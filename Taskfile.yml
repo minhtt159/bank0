@@ -1,0 +1,140 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  APP_NAME: bank0
+  BUILD_DIR: bin
+  CMD_DIR: cmd/app
+  BINARY: "{{.BUILD_DIR}}/{{.APP_NAME}}"
+
+env:
+  PATH: "{{.HOME}}/go/bin:$PATH"
+
+tasks:
+  default:
+    silent: true
+    cmds:
+      - task --list
+
+  install:
+    desc: Install dev CLI tools (sqlc, goose, air, oapi-codegen, templ)
+    cmds:
+      - go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - go install github.com/pressly/goose/v3/cmd/goose@latest
+      - go install github.com/air-verse/air@latest
+      - go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+      - go install github.com/a-h/templ/cmd/templ@latest
+
+  deps:
+    desc: Download and tidy Go modules
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  generate:
+    desc: Run all generators (sqlc -> oapi-codegen -> templ)
+    cmds:
+      - task: generate:sqlc
+      - task: generate:oapi
+      - task: generate:templ
+
+  generate:sqlc:
+    desc: Regenerate sqlc code from db/queries + db/migrations
+    sources:
+      - db/queries/**/*.sql
+      - db/migrations/**/*.sql
+      - db/sqlc.yaml
+    generates:
+      - internal/db/sqlc/*.go
+    cmds:
+      - sqlc generate -f db/sqlc.yaml
+
+  generate:oapi:
+    desc: Regenerate the client + admin server interfaces from api/openapi.yaml
+    sources:
+      - api/openapi.yaml
+      - api/oapi-codegen.*.yaml
+    generates:
+      - internal/api/genclient/genclient.gen.go
+      - internal/api/genadmin/genadmin.gen.go
+    cmds:
+      - oapi-codegen -config api/oapi-codegen.client.yaml api/openapi.yaml
+      - oapi-codegen -config api/oapi-codegen.admin.yaml api/openapi.yaml
+
+  generate:templ:
+    desc: Regenerate Templ components for the operator console
+    sources:
+      - web/template/**/*.templ
+    generates:
+      - web/template/**/*_templ.go
+    cmds:
+      - templ generate
+
+  lint:openapi:
+    desc: Lint/audit the OpenAPI spec with Spectral (needs node/npx)
+    cmds:
+      - npx --yes @stoplight/spectral-cli lint api/openapi.yaml
+
+  build:
+    desc: Generate then build the binary
+    deps: [generate]
+    cmds:
+      - go build -o {{.BINARY}} ./{{.CMD_DIR}}
+      - echo "Binary -> {{.BINARY}}"
+
+  quick:
+    desc: Build without regenerating
+    cmds:
+      - go build -o {{.BINARY}} ./{{.CMD_DIR}}
+
+  run:
+    desc: Run the app (needs Postgres + migrations applied)
+    cmds:
+      - go run ./{{.CMD_DIR}}
+
+  test:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  vet:
+    cmds:
+      - go vet ./...
+
+  dev:docker:
+    desc: Start Postgres 18 + app with hot-reload
+    cmds:
+      - docker compose -f deploy/docker-compose.dev.yml up --build
+
+  dev:docker:down:
+    cmds:
+      - docker compose -f deploy/docker-compose.dev.yml down
+
+  migrate:up:
+    desc: Apply all pending migrations (reads GOOSE_* from .env)
+    cmds:
+      - goose -dir db/migrations up
+
+  migrate:down:
+    cmds:
+      - goose -dir db/migrations down
+
+  migrate:status:
+    cmds:
+      - goose -dir db/migrations status
+
+  migrate:create:
+    desc: "Create a migration  (usage: task migrate:create -- <name>)"
+    cmds:
+      - goose -dir db/migrations create {{.CLI_ARGS}} sql
+
+  smoke:
+    desc: Run the SQL smoke test against the dev database
+    cmds:
+      - psql "$GOOSE_DBSTRING" -f db/smoke_test.sql
+
+  clean:
+    cmds:
+      - rm -rf {{.BUILD_DIR}} tmp
+      - find internal/db/sqlc -name "*.go" -delete
+      - go clean

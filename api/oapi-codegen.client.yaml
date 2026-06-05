@@ -1,0 +1,9 @@
+package: genclient
+output: internal/api/genclient/genclient.gen.go
+generate:
+  gorilla-server: true
+  models: true
+  embedded-spec: false
+output-options:
+  include-tags:
+    - client

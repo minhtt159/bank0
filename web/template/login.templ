@@ -1,0 +1,22 @@
+package template
+
+templ LoginPage(errMsg string) {
+	@layout("Sign in", "") {
+		<div class="login">
+			<h1>Sign in</h1>
+			<p class="muted">Operator console — staff accounts only.</p>
+			if errMsg != "" {
+				<div class="badge bad">{ errMsg }</div>
+			}
+			<form method="post" action="/login">
+				<label>Username
+					<input name="username" autocomplete="username" autofocus required/>
+				</label>
+				<label>Password
+					<input name="password" type="password" autocomplete="current-password" required/>
+				</label>
+				<button class="primary" type="submit">Sign in</button>
+			</form>
+		</div>
+	}
+}

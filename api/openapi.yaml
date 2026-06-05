@@ -1,0 +1,553 @@
+openapi: 3.1.0
+info:
+  title: bank0 API
+  version: 0.1.0
+  description: |
+    Core-banking backend. Two surfaces, separated by domain:
+      * **client** (api.bank0.hnimn.art) — customer-facing money operations
+      * **admin**  (portal.bank0.hnimn.art) — operator/back-office operations
+
+    This file is the source of truth. `oapi-codegen` generates the Go
+    `ServerInterface` for each tag (client/admin); handler drift is a compile
+    error. Edit here, regenerate, fix the compiler.
+servers:
+  - url: https://api.bank0.hnimn.art
+    description: client
+  - url: https://portal.bank0.hnimn.art
+    description: admin
+tags:
+  - name: client
+    description: Customer-facing operations (api.bank0.hnimn.art)
+  - name: admin
+    description: Operator / back-office operations (portal.bank0.hnimn.art)
+
+paths:
+  /health:
+    get:
+      operationId: health
+      tags: [client, admin]
+      summary: Liveness/version probe
+      security: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [client]
+      summary: Verify credentials (bcrypt). Establishes a session in the portal.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /users:
+    post:
+      operationId: createUser
+      tags: [admin]
+      summary: Create a user (customer or staff)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdResponse" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [admin]
+      summary: Get a user by id (no password hash)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /users/{id}/accounts:
+    get:
+      operationId: listUserAccounts
+      tags: [client, admin]
+      summary: List a user's accounts
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Account" }
+
+  /accounts:
+    post:
+      operationId: createAccount
+      tags: [admin]
+      summary: Open a customer account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAccountRequest" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdResponse" }
+
+  /accounts/{id}:
+    get:
+      operationId: getAccount
+      tags: [client, admin]
+      summary: Get an account with ledger + available balance
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /accounts/{id}/ledger:
+    get:
+      operationId: getAccountLedger
+      tags: [client]
+      summary: Account statement (cursor-paginated, running balance)
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LedgerEntry" }
+
+  /accounts/{id}/deposit:
+    post:
+      operationId: deposit
+      tags: [admin]
+      summary: Credit an account (posts from external_clearing). Idempotent.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AmountRequest" }
+      responses:
+        "200":
+          description: posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoneyMoveResponse" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /accounts/{id}/withdraw:
+    post:
+      operationId: withdraw
+      tags: [admin]
+      summary: Debit an account (posts to external_clearing). Idempotent.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AmountRequest" }
+      responses:
+        "200":
+          description: posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MoneyMoveResponse" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /accounts/{id}/status:
+    post:
+      operationId: setAccountStatus
+      tags: [admin]
+      summary: Freeze / unfreeze / close an account
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusRequest" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /transfers:
+    post:
+      operationId: createTransfer
+      tags: [client]
+      summary: Create a transfer (auto-posts by default). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTransferRequest" }
+      responses:
+        "200":
+          description: result (posted, or replayed)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferResult" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /transfers/pending:
+    get:
+      operationId: listPendingTransfers
+      tags: [admin]
+      summary: Operator pending-transfer queue (cursor-paginated)
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PendingTransfer" }
+
+  /transfers/{id}:
+    get:
+      operationId: getTransfer
+      tags: [client, admin]
+      summary: Get a transfer
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transfer" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /transfers/{id}/post:
+    post:
+      operationId: postTransfer
+      tags: [client]
+      summary: Post a pending transfer (deferred settlement). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /transfers/{id}/cancel:
+    post:
+      operationId: cancelTransfer
+      tags: [client]
+      summary: Cancel a pending transfer (releases the hold). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonRequest" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+
+  /transfers/{id}/reverse:
+    post:
+      operationId: reverseTransfer
+      tags: [admin]
+      summary: Reverse a posted transfer (appends inverse entries). Idempotent.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonRequest" }
+      responses:
+        "200":
+          description: reversed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReverseResponse" }
+
+  /admin/reconcile:
+    get:
+      operationId: reconcile
+      tags: [admin]
+      summary: Run ledger invariant checks (empty issues = books balanced)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconcileResponse" }
+
+  /admin/expire-holds:
+    post:
+      operationId: expireHolds
+      tags: [admin]
+      summary: Manually run the hold-expiry sweep
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpireHoldsResponse" }
+
+components:
+  securitySchemes:
+    # client surface (api.bank0.hnimn.art): JWT bearer from POST /auth/login
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    # admin surface (portal.bank0.hnimn.art): DB-backed cookie session from /login
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: bank0_session
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200 }
+
+  responses:
+    Error:
+      description: error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+      required: [error]
+    Health:
+      type: object
+      properties:
+        status: { type: string }
+        version: { type: string }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'." }
+        token_type: { type: string, example: Bearer }
+        expires_at: { type: string, format: date-time }
+    IdResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+    CreateUserRequest:
+      type: object
+      required: [username, password, full_name]
+      properties:
+        username: { type: string }
+        password: { type: string }
+        full_name: { type: string }
+        email: { type: string }
+        phone_number: { type: string }
+        role: { type: string, enum: [customer, operator, admin, auditor] }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        full_name: { type: string }
+        email: { type: string }
+        phone_number: { type: string }
+        role: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateAccountRequest:
+      type: object
+      required: [user_id, iban, pin]
+      properties:
+        user_id: { type: string, format: uuid }
+        iban: { type: string }
+        pin: { type: string }
+        transfer_limit_minor: { type: integer, format: int64 }
+    Account:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        kind: { type: string }
+        iban: { type: string }
+        currency: { type: string }
+        balance_minor: { type: integer, format: int64 }
+        available_minor: { type: integer, format: int64 }
+        transfer_limit_minor: { type: integer, format: int64 }
+        is_default: { type: boolean }
+        status: { type: string }
+    AmountRequest:
+      type: object
+      required: [amount_minor]
+      properties:
+        amount_minor: { type: integer, format: int64 }
+        description: { type: string }
+    MoneyMoveResponse:
+      type: object
+      properties:
+        transfer_id: { type: string, format: uuid }
+        requires_approval: { type: boolean }
+    StatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [active, frozen, closed] }
+    StatusResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+    CreateTransferRequest:
+      type: object
+      required: [debit_account, credit_account, amount_minor]
+      properties:
+        debit_account: { type: string, format: uuid }
+        credit_account: { type: string, format: uuid }
+        amount_minor: { type: integer, format: int64 }
+        description: { type: string }
+    TransferResult:
+      type: object
+      properties:
+        transfer_id: { type: string, format: uuid }
+        status: { type: string }
+        was_replay: { type: boolean }
+    Transfer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        debit_account_id: { type: string, format: uuid }
+        credit_account_id: { type: string, format: uuid }
+        amount_minor: { type: integer, format: int64 }
+        currency: { type: string }
+        status: { type: string }
+        kind: { type: string }
+        reverses_id: { type: string, format: uuid }
+        description: { type: string }
+        failure_reason: { type: string }
+        requested_at: { type: string, format: date-time }
+        posted_at: { type: string, format: date-time }
+    PendingTransfer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        debit_account_id: { type: string, format: uuid }
+        credit_account_id: { type: string, format: uuid }
+        amount_minor: { type: integer, format: int64 }
+        currency: { type: string }
+        kind: { type: string }
+        description: { type: string }
+        requested_at: { type: string, format: date-time }
+    ReasonRequest:
+      type: object
+      properties:
+        reason: { type: string }
+    ReverseResponse:
+      type: object
+      properties:
+        reversal_id: { type: string, format: uuid }
+    LedgerEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        transfer_id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        account_iban: { type: string }
+        direction: { type: string }
+        amount_minor: { type: integer, format: int64 }
+        signed_amount: { type: integer, format: int64 }
+        balance_after: { type: integer, format: int64 }
+        currency: { type: string }
+        posted_at: { type: string, format: date-time }
+        transfer_kind: { type: string }
+        transfer_status: { type: string }
+        description: { type: string }
+        counterparty_iban: { type: string }
+        counterparty_owner: { type: string }
+    ReconcileResponse:
+      type: object
+      properties:
+        healthy: { type: boolean }
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              check_name: { type: string }
+              detail: { type: string }
+    ExpireHoldsResponse:
+      type: object
+      properties:
+        expired: { type: integer }

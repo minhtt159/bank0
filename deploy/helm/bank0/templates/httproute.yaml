@@ -1,0 +1,74 @@
+{{- $gwNs := .Values.gateway.namespace | default .Release.Namespace -}}
+{{- $tls := .Values.gateway.tls.enabled -}}
+{{- if .Values.api.exposed }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ $gwNs }}
+      sectionName: {{ if $tls }}https-api{{ else }}http{{ end }}
+  hostnames:
+    - {{ .Values.api.host | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ .Release.Name }}-api
+          port: {{ .Values.service.port }}
+{{- end }}
+{{- if .Values.portal.exposed }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Release.Name }}-portal
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: portal
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ $gwNs }}
+      sectionName: {{ if $tls }}https-portal{{ else }}http{{ end }}
+  hostnames:
+    - {{ .Values.portal.host | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ .Release.Name }}-portal
+          port: {{ .Values.service.port }}
+{{- end }}
+{{- if and $tls .Values.gateway.httpsRedirect }}
+---
+# HTTP -> HTTPS redirect on the :80 listener for all bank0 hosts.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Release.Name }}-https-redirect
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ $gwNs }}
+      sectionName: http
+  hostnames:
+    {{- if .Values.api.exposed }}
+    - {{ .Values.api.host | quote }}
+    {{- end }}
+    {{- if .Values.portal.exposed }}
+    - {{ .Values.portal.host | quote }}
+    {{- end }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+{{- end }}

@@ -1,0 +1,9 @@
+package: genadmin
+output: internal/api/genadmin/genadmin.gen.go
+generate:
+  gorilla-server: true
+  models: true
+  embedded-spec: false
+output-options:
+  include-tags:
+    - admin

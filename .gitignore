@@ -1,0 +1,9 @@
+.DS_Store
+bin
+tmp
+.env
+.task/
+coverage.out
+coverage.txt
+.venv/
+__pycache__

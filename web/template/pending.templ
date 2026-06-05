@@ -1,0 +1,59 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+templ PendingTable(rows []sqlc.ListPendingEnrichedRow, canAct bool, flash string) {
+	if flash != "" {
+		<div class="flash">{ flash }</div>
+	}
+	if len(rows) == 0 {
+		<p class="muted">No pending transfers 🎉</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Requested</th>
+					<th>From</th>
+					<th>To</th>
+					<th>Kind</th>
+					<th class="num">Amount</th>
+					<th>Description</th>
+					if canAct {
+						<th>Actions</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, t := range rows {
+					<tr>
+						<td class="muted">{ t.RequestedAt.Format("2006-01-02 15:04") }</td>
+						<td>{ t.Debit }</td>
+						<td>{ t.Credit }</td>
+						<td><span class="pill">{ string(t.Kind) }</span></td>
+						<td class="num">{ money.FormatMinor(t.AmountMinor) }</td>
+						<td class="muted">{ t.Description }</td>
+						if canAct {
+							<td class="actions">
+								<button
+									class="btn ok"
+									hx-post={ "/console/transfers/" + t.ID.String() + "/post" }
+									hx-target="#content"
+									hx-confirm="Post (settle) this transfer now?"
+								>Post</button>
+								<button
+									class="btn danger"
+									hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" }
+									hx-target="#content"
+									hx-confirm="Cancel this pending transfer and release the hold?"
+								>Cancel</button>
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}

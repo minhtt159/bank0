@@ -1,0 +1,34 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+templ AccountsTable(rows []sqlc.ListCustomerAccountsRow) {
+	<table>
+		<thead>
+			<tr>
+				<th>Owner</th>
+				<th>IBAN</th>
+				<th>Status</th>
+				<th class="num">Ledger</th>
+				<th class="num">Available</th>
+			</tr>
+		</thead>
+		<tbody>
+			if len(rows) == 0 {
+				<tr><td colspan="5" class="muted">No customer accounts yet.</td></tr>
+			}
+			for _, a := range rows {
+				<tr>
+					<td>{ a.Owner }</td>
+					<td>{ a.Iban }</td>
+					<td><span class="pill">{ string(a.Status) }</span></td>
+					<td class="num">{ money.FormatMinor(a.BalanceMinor) }</td>
+					<td class="num">{ money.FormatMinor(a.AvailableMinor) }</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+}

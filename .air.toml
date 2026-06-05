@@ -1,0 +1,14 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "sqlc generate -f db/sqlc.yaml && oapi-codegen -config api/oapi-codegen.client.yaml api/openapi.yaml && oapi-codegen -config api/oapi-codegen.admin.yaml api/openapi.yaml && templ generate && go build -o ./tmp/main ./cmd/app"
+  bin = "./tmp/main"
+  full_bin = "APP_SERVER_AUTO_MIGRATE=true ./tmp/main serve"
+  delay = 1000
+  include_ext = ["go", "sql", "yaml", "templ"]
+  exclude_dir = ["internal/db/sqlc", "internal/api/genclient", "internal/api/genadmin", "tmp", "bin", "data"]
+  exclude_regex = ["_test\\.go", "_templ\\.go", "\\.gen\\.go"]
+
+[misc]
+  clean_on_exit = true

@@ -1,0 +1,22 @@
+bank0 {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }}.
+
+  client API  : https://{{ .Values.api.host }}      (deployment {{ .Release.Name }}-api, mode=api{{ if .Values.api.autoscaling.enabled }}, HPA {{ .Values.api.autoscaling.minReplicas }}-{{ .Values.api.autoscaling.maxReplicas }}{{ end }})
+  admin portal: https://{{ .Values.portal.host }}   (deployment {{ .Release.Name }}-portal, mode=portal, {{ .Values.portal.replicaCount }} replicas)
+  API docs    : https://{{ .Values.api.host }}/docs
+
+Routing: Gateway API on Envoy Gateway (gatewayClassName={{ .Values.gateway.gatewayClassName }}).
+{{- if .Values.gateway.create }}
+  Gateway "{{ .Values.gateway.name }}" created by this release; HTTPRoutes attach via parentRef.
+{{- else }}
+  Attaching HTTPRoutes to existing Gateway "{{ .Values.gateway.name }}" in namespace "{{ .Values.gateway.namespace | default .Release.Namespace }}".
+{{- end }}
+
+Migrations ran via the pre-upgrade Job ({{ .Release.Name }}-migrate-{{ .Release.Revision }}).
+Maintenance (expire_holds + cleanup) runs in-process on the portal pods, guarded
+by a Postgres advisory lock so only one replica acts per tick.
+
+{{- if and (not .Values.database.existingSecret) (not .Values.database.dsn) }}
+
+WARNING: no database.existingSecret and no database.dsn set — pods will fail to
+start. Provide one (existingSecret recommended).
+{{- end }}

@@ -1,0 +1,50 @@
+{{- if .Values.gateway.create }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  {{- if and .Values.gateway.tls.enabled .Values.gateway.tls.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.gateway.tls.clusterIssuer }}
+  {{- end }}
+spec:
+  gatewayClassName: {{ .Values.gateway.gatewayClassName }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- if .Values.gateway.tls.enabled }}
+    {{- if .Values.api.exposed }}
+    - name: https-api
+      protocol: HTTPS
+      port: 443
+      hostname: {{ .Values.api.host | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: {{ .Release.Name }}-api-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- end }}
+    {{- if .Values.portal.exposed }}
+    - name: https-portal
+      protocol: HTTPS
+      port: 443
+      hostname: {{ .Values.portal.host | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: {{ .Release.Name }}-portal-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- end }}
+    {{- end }}
+{{- end }}

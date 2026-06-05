@@ -1,0 +1,30 @@
+package template
+
+templ layout(title string, username string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ "bank0 · " + title }</title>
+			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+			@templ.Raw(styleTag)
+		</head>
+		<body>
+			<header class="topbar">
+				<strong>bank0</strong>
+				<span>operator console</span>
+				if username != "" {
+					<span class="spacer"></span>
+					<span class="muted">{ username }</span>
+					<form method="post" action="/logout" style="margin:0">
+						<button class="linkbtn" type="submit">Sign out</button>
+					</form>
+				}
+			</header>
+			<main>
+				{ children... }
+			</main>
+		</body>
+	</html>
+}

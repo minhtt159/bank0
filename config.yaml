@@ -1,0 +1,40 @@
+app:
+  name: bank0
+  version: "0.1.0"
+  env: development
+  debug: true
+
+logging:
+  level: debug       # debug | info | warn | error
+  encoding: console  # console | json
+
+database:
+  # Override with APP_DATABASE_DSN (env wins). Default targets local Postgres.
+  dsn: postgres://admin:admin@localhost:5432/bank0?sslmode=disable
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_timeout: 5s
+
+server:
+  port: 8080
+  default_page_limit: 25
+  mode: all                 # api | portal | all  (override per deployment)
+  openapi_spec_path: api/openapi.yaml
+  auto_migrate: false       # true for local compose; false in K8s (use migrate Job)
+
+admin:
+  # 4-eyes / maker-checker threshold (minor units). Money moves above this
+  # should route to the approvals queue. 1000000 = €10,000.00.
+  maker_checker_threshold_minor: 1000000
+  session_idle_timeout: 30m   # portal cookie-session idle timeout (DB-enforced)
+  maintenance_interval: 60s   # expire_holds + cleanup cadence
+  run_maintenance: true       # advisory-locked; in K8s enable on portal only
+
+auth:
+  # JWT bearer auth for the CLIENT surface (api.*). The portal uses cookie
+  # sessions, not JWT. Set jwt_secret via APP_AUTH_JWT_SECRET in production and
+  # share it across all api replicas (empty => insecure dev fallback + warning).
+  jwt_secret: ""
+  jwt_ttl: 1h
+  jwt_issuer: bank0
+  jwt_audience: bank0-client
