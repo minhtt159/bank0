@@ -1,0 +1,109 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// UserDetail is the right-rail hub: edit user details, list/edit accounts, add
+// credit, and open new accounts. canManageUsers => admin (edit user); canMoney =>
+// operator/admin (account + money actions). Auditors get a read-only view.
+templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, canManageUsers bool, canMoney bool, flash string) {
+	<div class="detail">
+		<div class="detail-head">
+			<h2>{ u.FullName }</h2>
+			<span class="muted">{ "@" + u.Username } · { string(u.Role) }</span>
+		</div>
+		if flash != "" {
+			<div class="flash">{ flash }</div>
+		}
+		<section class="block">
+			<h3>Details</h3>
+			<form hx-post={ "/console/users/" + u.ID.String() } hx-target="#rail">
+				<label>Full name <input name="full_name" value={ u.FullName } disabled?={ !canManageUsers }/></label>
+				<label>Email <input name="email" type="email" value={ deref(u.Email) } disabled?={ !canManageUsers }/></label>
+				<label>Phone <input name="phone_number" value={ deref(u.PhoneNumber) } disabled?={ !canManageUsers }/></label>
+				<label>Status
+					<select name="status" disabled?={ !canManageUsers }>
+						@statusOpt("active", string(u.Status))
+						@statusOpt("locked", string(u.Status))
+						@statusOpt("closed", string(u.Status))
+					</select>
+				</label>
+				if canManageUsers {
+					<button class="primary sm" type="submit" hx-disabled-elt="this">Save details</button>
+				} else {
+					<p class="muted">Read-only (admin role required to edit users).</p>
+				}
+			</form>
+		</section>
+		<section class="block">
+			<h3>Accounts</h3>
+			if len(accounts) == 0 {
+				<p class="muted">No accounts yet.</p>
+			}
+			for _, a := range accounts {
+				@accountCard(a, canMoney)
+			}
+			if canMoney {
+				<details class="newacct">
+					<summary>+ New account</summary>
+					<form hx-post={ "/console/users/" + u.ID.String() + "/accounts" } hx-target="#rail">
+						<label>IBAN <input name="iban" placeholder="SE45..." required/></label>
+						<label>PIN <input name="pin" inputmode="numeric" pattern="\d{4}" placeholder="4 digits" required/></label>
+						<label>Transfer limit (€) <input name="limit" type="number" step="0.01" min="0" value="500.00"/></label>
+						<button class="primary sm" type="submit" hx-disabled-elt="this">Create account</button>
+					</form>
+				</details>
+			}
+		</section>
+	</div>
+}
+
+templ statusOpt(val string, current string) {
+	if val == current {
+		<option value={ val } selected>{ val }</option>
+	} else {
+		<option value={ val }>{ val }</option>
+	}
+}
+
+templ accountCard(a sqlc.ListAccountsByUserRow, canMoney bool) {
+	<div class="acct">
+		<div class="acct-head">
+			<span class="iban">{ deref(a.Iban) }</span>
+			if a.IsDefault {
+				<span class="star" title="default account">★</span>
+			}
+			<span class={ "pill " + string(a.Status) }>{ string(a.Status) }</span>
+		</div>
+		<div class="acct-bal">
+			<span>Ledger <strong>{ money.FormatMinor(a.BalanceMinor) }</strong></span>
+			<span class="muted">Available { money.FormatMinor(a.AvailableMinor) }</span>
+			<span class="muted">Limit { money.FormatMinor(a.TransferLimitMinor) }</span>
+		</div>
+		if canMoney {
+			<div class="acct-actions">
+				<form class="inline" hx-post={ "/console/accounts/" + a.ID.String() + "/credit" } hx-target="#rail">
+					<input type="hidden" name="idempotency_key" value={ newKey() }/>
+					<input name="amount" type="number" step="0.01" min="0.01" placeholder="€ amount" required/>
+					<button class="btn ok" type="submit" hx-disabled-elt="this" hx-confirm="Credit this account (posts a ledger deposit from external_clearing)?">Add credit</button>
+				</form>
+				<div class="acct-controls">
+					if a.Status == "active" {
+						<button class="btn" hx-post={ "/console/accounts/" + a.ID.String() + "/status" } hx-vals='{"status":"frozen"}' hx-target="#rail" hx-confirm="Freeze this account?">Freeze</button>
+					} else if a.Status == "frozen" {
+						<button class="btn" hx-post={ "/console/accounts/" + a.ID.String() + "/status" } hx-vals='{"status":"active"}' hx-target="#rail" hx-confirm="Unfreeze this account?">Unfreeze</button>
+					}
+					if !a.IsDefault && a.Status == "active" {
+						<button class="btn" hx-post={ "/console/accounts/" + a.ID.String() + "/default" } hx-target="#rail">Set default</button>
+					}
+					<form class="inline" hx-post={ "/console/accounts/" + a.ID.String() + "/limit" } hx-target="#rail">
+						<input name="limit" type="number" step="0.01" min="0" value={ money.PlainMinor(a.TransferLimitMinor) }/>
+						<button class="btn" type="submit">Set limit</button>
+					</form>
+				</div>
+			</div>
+		}
+	</div>
+}

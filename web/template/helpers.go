@@ -1,8 +1,40 @@
 package template
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/google/uuid"
+)
 
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
+
+// deref renders an optional string (nil -> "").
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// uuidStr renders an optional uuid (nil -> "").
+func uuidStr(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
+}
+
+// newKey mints a fresh idempotency key when a money form is rendered, so a
+// double-submit of the same form replays rather than duplicating (docs/04 §5.2).
+func newKey() string { return uuid.NewString() }
+
+// shortID renders the first 8 chars of an optional uuid (nil -> "—").
+func shortID(id *uuid.UUID) string {
+	if id == nil {
+		return "—"
+	}
+	return id.String()[:8]
+}
 
 // styleTag is rendered via templ.Raw so the CSS braces aren't parsed as templ
 // expressions.
@@ -47,4 +79,59 @@ const styleTag = `<style>
   .btn.danger { border-color:var(--bad); color:#ff7b7b; }
   .btn.danger:hover { background:rgba(229,72,77,.15); }
   .flash { background:rgba(59,130,246,.15); border:1px solid var(--accent); color:#9ec5ff; padding:.5rem .8rem; border-radius:8px; margin-bottom:.8rem; }
+  /* app layout (docs/04 §3 IA) */
+  /* proportional 3-column layout (~14% / 57% / 29%); minmax(0,..) keeps wide
+     content from forcing the grid past the viewport. */
+  .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,4fr) minmax(0,2fr); min-height:calc(100vh - 49px); }
+  @media (max-width:900px) { .layout { grid-template-columns:minmax(0,1fr) minmax(0,3fr) minmax(0,3fr); } }
+  .leftnav { border-right:1px solid var(--line); padding:.8rem .5rem; display:flex; flex-direction:column; gap:.15rem; background:var(--panel); min-width:0; }
+  .navitem { padding:.5rem .7rem; border-radius:8px; color:var(--ink); cursor:pointer; text-decoration:none; font-size:.9rem; }
+  .navitem:hover { background:rgba(59,130,246,.12); }
+  .navitem.disabled { color:var(--muted); cursor:default; }
+  .navitem.disabled:hover { background:none; }
+  #main-panel { padding:1.2rem 1.4rem; overflow:auto; min-width:0; }
+  #rail { border-left:1px solid var(--line); padding:1rem 1.1rem; background:#141b27; overflow:auto; min-width:0; overflow-wrap:anywhere; }
+  .rail-empty { margin-top:2rem; text-align:center; }
+  .panel { min-width:0; }
+  .panel-head { display:flex; align-items:center; gap:.8rem; margin-bottom:1rem; }
+  .panel-head h1 { font-size:1.2rem; margin:0; white-space:nowrap; }
+  .search { flex:1; min-width:0; max-width:460px; padding:.45rem .7rem; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  .search:focus { outline:none; border-color:var(--accent); }
+  .small { font-size:.8rem; }
+  .mono { font-family:ui-monospace,monospace; font-size:.8rem; }
+  /* transfer-status pills */
+  .pill.posted { color:#3ddc84; border-color:var(--ok); }
+  .pill.pending { color:#ffd479; border-color:#ffd479; }
+  .pill.failed, .pill.canceled { color:#ff7b7b; border-color:var(--bad); }
+  .pill.reversed { color:var(--muted); }
+  .detail { min-width:0; }
+  .detail-head { border-bottom:1px solid var(--line); padding-bottom:.6rem; margin-bottom:.8rem; }
+  .detail-head h2 { margin:0; font-size:1.1rem; }
+  .block { margin-bottom:1.4rem; }
+  .block h3 { font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:.2rem 0 .6rem; }
+  form label { display:block; margin:.5rem 0 .15rem; font-size:.8rem; color:var(--muted); }
+  form input, form select { width:100%; padding:.45rem .6rem; border-radius:7px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  form input:disabled, form select:disabled { opacity:.55; }
+  .rowlink { cursor:pointer; }
+  .rowlink:hover { background:rgba(59,130,246,.10); }
+  .rolebadge { padding:.1rem .55rem; border-radius:999px; font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; border:1px solid var(--line); }
+  .rolebadge.admin { color:#ffd479; border-color:#ffd479; }
+  .rolebadge.operator { color:#9ec5ff; border-color:var(--accent); }
+  .rolebadge.auditor { color:var(--muted); }
+  button.primary.sm { width:auto; margin-top:0; padding:.4rem .8rem; font-size:.85rem; }
+  .pill.active { color:#3ddc84; border-color:var(--ok); }
+  .pill.frozen, .pill.locked { color:#ffd479; border-color:#ffd479; }
+  .pill.closed { color:#ff7b7b; border-color:var(--bad); }
+  .acct { border:1px solid var(--line); border-radius:10px; padding:.7rem .8rem; margin-bottom:.7rem; background:var(--bg); }
+  .acct-head { display:flex; align-items:center; gap:.5rem; }
+  .acct-head .iban { font-family:ui-monospace,monospace; font-size:.84rem; }
+  .acct-head .star { color:#ffd479; }
+  .acct-head .pill { margin-left:auto; }
+  .acct-bal { display:flex; gap:1rem; flex-wrap:wrap; margin:.5rem 0; font-size:.85rem; }
+  .acct-actions { border-top:1px dashed var(--line); padding-top:.5rem; }
+  .inline { display:flex; gap:.4rem; align-items:center; margin-bottom:.4rem; }
+  .inline input { width:auto; flex:1; }
+  .acct-controls { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
+  .acct-controls .inline { margin-bottom:0; }
+  .newacct summary { cursor:pointer; color:var(--accent); font-size:.85rem; margin-top:.4rem; }
 </style>`

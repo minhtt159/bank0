@@ -5,7 +5,19 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-templ AccountsTable(rows []sqlc.ListCustomerAccountsRow) {
+// AccountsPanel is the main-panel Accounts screen: search + results container.
+templ AccountsPanel() {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Accounts</h1>
+			@searchBox("Search accounts by IBAN or owner…", "/console/accounts/results", "accounts-results")
+		</div>
+		<div id="accounts-results" hx-get="/console/accounts/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
+// AccountsRows: each row opens the owner's detail in the rail (where actions live).
+templ AccountsRows(rows []sqlc.SearchAccountsRow) {
 	<table>
 		<thead>
 			<tr>
@@ -18,13 +30,13 @@ templ AccountsTable(rows []sqlc.ListCustomerAccountsRow) {
 		</thead>
 		<tbody>
 			if len(rows) == 0 {
-				<tr><td colspan="5" class="muted">No customer accounts yet.</td></tr>
+				<tr><td colspan="5" class="muted">No matching accounts.</td></tr>
 			}
 			for _, a := range rows {
-				<tr>
+				<tr class="rowlink" hx-get={ "/console/users/" + uuidStr(a.UserID) } hx-target="#rail">
 					<td>{ a.Owner }</td>
 					<td>{ a.Iban }</td>
-					<td><span class="pill">{ string(a.Status) }</span></td>
+					<td><span class={ "pill " + string(a.Status) }>{ string(a.Status) }</span></td>
 					<td class="num">{ money.FormatMinor(a.BalanceMinor) }</td>
 					<td class="num">{ money.FormatMinor(a.AvailableMinor) }</td>
 				</tr>

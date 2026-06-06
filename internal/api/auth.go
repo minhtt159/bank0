@@ -147,6 +147,7 @@ func (s *Server) consoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("login", "user", su.Username, "role", su.Role)
+	s.audit(r.Context(), su, "login", nil, nil)
 	s.setSessionCookie(w, token)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

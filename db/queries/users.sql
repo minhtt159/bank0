@@ -25,3 +25,13 @@ FROM users
 WHERE created_at < COALESCE(sqlc.narg(cursor)::timestamptz, now())
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int;
+
+-- name: UpdateUserInfo :exec
+SELECT update_user_info(
+    sqlc.arg(user_id)::uuid,
+    sqlc.narg(full_name)::text,
+    sqlc.narg(email)::citext,
+    sqlc.narg(phone_number)::varchar,
+    sqlc.narg(password)::text,
+    sqlc.narg(status)::user_status
+);
