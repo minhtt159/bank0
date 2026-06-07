@@ -54,16 +54,21 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 ## Quick start (local)
 
 ```bash
-docker compose -f deploy/docker-compose.dev.yml up --build   # 1 postgres + 1 app (mode=all, auto-migrates)
-open http://localhost:8080/        # operator console (Templ + HTMX)
-open http://localhost:8080/docs    # OpenAPI reference (Scalar)
-curl localhost:8080/health
+docker compose -f deploy/docker-compose.dev.yml up --build
+# stack: postgres + migrate (one-shot) + seed (one-shot) + admin + client
+open http://localhost:8080/        # admin portal + operator console (Templ + HTMX)
+open http://localhost:8090/docs    # client API reference (Scalar)
 ```
 
-Without Docker: `task install && task generate && task migrate:up && task run`
-(needs a local Postgres; set `APP_DATABASE_DSN`).
+- **admin portal** → http://localhost:8080  (mode=portal, cookie sessions)
+- **client API**  → http://localhost:8090  (mode=api, JWT bearer)
 
-Bootstrap admin (seeded): `admin` / `admin` — **change immediately**.
+Seeded logins (dev passwords): `admin`/`admin`, `operator1`/`operator`,
+`auditor1`/`auditor` (staff); customers `alice`/`password` … `frank` (no console
+access). The seed (`db/seed.sql`, idempotent) loads 6 customers, 7 accounts, and
+16 transfers (3 pending). **Change the admin password immediately.**
+
+Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
 
 ## Deploy (Kubernetes)
 

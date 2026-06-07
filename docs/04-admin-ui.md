@@ -4,14 +4,17 @@
 > Stack stays server-rendered: **Go Templ + HTMX**, but redesigned around roles,
 > safety, and the ledger truths from [`03-...md`](03-ledger-lifecycle-idempotency.md).
 
-> **Status (in progress):** the console is mounted on the portal surface
-> (`server.mode=portal|all`, served at `/`) **behind session auth** (§7). Built so
-> far: **login/logout** with DB-backed sessions + role check, the **Dashboard**
-> (reconcile badge + customer-money / pending / held-funds counters), the
-> **Accounts** list, and the **Pending-transfers** queue with **Post/Cancel
-> actions** (role-gated, `hx-confirm`, HTMX re-render). Still to build: Deposit/
-> Withdraw with idempotency keys, the maker-checker Approvals queue (§4.4) which
-> feeds the pending queue, audit log, search, and auto-refresh.
+> **Status (in progress):** the full **IA shell** (§3) is built — top bar (role
+> badge + operator + logout), left nav, HTMX-swapped main panel, right rail — on
+> the portal surface behind session auth (§7). Working screens: **Dashboard**
+> (reconcile badge + counters), **Users** (list → rail detail), **Accounts** (list
+> → owner detail), **Transfers** (pending queue + Post/Cancel), **Reconciliation**.
+> Admin/operator workflows: **create users, create accounts, add credit** (deposit,
+> with `hx-confirm` + per-form idempotency key), **see/edit user details**, and
+> **see/edit accounts** (freeze/unfreeze, set default, set transfer limit) — all
+> role-gated (auditor read-only). Mutations fire `HX-Trigger: bank0:refresh` so the
+> main-panel lists self-refresh. Still to build: Withdraw, maker-checker Approvals
+> (§4.4), account statement drill-down, audit log, search, auto-refresh.
 
 ---
 
@@ -214,12 +217,20 @@ denied-action audit log, and per-IP rate limiting.
 ## 8. Build order
 
 1. ✅ Session auth + roles + Shell + Dashboard (reconcile badge).
-2. ✅ Accounts list + Pending queue (read path). *(detail + statement: pending)*
+2. ✅ Accounts list + Pending queue (read path).
 3. ✅ Pending-queue **actions**: Post / Cancel with `hx-confirm`, HTMX re-render,
    role-gated (operator/admin act; auditor read-only, 403 on direct POST).
-4. ⬜ Credit/withdraw via deposit/withdraw + confirm modals + idempotency keys.
-5. ⬜ Maker-checker approvals queue (the producer of pending money moves) + Reverse + audit log.
-6. ⬜ Search + auto-refresh polish.
+4. ✅ **IA shell (nav + main + rail) + Users/Accounts management**: create users,
+   create accounts, add **credit** (deposit, confirm + idempotency key), edit user
+   details, edit accounts (freeze/unfreeze, set default, transfer limit). 🟡 Withdraw
+   not yet exposed.
+5. 🟡 **Audit log** ✅ — every operator action (login, create user/account, credit,
+   freeze, set limit/default, post/cancel) is written to `admin_actions` (actor +
+   action + target + JSON detail) and shown on a searchable **Audit log** screen,
+   pairing with the Transfers ledger. Maker-checker approvals + Reverse still ⬜.
+6. 🟡 **Fuzzy search** ✅ (users/accounts/transfers via pg_trgm). **Transfers** screen
+   now lists the full transfer **history** (newest first, status pills, pending rows
+   actionable) — not just the pending queue. Statement drill-down + auto-refresh ⬜.
 
 > The Post/Cancel actions are ready; the main *producer* of pending transfers is
 > the maker-checker flow (step 5) — above-threshold money moves will call

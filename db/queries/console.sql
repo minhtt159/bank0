@@ -7,6 +7,7 @@ SELECT
 
 -- name: ListCustomerAccounts :many
 SELECT a.id,
+       a.user_id,
        COALESCE(u.full_name, '') AS owner,
        COALESCE(a.iban, '')      AS iban,
        a.status,

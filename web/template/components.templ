@@ -1,0 +1,20 @@
+package template
+
+// searchBox is a live-search input. It swaps only the results fragment (target),
+// so the input keeps focus while typing. type=search gives a native clear (x),
+// and the "search" trigger fires when cleared. hx-disinherit keeps child results
+// from inheriting these attributes.
+templ searchBox(placeholder string, url string, target string) {
+	<input
+		class="search"
+		type="search"
+		name="q"
+		placeholder={ placeholder }
+		autocomplete="off"
+		hx-get={ url }
+		hx-target={ "#" + target }
+		hx-swap="innerHTML"
+		hx-trigger="input changed delay:300ms, search"
+		hx-disinherit="*"
+	/>
+}

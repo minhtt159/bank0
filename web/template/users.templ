@@ -1,0 +1,67 @@
+package template
+
+import sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+
+// UsersPanel is the main-panel Users screen: search box + a results container
+// that lazy-loads the rows and reloads on bank0:refresh.
+templ UsersPanel(canManageUsers bool) {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Users</h1>
+			@searchBox("Search users by name, username, email…", "/console/users/results", "users-results")
+			if canManageUsers {
+				<button class="primary sm" hx-get="/console/users/new" hx-target="#rail">+ New user</button>
+			}
+		</div>
+		<div id="users-results" hx-get="/console/users/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
+// UsersRows is the results fragment (rows open the detail in the rail).
+templ UsersRows(rows []sqlc.SearchUsersRow) {
+	<table>
+		<thead>
+			<tr><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr>
+		</thead>
+		<tbody>
+			if len(rows) == 0 {
+				<tr><td colspan="5" class="muted">No matching users.</td></tr>
+			}
+			for _, u := range rows {
+				<tr class="rowlink" hx-get={ "/console/users/" + u.ID.String() } hx-target="#rail">
+					<td>{ u.Username }</td>
+					<td>{ u.FullName }</td>
+					<td class="muted">{ deref(u.Email) }</td>
+					<td><span class="pill">{ string(u.Role) }</span></td>
+					<td><span class={ "pill " + string(u.Status) }>{ string(u.Status) }</span></td>
+				</tr>
+			}
+		</tbody>
+	</table>
+}
+
+// CreateUserForm renders in the right rail (single .detail root).
+templ CreateUserForm(flash string) {
+	<div class="detail">
+		<div class="detail-head"><h2>New user</h2></div>
+		if flash != "" {
+			<div class="badge bad">{ flash }</div>
+		}
+		<form hx-post="/console/users" hx-target="#rail">
+			<label>Username <input name="username" autocomplete="off" required/></label>
+			<label>Full name <input name="full_name" required/></label>
+			<label>Email <input name="email" type="email"/></label>
+			<label>Phone <input name="phone_number"/></label>
+			<label>Temp password <input name="password" type="text" value="password" required/></label>
+			<label>Role
+				<select name="role">
+					<option value="customer">customer</option>
+					<option value="operator">operator</option>
+					<option value="admin">admin</option>
+					<option value="auditor">auditor</option>
+				</select>
+			</label>
+			<button class="primary" type="submit" hx-disabled-elt="this">Create user</button>
+		</form>
+	</div>
+}

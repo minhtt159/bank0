@@ -6,9 +6,14 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-templ DashboardPage(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, version string, username string) {
-	@layout("Dashboard", username) {
-		<h1>Dashboard <span class="muted">v{ version }</span></h1>
+// DashboardCards is the main-panel fragment (loaded via hx-get). It refreshes
+// itself when a bank0:refresh event fires on the body (after any mutation).
+templ DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, version string) {
+	<div id="dashboard" hx-get="/console/dashboard" hx-trigger="bank0:refresh from:body" hx-swap="outerHTML" hx-disinherit="*">
+		<div class="panel-head">
+			<h1>Dashboard</h1>
+			<span class="muted">v{ version }</span>
+		</div>
 		if healthy {
 			<div class="badge ok">✅ Reconciled — books balanced (global ledger sums to zero)</div>
 		} else {
@@ -26,10 +31,5 @@ templ DashboardPage(stats sqlc.DashboardStatsRow, healthy bool, issues []db.Reco
 			<div class="card"><span>Pending transfers</span><strong>{ i64(stats.PendingCount) }</strong></div>
 			<div class="card"><span>Active holds</span><strong>{ i64(stats.ActiveHolds) }</strong><span class="muted">{ money.FormatMinor(stats.HeldMinor) } reserved</span></div>
 		</div>
-		<div class="tabs">
-			<button hx-get="/console/accounts" hx-target="#content">Accounts</button>
-			<button hx-get="/console/pending" hx-target="#content">Pending queue</button>
-		</div>
-		<div id="content" hx-get="/console/accounts" hx-trigger="load"></div>
-	}
+	</div>
 }
