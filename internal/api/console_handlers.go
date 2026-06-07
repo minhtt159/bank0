@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -20,6 +21,9 @@ func canActOnMoney(role string) bool {
 }
 
 func canManageUsers(role string) bool { return role == string(sqlc.UserRoleAdmin) }
+
+// canApprove gates the maker-checker queue: only admins approve/reject.
+func canApprove(role string) bool { return role == string(sqlc.UserRoleAdmin) }
 
 func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, allow func(string) bool) (db.SessionUser, bool) {
 	u, ok := userFromContext(r.Context())
@@ -51,8 +55,9 @@ func pathID(r *http.Request) (uuid.UUID, error) { return uuid.Parse(mux.Vars(r)[
 
 func (s *Server) consoleHome(w http.ResponseWriter, r *http.Request) {
 	su, _ := userFromContext(r.Context())
+	pending, _ := s.pg.Queries.CountPendingApprovals(r.Context())
 	s.html(w)
-	_ = template.Shell(su.Username, su.Role).Render(r.Context(), w)
+	_ = template.Shell(su.Username, su.Role, int(pending)).Render(r.Context(), w)
 }
 
 func (s *Server) consoleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +314,32 @@ func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = uuid.NewString()
 	}
-	tid, err := s.pg.Queries.Deposit(r.Context(), sqlc.DepositParams{
+	ctx := r.Context()
+	// Maker-checker: above the threshold, the credit becomes a PENDING deposit and
+	// goes to the Approvals queue for a second admin instead of posting now.
+	if amount > s.cfg.Admin.MakerCheckerThresholdMinor {
+		tid, err := s.pg.Queries.RequestDeposit(ctx, sqlc.RequestDepositParams{
+			IdempotencyKey: key, AccountID: acctID, AmountMinor: amount,
+			Description: "Console credit (awaiting approval)",
+		})
+		if err != nil {
+			s.renderUserDetail(w, r, owner, "Could not submit: "+dbErrorMessage(err))
+			return
+		}
+		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": "credit", "account_id": acctID.String()})
+		if _, err := s.pg.Queries.CreateApprovalRequest(ctx, sqlc.CreateApprovalRequestParams{
+			Maker: actor.UserID, TransferID: tid, Detail: detail,
+		}); err != nil {
+			s.renderUserDetail(w, r, owner, "Could not submit for approval: "+dbErrorMessage(err))
+			return
+		}
+		refresh(w)
+		s.audit(ctx, actor, "credit_requested", &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
+		s.renderUserDetail(w, r, owner, "Credit of "+money.FormatMinor(amount)+" exceeds the "+
+			money.FormatMinor(s.cfg.Admin.MakerCheckerThresholdMinor)+" threshold — sent to Approvals for a second admin.")
+		return
+	}
+	tid, err := s.pg.Queries.Deposit(ctx, sqlc.DepositParams{
 		IdempotencyKey: key,
 		AccountID:      acctID,
 		AmountMinor:    amount,
@@ -320,7 +350,7 @@ func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	refresh(w)
-	s.audit(r.Context(), actor, "credit", &acctID, map[string]any{
+	s.audit(ctx, actor, "credit", &acctID, map[string]any{
 		"amount_minor": amount, "transfer_id": tid.String(),
 	})
 	s.renderUserDetail(w, r, owner, "Credited "+money.FormatMinor(amount)+".")
@@ -492,6 +522,79 @@ func (s *Server) consoleAuditResults(w http.ResponseWriter, r *http.Request) {
 	}
 	s.html(w)
 	_ = template.AuditRows(rows).Render(r.Context(), w)
+}
+
+// ---- approvals (maker-checker) ------------------------------------------
+
+func (s *Server) consoleApprovals(w http.ResponseWriter, r *http.Request) {
+	role := ""
+	if su, ok := userFromContext(r.Context()); ok {
+		role = su.Role
+	}
+	s.html(w)
+	_ = template.ApprovalsPanel(canApprove(role)).Render(r.Context(), w)
+}
+
+func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, flash string) {
+	ctx := r.Context()
+	rows, err := s.pg.Queries.ListPendingApprovals(ctx, s.cfg.Server.DefaultPageLimit)
+	if err != nil {
+		s.log.Error("list approvals", "err", err)
+		http.Error(w, "approvals error", http.StatusInternalServerError)
+		return
+	}
+	canAct := false
+	if su, ok := userFromContext(ctx); ok {
+		canAct = canApprove(su.Role)
+	}
+	s.html(w)
+	_ = template.ApprovalRows(rows, canAct, flash).Render(ctx, w)
+}
+
+func (s *Server) consoleApprovalsResults(w http.ResponseWriter, r *http.Request) {
+	s.renderApprovals(w, r, "")
+}
+
+func (s *Server) consoleApprove(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canApprove)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid request id")
+		return
+	}
+	tid, err := s.pg.Queries.ApproveRequest(r.Context(), sqlc.ApproveRequestParams{RequestID: id, Approver: actor.UserID})
+	if err != nil {
+		s.renderApprovals(w, r, "Could not approve: "+dbErrorMessage(err))
+		return
+	}
+	refresh(w)
+	s.audit(r.Context(), actor, "approve", &tid, map[string]any{"request_id": id.String()})
+	s.renderApprovals(w, r, "Approved and posted.")
+}
+
+func (s *Server) consoleReject(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canApprove)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid request id")
+		return
+	}
+	tid, err := s.pg.Queries.RejectRequest(r.Context(), sqlc.RejectRequestParams{
+		RequestID: id, Approver: actor.UserID, Reason: "rejected via console by " + actor.Username,
+	})
+	if err != nil {
+		s.renderApprovals(w, r, "Could not reject: "+dbErrorMessage(err))
+		return
+	}
+	refresh(w)
+	s.audit(r.Context(), actor, "reject", &tid, map[string]any{"request_id": id.String()})
+	s.renderApprovals(w, r, "Request rejected.")
 }
 
 // consoleActionContext extracts the session user + {id} and enforces the money

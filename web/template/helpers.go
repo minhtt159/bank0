@@ -88,6 +88,7 @@ const styleTag = `<style>
   .navitem { padding:.5rem .7rem; border-radius:8px; color:var(--ink); cursor:pointer; text-decoration:none; font-size:.9rem; }
   .navitem:hover { background:rgba(59,130,246,.12); }
   .navitem.disabled { color:var(--muted); cursor:default; }
+  .badge-count { background:var(--bad); color:#fff; border-radius:999px; padding:0 .4rem; font-size:.72rem; margin-left:.35rem; }
   .navitem.disabled:hover { background:none; }
   #main-panel { padding:1.2rem 1.4rem; overflow:auto; min-width:0; }
   #rail { border-left:1px solid var(--line); padding:1rem 1.1rem; background:#141b27; overflow:auto; min-width:0; overflow-wrap:anywhere; }
