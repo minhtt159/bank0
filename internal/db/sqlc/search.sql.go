@@ -82,18 +82,24 @@ SELECT t.id,
 FROM transfers t
 JOIN accounts da ON da.id = t.debit_account_id
 JOIN accounts ca ON ca.id = t.credit_account_id
-WHERE $1::text IS NULL OR $1::text = ''
-   OR t.description ILIKE '%' || $1 || '%'
-   OR COALESCE(da.iban::text, '') ILIKE '%' || $1 || '%'
-   OR COALESCE(ca.iban::text, '') ILIKE '%' || $1 || '%'
-   OR word_similarity($1::text, t.description) > 0.3
-ORDER BY t.requested_at DESC
-LIMIT $2::int
+WHERE ($1::timestamptz IS NULL
+       OR (t.requested_at, t.id) < ($1::timestamptz, $2::uuid))
+  AND (
+      $3::text IS NULL OR $3::text = ''
+   OR t.description ILIKE '%' || $3 || '%'
+   OR COALESCE(da.iban::text, '') ILIKE '%' || $3 || '%'
+   OR COALESCE(ca.iban::text, '') ILIKE '%' || $3 || '%'
+   OR word_similarity($3::text, t.description) > 0.3
+  )
+ORDER BY t.requested_at DESC, t.id DESC
+LIMIT $4::int
 `
 
 type SearchTransfersParams struct {
-	Q         *string `json:"q"`
-	PageLimit int32   `json:"page_limit"`
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	Q         *string    `json:"q"`
+	PageLimit int32      `json:"page_limit"`
 }
 
 type SearchTransfersRow struct {
@@ -108,7 +114,12 @@ type SearchTransfersRow struct {
 }
 
 func (q *Queries) SearchTransfers(ctx context.Context, arg SearchTransfersParams) ([]SearchTransfersRow, error) {
-	rows, err := q.db.Query(ctx, searchTransfers, arg.Q, arg.PageLimit)
+	rows, err := q.db.Query(ctx, searchTransfers,
+		arg.Cursor,
+		arg.CursorID,
+		arg.Q,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

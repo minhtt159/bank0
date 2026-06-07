@@ -1,0 +1,78 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// TransferDetail (rail): the full picture of one transfer — both ledger legs,
+// the hold, the idempotency key, and the reverses link. Posted transfers can be
+// reversed by an admin (canReverse), which appends inverse ledger entries.
+templ TransferDetail(t sqlc.GetTransferDetailRow, legs []sqlc.TransferLegsRow, holds []sqlc.HoldForTransferRow, canReverse bool, flash string) {
+	<div class="detail">
+		<div class="detail-head">
+			<h2>{ money.FormatMinor(t.AmountMinor) } { t.Currency }</h2>
+			<span class="muted"><span class={ "pill " + string(t.Status) }>{ string(t.Status) }</span> · { string(t.Kind) }</span>
+		</div>
+		if flash != "" {
+			<div class="flash">{ flash }</div>
+		}
+		<section class="block">
+			<div class="kv"><span>From</span><span class="mono">{ t.DebitLabel }</span></div>
+			<div class="kv"><span>To</span><span class="mono">{ t.CreditLabel }</span></div>
+			<div class="kv"><span>Requested</span><span class="muted">{ t.RequestedAt.Format("2006-01-02 15:04:05") }</span></div>
+			if t.PostedAt != nil {
+				<div class="kv"><span>Posted</span><span class="muted">{ t.PostedAt.Format("2006-01-02 15:04:05") }</span></div>
+			}
+			if t.Description != "" {
+				<div class="kv"><span>Description</span><span>{ t.Description }</span></div>
+			}
+			if t.FailureReason != nil {
+				<div class="kv"><span>Reason</span><span>{ deref(t.FailureReason) }</span></div>
+			}
+			<div class="kv"><span>Idempotency</span><span class="mono">{ deref(t.IdempotencyKey) }</span></div>
+			if t.ReversesID != nil {
+				<div class="kv">
+					<span>Reverses</span>
+					<a class="link" hx-get={ "/console/transfers/" + t.ReversesID.String() + "/detail" } hx-target="#rail">{ shortID(t.ReversesID) }</a>
+				</div>
+			}
+		</section>
+		if len(legs) > 0 {
+			<section class="block">
+				<h3>Ledger legs</h3>
+				<table>
+					<thead><tr><th>Account</th><th>Dir</th><th class="num">Signed</th><th class="num">Balance</th></tr></thead>
+					<tbody>
+						for _, l := range legs {
+							<tr>
+								<td class="mono">{ orDash(l.AccountIban, nil) }</td>
+								<td>{ string(l.Direction) }</td>
+								<td class="num">{ money.FormatMinor(derefI64(l.SignedAmount)) }</td>
+								<td class="num">{ money.FormatMinor(l.BalanceAfter) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</section>
+		}
+		if len(holds) > 0 {
+			<section class="block">
+				<h3>Hold</h3>
+				<div class="kv"><span>Amount</span><strong>{ money.FormatMinor(holds[0].AmountMinor) }</strong></div>
+				<div class="kv"><span>Status</span><span class="pill">{ string(holds[0].Status) }</span></div>
+				<div class="kv"><span>Expires</span><span class="muted">{ holds[0].ExpiresAt.Format("2006-01-02 15:04") }</span></div>
+			</section>
+		}
+		if canReverse {
+			<section class="block">
+				<h3>Reverse</h3>
+				<form hx-post={ "/console/transfers/" + t.ID.String() + "/reverse" } hx-target="#rail">
+					<input type="hidden" name="idempotency_key" value={ newKey() }/>
+					<label>Reason <input name="reason" required/></label>
+					<button class="btn danger" type="submit" hx-disabled-elt="this" hx-confirm="Reverse this posted transfer? This appends inverse ledger entries (the original is never edited).">Reverse</button>
+				</form>
+			</section>
+		}
+	</div>
+}

@@ -224,13 +224,19 @@ denied-action audit log, and per-IP rate limiting.
    create accounts, add **credit** (deposit, confirm + idempotency key), edit user
    details, edit accounts (freeze/unfreeze, set default, transfer limit). 🟡 Withdraw
    not yet exposed.
-5. 🟡 **Audit log** ✅ — every operator action (login, create user/account, credit,
-   freeze, set limit/default, post/cancel) is written to `admin_actions` (actor +
-   action + target + JSON detail) and shown on a searchable **Audit log** screen,
-   pairing with the Transfers ledger. Maker-checker approvals + Reverse still ⬜.
-6. 🟡 **Fuzzy search** ✅ (users/accounts/transfers via pg_trgm). **Transfers** screen
-   now lists the full transfer **history** (newest first, status pills, pending rows
-   actionable) — not just the pending queue. Statement drill-down + auto-refresh ⬜.
+5. ✅ **Audit log** — every operator action written to `admin_actions` (actor +
+   action + target + JSON detail), searchable screen, pairing with the ledger.
+   ✅ **Maker-checker** — console credits **strictly above €10,000** become a PENDING
+   deposit + an `approval_request`; the **Approvals** screen lets a *different* admin
+   Approve (posts) or Reject (cancels). `approve_request` enforces approver ≠ maker
+   (`approved_by` recorded); nav shows a pending-count badge. Reverse still ⬜.
+6. 🟡 **Fuzzy search** ✅ (users/accounts/transfers via pg_trgm). **Transfers** = full
+   history (status pills, pending rows actionable). ✅ **Drill-down**: account →
+   **Statement** (ledger w/ running balance, in main panel) and **Transfer detail**
+   (rail: both legs, hold, idempotency key, reverses link, admin **Reverse**). ✅
+   **Pagination**: "Load more" with a **composite (timestamp, id) keyset cursor**
+   (Transfers, Audit, Statement) — correct even when many rows share a timestamp.
+   Auto-refresh ⬜.
 
 > The Post/Cancel actions are ready; the main *producer* of pending transfers is
 > the maker-checker flow (step 5) — above-threshold money moves will call
