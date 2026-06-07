@@ -13,18 +13,62 @@ services:
       timeout: 3s
       retries: 10
 
-  # Single app container serving everything (mode=all), auto-migrating on start.
-  app:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+  # One-shot: apply embedded migrations, then exit.
+  migrate:
+    image: bank0:dev
+    command: ["migrate", "up"]
+    restart: "no"
     depends_on:
       db:
         condition: service_healthy
     environment:
       APP_DATABASE_DSN: postgres://admin:admin@db:5432/bank0?sslmode=disable
-      APP_SERVER_MODE: all
-      APP_SERVER_AUTO_MIGRATE: "true"
+
+  # One-shot: load dev seed data (idempotent), then exit.
+  seed:
+    image: postgres:18
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ../db/seed.sql:/seed.sql:ro
+    entrypoint:
+      - sh
+      - -c
+      - psql 'postgres://admin:admin@db:5432/bank0?sslmode=disable' -v ON_ERROR_STOP=1 -f /seed.sql
+
+  # Admin portal + operator console -> http://localhost:8080
+  admin:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: bank0:dev
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    environment:
+      APP_DATABASE_DSN: postgres://admin:admin@db:5432/bank0?sslmode=disable
+      APP_SERVER_MODE: portal
+      APP_SERVER_AUTO_MIGRATE: "false"
+      APP_ADMIN_RUN_MAINTENANCE: "true"
+      APP_AUTH_JWT_SECRET: dev-shared-secret
       APP_LOGGING_ENCODING: json
     ports:
       - "8080:8080"
+
+  # Client API -> http://localhost:8090
+  client:
+    image: bank0:dev
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      APP_DATABASE_DSN: postgres://admin:admin@db:5432/bank0?sslmode=disable
+      APP_SERVER_MODE: api
+      APP_SERVER_AUTO_MIGRATE: "false"
+      APP_ADMIN_RUN_MAINTENANCE: "false"
+      APP_AUTH_JWT_SECRET: dev-shared-secret
+      APP_LOGGING_ENCODING: json
+    ports:
+      - "8090:8080"

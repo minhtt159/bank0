@@ -41,6 +41,7 @@ func (q *Queries) DashboardStats(ctx context.Context) (DashboardStatsRow, error)
 
 const listCustomerAccounts = `-- name: ListCustomerAccounts :many
 SELECT a.id,
+       a.user_id,
        COALESCE(u.full_name, '') AS owner,
        COALESCE(a.iban, '')      AS iban,
        a.status,
@@ -55,6 +56,7 @@ LIMIT $1::int
 
 type ListCustomerAccountsRow struct {
 	ID             uuid.UUID     `json:"id"`
+	UserID         *uuid.UUID    `json:"user_id"`
 	Owner          string        `json:"owner"`
 	Iban           string        `json:"iban"`
 	Status         AccountStatus `json:"status"`
@@ -73,6 +75,7 @@ func (q *Queries) ListCustomerAccounts(ctx context.Context, pageLimit int32) ([]
 		var i ListCustomerAccountsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.UserID,
 			&i.Owner,
 			&i.Iban,
 			&i.Status,

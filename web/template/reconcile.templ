@@ -1,0 +1,25 @@
+package template
+
+import "github.com/minhtt159/bank0/internal/db"
+
+templ ReconcilePanel(issues []db.ReconcileRow) {
+	<div id="reconcile" hx-get="/console/reconcile" hx-trigger="bank0:refresh from:body" hx-swap="outerHTML" hx-disinherit="*">
+		<div class="panel-head">
+			<h1>Reconciliation</h1>
+			<button class="btn" hx-get="/console/reconcile" hx-target="#main-panel">Re-run</button>
+		</div>
+		if len(issues) == 0 {
+			<div class="badge ok">✅ All invariants hold — the books balance. (This emptiness is the product.)</div>
+		} else {
+			<div class="badge bad">❌ { i64(int64(len(issues))) } failing invariant(s)</div>
+			<table>
+				<thead><tr><th>Check</th><th>Detail</th></tr></thead>
+				<tbody>
+					for _, it := range issues {
+						<tr><td>{ it.CheckName }</td><td class="muted">{ it.Detail }</td></tr>
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}

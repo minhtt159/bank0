@@ -5,55 +5,61 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-templ PendingTable(rows []sqlc.ListPendingEnrichedRow, canAct bool, flash string) {
+// TransfersPanel: search box + a results container showing ALL transfers
+// (history), newest first. Pending rows are actionable for staff.
+templ TransfersPanel() {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Transfers</h1>
+			@searchBox("Search transfers by IBAN or description…", "/console/transfers/results", "transfers-results")
+		</div>
+		<div id="transfers-results" hx-get="/console/transfers/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
+// TransferRows: full transfer history with status; pending rows get Post/Cancel.
+templ TransferRows(rows []sqlc.SearchTransfersRow, canAct bool, flash string) {
 	if flash != "" {
 		<div class="flash">{ flash }</div>
 	}
-	if len(rows) == 0 {
-		<p class="muted">No pending transfers 🎉</p>
-	} else {
-		<table>
-			<thead>
+	<table>
+		<thead>
+			<tr>
+				<th>Requested</th>
+				<th>From</th>
+				<th>To</th>
+				<th>Kind</th>
+				<th>Status</th>
+				<th class="num">Amount</th>
+				<th>Description</th>
+				if canAct {
+					<th>Actions</th>
+				}
+			</tr>
+		</thead>
+		<tbody>
+			if len(rows) == 0 {
+				<tr><td colspan="8" class="muted">No transfers.</td></tr>
+			}
+			for _, t := range rows {
 				<tr>
-					<th>Requested</th>
-					<th>From</th>
-					<th>To</th>
-					<th>Kind</th>
-					<th class="num">Amount</th>
-					<th>Description</th>
+					<td class="muted">{ t.RequestedAt.Format("2006-01-02 15:04") }</td>
+					<td>{ t.Debit }</td>
+					<td>{ t.Credit }</td>
+					<td><span class="pill">{ string(t.Kind) }</span></td>
+					<td><span class={ "pill " + string(t.Status) }>{ string(t.Status) }</span></td>
+					<td class="num">{ money.FormatMinor(t.AmountMinor) }</td>
+					<td class="muted">{ t.Description }</td>
 					if canAct {
-						<th>Actions</th>
+						<td class="actions">
+							if t.Status == "pending" {
+								<button class="btn ok" hx-post={ "/console/transfers/" + t.ID.String() + "/post" } hx-target="#transfers-results" hx-disabled-elt="this" hx-confirm="Post (settle) this transfer now?">Post</button>
+								<button class="btn danger" hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" } hx-target="#transfers-results" hx-disabled-elt="this" hx-confirm="Cancel this pending transfer and release the hold?">Cancel</button>
+							}
+						</td>
 					}
 				</tr>
-			</thead>
-			<tbody>
-				for _, t := range rows {
-					<tr>
-						<td class="muted">{ t.RequestedAt.Format("2006-01-02 15:04") }</td>
-						<td>{ t.Debit }</td>
-						<td>{ t.Credit }</td>
-						<td><span class="pill">{ string(t.Kind) }</span></td>
-						<td class="num">{ money.FormatMinor(t.AmountMinor) }</td>
-						<td class="muted">{ t.Description }</td>
-						if canAct {
-							<td class="actions">
-								<button
-									class="btn ok"
-									hx-post={ "/console/transfers/" + t.ID.String() + "/post" }
-									hx-target="#content"
-									hx-confirm="Post (settle) this transfer now?"
-								>Post</button>
-								<button
-									class="btn danger"
-									hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" }
-									hx-target="#content"
-									hx-confirm="Cancel this pending transfer and release the hold?"
-								>Cancel</button>
-							</td>
-						}
-					</tr>
-				}
-			</tbody>
-		</table>
-	}
+			}
+		</tbody>
+	</table>
 }
