@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 // Shell is the operator-console chrome (docs/04 §3 IA): top bar + left nav +
 // HTMX-swapped main panel + right rail. Nav items load the main panel; rows in
 // the main panel load details/forms into the rail.
-func Shell(username string, role string) templ.Component {
+func Shell(username string, role string, pendingApprovals int) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -88,7 +88,30 @@ func Shell(username string, role string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span><form method=\"post\" action=\"/logout\" style=\"margin:0\"><button class=\"linkbtn\" type=\"submit\">Sign out</button></form></header><div class=\"layout\"><nav class=\"leftnav\"><a class=\"navitem\" hx-get=\"/console/dashboard\" hx-target=\"#main-panel\">Dashboard</a> <a class=\"navitem\" hx-get=\"/console/users\" hx-target=\"#main-panel\">Users</a> <a class=\"navitem\" hx-get=\"/console/accounts\" hx-target=\"#main-panel\">Accounts</a> <a class=\"navitem\" hx-get=\"/console/pending\" hx-target=\"#main-panel\">Transfers</a> <a class=\"navitem\" hx-get=\"/console/reconcile\" hx-target=\"#main-panel\">Reconciliation</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\">Audit log</a> <span class=\"navitem disabled\">Approvals (soon)</span></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail\"><div class=\"rail-empty muted\">Select a user or row to see details.</div></aside></div></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span><form method=\"post\" action=\"/logout\" style=\"margin:0\"><button class=\"linkbtn\" type=\"submit\">Sign out</button></form></header><div class=\"layout\"><nav class=\"leftnav\"><a class=\"navitem\" hx-get=\"/console/dashboard\" hx-target=\"#main-panel\">Dashboard</a> <a class=\"navitem\" hx-get=\"/console/users\" hx-target=\"#main-panel\">Users</a> <a class=\"navitem\" hx-get=\"/console/accounts\" hx-target=\"#main-panel\">Accounts</a> <a class=\"navitem\" hx-get=\"/console/pending\" hx-target=\"#main-panel\">Transfers</a> <a class=\"navitem\" hx-get=\"/console/reconcile\" hx-target=\"#main-panel\">Reconciliation</a> <a class=\"navitem\" hx-get=\"/console/approvals\" hx-target=\"#main-panel\">Approvals ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if pendingApprovals > 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<span class=\"badge-count\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var6 string
+			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(i64(int64(pendingApprovals)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 37, Col: 63}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\">Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail\"><div class=\"rail-empty muted\">Select a user or row to see details.</div></aside></div></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

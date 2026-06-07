@@ -1,0 +1,57 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// StatementView: an account's ledger (running balance), in the main panel. Rows
+// drill into the transfer detail (rail). Paginated by posted_at cursor.
+templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, nextURL string) {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Statement</h1>
+			<span class="muted mono">{ deref(acct.Iban) }</span>
+			<span class={ "pill " + string(acct.Status) }>{ string(acct.Status) }</span>
+		</div>
+		<div class="cards">
+			<div class="card"><span>Ledger balance</span><strong>{ money.FormatMinor(acct.BalanceMinor) }</strong></div>
+			<div class="card"><span>Available</span><strong>{ money.FormatMinor(acct.AvailableMinor) }</strong></div>
+			<div class="card"><span>Transfer limit</span><strong>{ money.FormatMinor(acct.TransferLimitMinor) }</strong></div>
+		</div>
+		<table>
+			<thead>
+				<tr>
+					<th>Posted</th>
+					<th>Counterparty</th>
+					<th>Kind</th>
+					<th class="num">Amount</th>
+					<th class="num">Balance</th>
+					<th>Description</th>
+				</tr>
+			</thead>
+			<tbody>
+				@StatementItems(rows, nextURL)
+			</tbody>
+		</table>
+	</div>
+}
+
+templ StatementItems(rows []sqlc.AccountStatementRow, nextURL string) {
+	if len(rows) == 0 && nextURL == "" {
+		<tr><td colspan="6" class="muted">No ledger entries.</td></tr>
+	}
+	for _, e := range rows {
+		<tr class="rowlink" hx-get={ "/console/transfers/" + e.TransferID.String() + "/detail" } hx-target="#rail">
+			<td class="muted">{ e.PostedAt.Format("2006-01-02 15:04") }</td>
+			<td class="mono">{ orDash(e.CounterpartyIban, e.CounterpartyOwner) }</td>
+			<td><span class="pill">{ string(e.TransferKind) }</span></td>
+			<td class="num">{ money.FormatMinor(derefI64(e.SignedAmount)) }</td>
+			<td class="num">{ money.FormatMinor(e.BalanceAfter) }</td>
+			<td class="muted">{ e.Description }</td>
+		</tr>
+	}
+	if nextURL != "" {
+		@loadMore(nextURL, 6)
+	}
+}

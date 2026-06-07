@@ -43,10 +43,14 @@ SELECT t.id,
 FROM transfers t
 JOIN accounts da ON da.id = t.debit_account_id
 JOIN accounts ca ON ca.id = t.credit_account_id
-WHERE sqlc.narg(q)::text IS NULL OR sqlc.narg(q)::text = ''
+WHERE (sqlc.narg(cursor)::timestamptz IS NULL
+       OR (t.requested_at, t.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+  AND (
+      sqlc.narg(q)::text IS NULL OR sqlc.narg(q)::text = ''
    OR t.description ILIKE '%' || sqlc.narg(q) || '%'
    OR COALESCE(da.iban::text, '') ILIKE '%' || sqlc.narg(q) || '%'
    OR COALESCE(ca.iban::text, '') ILIKE '%' || sqlc.narg(q) || '%'
    OR word_similarity(sqlc.narg(q)::text, t.description) > 0.3
-ORDER BY t.requested_at DESC
+  )
+ORDER BY t.requested_at DESC, t.id DESC
 LIMIT sqlc.arg(page_limit)::int;

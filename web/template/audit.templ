@@ -14,24 +14,31 @@ templ AuditPanel() {
 	</div>
 }
 
-templ AuditRows(rows []sqlc.ListAuditLogRow) {
+templ AuditRows(rows []sqlc.ListAuditLogRow, nextURL string) {
 	<table>
 		<thead>
 			<tr><th>When</th><th>Operator</th><th>Action</th><th>Target</th><th>Detail</th></tr>
 		</thead>
 		<tbody>
-			if len(rows) == 0 {
-				<tr><td colspan="5" class="muted">No audit entries.</td></tr>
-			}
-			for _, a := range rows {
-				<tr>
-					<td class="muted">{ a.CreatedAt.Format("2006-01-02 15:04:05") }</td>
-					<td>{ a.Actor }</td>
-					<td><span class="pill">{ a.Action }</span></td>
-					<td class="muted mono">{ shortID(a.TargetID) }</td>
-					<td class="muted mono">{ string(a.Detail) }</td>
-				</tr>
-			}
+			@AuditItems(rows, nextURL)
 		</tbody>
 	</table>
+}
+
+templ AuditItems(rows []sqlc.ListAuditLogRow, nextURL string) {
+	if len(rows) == 0 && nextURL == "" {
+		<tr><td colspan="5" class="muted">No audit entries.</td></tr>
+	}
+	for _, a := range rows {
+		<tr>
+			<td class="muted">{ a.CreatedAt.Format("2006-01-02 15:04:05") }</td>
+			<td>{ a.Actor }</td>
+			<td><span class="pill">{ a.Action }</span></td>
+			<td class="muted mono">{ shortID(a.TargetID) }</td>
+			<td class="muted mono">{ string(a.Detail) }</td>
+		</tr>
+	}
+	if nextURL != "" {
+		@loadMore(nextURL, 5)
+	}
 }

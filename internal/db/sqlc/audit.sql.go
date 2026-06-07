@@ -23,17 +23,23 @@ SELECT aa.id,
 FROM admin_actions aa
 LEFT JOIN users u  ON u.id  = aa.actor_user_id
 LEFT JOIN users ap ON ap.id = aa.approved_by
-WHERE $1::text IS NULL OR $1::text = ''
-   OR aa.action ILIKE '%' || $1 || '%'
-   OR u.username::text ILIKE '%' || $1 || '%'
-   OR aa.detail::text ILIKE '%' || $1 || '%'
-ORDER BY aa.created_at DESC
-LIMIT $2::int
+WHERE ($1::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < ($1::timestamptz, $2::uuid))
+  AND (
+      $3::text IS NULL OR $3::text = ''
+   OR aa.action ILIKE '%' || $3 || '%'
+   OR u.username::text ILIKE '%' || $3 || '%'
+   OR aa.detail::text ILIKE '%' || $3 || '%'
+  )
+ORDER BY aa.created_at DESC, aa.id DESC
+LIMIT $4::int
 `
 
 type ListAuditLogParams struct {
-	Q         *string `json:"q"`
-	PageLimit int32   `json:"page_limit"`
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	Q         *string    `json:"q"`
+	PageLimit int32      `json:"page_limit"`
 }
 
 type ListAuditLogRow struct {
@@ -47,7 +53,12 @@ type ListAuditLogRow struct {
 }
 
 func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]ListAuditLogRow, error) {
-	rows, err := q.db.Query(ctx, listAuditLog, arg.Q, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listAuditLog,
+		arg.Cursor,
+		arg.CursorID,
+		arg.Q,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

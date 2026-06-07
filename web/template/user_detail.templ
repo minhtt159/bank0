@@ -76,6 +76,7 @@ templ accountCard(a sqlc.ListAccountsByUserRow, canMoney bool) {
 				<span class="star" title="default account">★</span>
 			}
 			<span class={ "pill " + string(a.Status) }>{ string(a.Status) }</span>
+			<a class="link sm" hx-get={ "/console/accounts/" + a.ID.String() + "/statement" } hx-target="#main-panel">Statement →</a>
 		</div>
 		<div class="acct-bal">
 			<span>Ledger <strong>{ money.FormatMinor(a.BalanceMinor) }</strong></span>
