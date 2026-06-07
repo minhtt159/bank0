@@ -18,3 +18,14 @@ templ searchBox(placeholder string, url string, target string) {
 		hx-disinherit="*"
 	/>
 }
+
+// loadMore is a trailing table row: clicking it fetches the next cursor page and
+// replaces itself (outerHTML) with the next rows (+ a fresh loadMore if more).
+templ loadMore(url string, colspan int) {
+	<tr class="loadmore-row">
+		<td colspan={ itoa(colspan) }>
+			<button class="btn loadmore" type="button" hx-get={ url } hx-target="closest tr" hx-swap="outerHTML">Load more ↓</button>
+		</td>
+	</tr>
+}
+

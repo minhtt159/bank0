@@ -38,13 +38,16 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/users/{id}", s.consoleUpdateUser).Methods(http.MethodPost)
 	r.HandleFunc("/console/users/{id}/accounts", s.consoleCreateAccount).Methods(http.MethodPost)
 
-	// Account money/admin actions (operator/admin)
+	// Account statement (drill-down, paginated) + money/admin actions
+	r.HandleFunc("/console/accounts/{id}/statement", s.consoleStatement).Methods(http.MethodGet)
 	r.HandleFunc("/console/accounts/{id}/credit", s.consoleCredit).Methods(http.MethodPost)
 	r.HandleFunc("/console/accounts/{id}/status", s.consoleAccountStatus).Methods(http.MethodPost)
 	r.HandleFunc("/console/accounts/{id}/limit", s.consoleAccountLimit).Methods(http.MethodPost)
 	r.HandleFunc("/console/accounts/{id}/default", s.consoleAccountDefault).Methods(http.MethodPost)
 
-	// Pending-queue actions
+	// Transfer detail (drill-down) + lifecycle actions
+	r.HandleFunc("/console/transfers/{id}/detail", s.consoleTransferDetail).Methods(http.MethodGet)
 	r.HandleFunc("/console/transfers/{id}/post", s.consolePostTransfer).Methods(http.MethodPost)
 	r.HandleFunc("/console/transfers/{id}/cancel", s.consoleCancelTransfer).Methods(http.MethodPost)
+	r.HandleFunc("/console/transfers/{id}/reverse", s.consoleReverse).Methods(http.MethodPost)
 }

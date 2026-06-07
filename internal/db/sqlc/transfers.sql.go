@@ -12,6 +12,86 @@ import (
 	uuid "github.com/google/uuid"
 )
 
+const accountStatement = `-- name: AccountStatement :many
+SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signed_amount,
+       balance_after, currency, posted_at, transfer_kind, transfer_status, description,
+       counterparty_iban, counterparty_owner
+FROM enriched_ledger
+WHERE account_id = $1::uuid
+  AND ($2::timestamptz IS NULL
+       OR (posted_at, id) < ($2::timestamptz, $3::uuid))
+ORDER BY posted_at DESC, id DESC
+LIMIT $4::int
+`
+
+type AccountStatementParams struct {
+	AccountID uuid.UUID  `json:"account_id"`
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	PageLimit int32      `json:"page_limit"`
+}
+
+type AccountStatementRow struct {
+	ID                uuid.UUID      `json:"id"`
+	TransferID        uuid.UUID      `json:"transfer_id"`
+	AccountID         uuid.UUID      `json:"account_id"`
+	AccountIban       *string        `json:"account_iban"`
+	Direction         EntryDirection `json:"direction"`
+	AmountMinor       int64          `json:"amount_minor"`
+	SignedAmount      *int64         `json:"signed_amount"`
+	BalanceAfter      int64          `json:"balance_after"`
+	Currency          string         `json:"currency"`
+	PostedAt          time.Time      `json:"posted_at"`
+	TransferKind      TransferKind   `json:"transfer_kind"`
+	TransferStatus    TransferStatus `json:"transfer_status"`
+	Description       string         `json:"description"`
+	CounterpartyIban  *string        `json:"counterparty_iban"`
+	CounterpartyOwner *string        `json:"counterparty_owner"`
+}
+
+// Console account statement with a composite (posted_at, id) keyset cursor so
+// ties (same posted_at) page correctly.
+func (q *Queries) AccountStatement(ctx context.Context, arg AccountStatementParams) ([]AccountStatementRow, error) {
+	rows, err := q.db.Query(ctx, accountStatement,
+		arg.AccountID,
+		arg.Cursor,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountStatementRow
+	for rows.Next() {
+		var i AccountStatementRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TransferID,
+			&i.AccountID,
+			&i.AccountIban,
+			&i.Direction,
+			&i.AmountMinor,
+			&i.SignedAmount,
+			&i.BalanceAfter,
+			&i.Currency,
+			&i.PostedAt,
+			&i.TransferKind,
+			&i.TransferStatus,
+			&i.Description,
+			&i.CounterpartyIban,
+			&i.CounterpartyOwner,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelTransfer = `-- name: CancelTransfer :one
 SELECT cancel_transfer($1::uuid, $2::text) AS status
 `
@@ -144,6 +224,94 @@ func (q *Queries) GetTransfer(ctx context.Context, id uuid.UUID) (GetTransferRow
 	return i, err
 }
 
+const getTransferDetail = `-- name: GetTransferDetail :one
+SELECT t.id, t.amount_minor, t.currency, t.status, t.kind, t.reverses_id,
+       t.description, t.failure_reason, t.requested_at, t.posted_at, t.idempotency_key,
+       COALESCE(da.iban, da.system_code, '') AS debit_label,
+       COALESCE(ca.iban, ca.system_code, '') AS credit_label
+FROM transfers t
+JOIN accounts da ON da.id = t.debit_account_id
+JOIN accounts ca ON ca.id = t.credit_account_id
+WHERE t.id = $1::uuid
+`
+
+type GetTransferDetailRow struct {
+	ID             uuid.UUID      `json:"id"`
+	AmountMinor    int64          `json:"amount_minor"`
+	Currency       string         `json:"currency"`
+	Status         TransferStatus `json:"status"`
+	Kind           TransferKind   `json:"kind"`
+	ReversesID     *uuid.UUID     `json:"reverses_id"`
+	Description    string         `json:"description"`
+	FailureReason  *string        `json:"failure_reason"`
+	RequestedAt    time.Time      `json:"requested_at"`
+	PostedAt       *time.Time     `json:"posted_at"`
+	IdempotencyKey *string        `json:"idempotency_key"`
+	DebitLabel     string         `json:"debit_label"`
+	CreditLabel    string         `json:"credit_label"`
+}
+
+func (q *Queries) GetTransferDetail(ctx context.Context, id uuid.UUID) (GetTransferDetailRow, error) {
+	row := q.db.QueryRow(ctx, getTransferDetail, id)
+	var i GetTransferDetailRow
+	err := row.Scan(
+		&i.ID,
+		&i.AmountMinor,
+		&i.Currency,
+		&i.Status,
+		&i.Kind,
+		&i.ReversesID,
+		&i.Description,
+		&i.FailureReason,
+		&i.RequestedAt,
+		&i.PostedAt,
+		&i.IdempotencyKey,
+		&i.DebitLabel,
+		&i.CreditLabel,
+	)
+	return i, err
+}
+
+const holdForTransfer = `-- name: HoldForTransfer :many
+SELECT amount_minor, status, expires_at, created_at
+FROM holds
+WHERE transfer_id = $1::uuid
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type HoldForTransferRow struct {
+	AmountMinor int64      `json:"amount_minor"`
+	Status      HoldStatus `json:"status"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+func (q *Queries) HoldForTransfer(ctx context.Context, transferID uuid.UUID) ([]HoldForTransferRow, error) {
+	rows, err := q.db.Query(ctx, holdForTransfer, transferID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []HoldForTransferRow
+	for rows.Next() {
+		var i HoldForTransferRow
+		if err := rows.Scan(
+			&i.AmountMinor,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingTransfers = `-- name: ListPendingTransfers :many
 SELECT id, debit_account_id, credit_account_id, amount_minor, currency, kind, description, requested_at
 FROM transfers
@@ -232,4 +400,43 @@ func (q *Queries) ReverseTransfer(ctx context.Context, arg ReverseTransferParams
 	var reversal_id uuid.UUID
 	err := row.Scan(&reversal_id)
 	return reversal_id, err
+}
+
+const transferLegs = `-- name: TransferLegs :many
+SELECT account_iban, direction, signed_amount, balance_after
+FROM enriched_ledger
+WHERE transfer_id = $1::uuid
+ORDER BY direction
+`
+
+type TransferLegsRow struct {
+	AccountIban  *string        `json:"account_iban"`
+	Direction    EntryDirection `json:"direction"`
+	SignedAmount *int64         `json:"signed_amount"`
+	BalanceAfter int64          `json:"balance_after"`
+}
+
+func (q *Queries) TransferLegs(ctx context.Context, transferID uuid.UUID) ([]TransferLegsRow, error) {
+	rows, err := q.db.Query(ctx, transferLegs, transferID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TransferLegsRow
+	for rows.Next() {
+		var i TransferLegsRow
+		if err := rows.Scan(
+			&i.AccountIban,
+			&i.Direction,
+			&i.SignedAmount,
+			&i.BalanceAfter,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

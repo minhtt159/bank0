@@ -68,6 +68,18 @@ BEGIN
     PERFORM request_transfer('seed-pend-1', aids[1],  aids[4],  2500, 'Deferred: pending demo 1', 'transfer');
     PERFORM request_transfer('seed-pend-2', aids[5],  aids[2],  1500, 'Deferred: pending demo 2', 'transfer');
     PERFORM request_transfer('seed-pend-3', aids[7],  aids[10], 3000, 'Deferred: pending demo 3', 'transfer');
+
+    --- bulk volume so lists + the first account's statement span pages.
+    --- aids[1] is in every bulk transfer (alternating side) -> a long statement.
+    FOR i IN 1 .. 70 LOOP
+        IF i % 2 = 0 THEN
+            PERFORM transfer('seed-bulk-' || i, aids[1], aids[(i % 11) + 2],
+                             100 * (1 + i % 3), 'Bulk #' || i || ' out', 'transfer');
+        ELSE
+            PERFORM transfer('seed-bulk-' || i, aids[(i % 11) + 2], aids[1],
+                             100 * (1 + i % 3), 'Bulk #' || i || ' in', 'transfer');
+        END IF;
+    END LOOP;
 END $$;
 
 SELECT 'seed complete: ' ||

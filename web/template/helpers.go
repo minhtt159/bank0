@@ -7,6 +7,15 @@ import (
 )
 
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
+func itoa(n int) string  { return strconv.Itoa(n) }
+
+// derefI64 reads an optional signed amount (nil -> 0).
+func derefI64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
 
 // deref renders an optional string (nil -> "").
 func deref(s *string) string {
@@ -14,6 +23,17 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// orDash returns the first non-empty of a, b, else an em dash.
+func orDash(a *string, b *string) string {
+	if a != nil && *a != "" {
+		return *a
+	}
+	if b != nil && *b != "" {
+		return *b
+	}
+	return "—"
 }
 
 // uuidStr renders an optional uuid (nil -> "").
@@ -100,6 +120,13 @@ const styleTag = `<style>
   .search:focus { outline:none; border-color:var(--accent); }
   .small { font-size:.8rem; }
   .mono { font-family:ui-monospace,monospace; font-size:.8rem; }
+  .link { color:var(--accent); cursor:pointer; text-decoration:none; }
+  .link:hover { text-decoration:underline; }
+  .link.sm { margin-left:auto; font-size:.8rem; }
+  .kv { display:flex; gap:.8rem; padding:.3rem 0; border-bottom:1px solid var(--line); font-size:.88rem; }
+  .kv > span:first-child { color:var(--muted); min-width:96px; }
+  .loadmore-row td { text-align:center; padding:.6rem; }
+  .btn.loadmore { width:100%; max-width:240px; }
   /* transfer-status pills */
   .pill.posted { color:#3ddc84; border-color:var(--ok); }
   .pill.pending { color:#ffd479; border-color:#ffd479; }

@@ -18,9 +18,13 @@ SELECT aa.id,
 FROM admin_actions aa
 LEFT JOIN users u  ON u.id  = aa.actor_user_id
 LEFT JOIN users ap ON ap.id = aa.approved_by
-WHERE sqlc.narg(q)::text IS NULL OR sqlc.narg(q)::text = ''
+WHERE (sqlc.narg(cursor)::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+  AND (
+      sqlc.narg(q)::text IS NULL OR sqlc.narg(q)::text = ''
    OR aa.action ILIKE '%' || sqlc.narg(q) || '%'
    OR u.username::text ILIKE '%' || sqlc.narg(q) || '%'
    OR aa.detail::text ILIKE '%' || sqlc.narg(q) || '%'
-ORDER BY aa.created_at DESC
+  )
+ORDER BY aa.created_at DESC, aa.id DESC
 LIMIT sqlc.arg(page_limit)::int;

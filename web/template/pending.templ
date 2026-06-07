@@ -5,8 +5,7 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-// TransfersPanel: search box + a results container showing ALL transfers
-// (history), newest first. Pending rows are actionable for staff.
+// TransfersPanel: search box + results container (full transfer history).
 templ TransfersPanel() {
 	<div class="panel">
 		<div class="panel-head">
@@ -17,8 +16,8 @@ templ TransfersPanel() {
 	</div>
 }
 
-// TransferRows: full transfer history with status; pending rows get Post/Cancel.
-templ TransferRows(rows []sqlc.SearchTransfersRow, canAct bool, flash string) {
+// TransferTable: full table (first page / search / after an action).
+templ TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, flash string) {
 	if flash != "" {
 		<div class="flash">{ flash }</div>
 	}
@@ -38,28 +37,40 @@ templ TransferRows(rows []sqlc.SearchTransfersRow, canAct bool, flash string) {
 			</tr>
 		</thead>
 		<tbody>
-			if len(rows) == 0 {
-				<tr><td colspan="8" class="muted">No transfers.</td></tr>
-			}
-			for _, t := range rows {
-				<tr>
-					<td class="muted">{ t.RequestedAt.Format("2006-01-02 15:04") }</td>
-					<td>{ t.Debit }</td>
-					<td>{ t.Credit }</td>
-					<td><span class="pill">{ string(t.Kind) }</span></td>
-					<td><span class={ "pill " + string(t.Status) }>{ string(t.Status) }</span></td>
-					<td class="num">{ money.FormatMinor(t.AmountMinor) }</td>
-					<td class="muted">{ t.Description }</td>
-					if canAct {
-						<td class="actions">
-							if t.Status == "pending" {
-								<button class="btn ok" hx-post={ "/console/transfers/" + t.ID.String() + "/post" } hx-target="#transfers-results" hx-disabled-elt="this" hx-confirm="Post (settle) this transfer now?">Post</button>
-								<button class="btn danger" hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" } hx-target="#transfers-results" hx-disabled-elt="this" hx-confirm="Cancel this pending transfer and release the hold?">Cancel</button>
-							}
-						</td>
-					}
-				</tr>
-			}
+			@TransferItems(rows, canAct, nextURL)
 		</tbody>
 	</table>
+}
+
+// TransferItems: rows (+ a loadMore sentinel). Returned alone on "Load more".
+templ TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) {
+	if len(rows) == 0 && nextURL == "" {
+		<tr><td colspan="8" class="muted">No transfers.</td></tr>
+	}
+	for _, t := range rows {
+		<tr class="rowlink" hx-get={ "/console/transfers/" + t.ID.String() + "/detail" } hx-target="#rail">
+			<td class="muted">{ t.RequestedAt.Format("2006-01-02 15:04") }</td>
+			<td>{ t.Debit }</td>
+			<td>{ t.Credit }</td>
+			<td><span class="pill">{ string(t.Kind) }</span></td>
+			<td><span class={ "pill " + string(t.Status) }>{ string(t.Status) }</span></td>
+			<td class="num">{ money.FormatMinor(t.AmountMinor) }</td>
+			<td class="muted">{ t.Description }</td>
+			if canAct {
+				<td class="actions">
+					if t.Status == "pending" {
+						<button class="btn ok" hx-on:click="event.stopPropagation()" hx-post={ "/console/transfers/" + t.ID.String() + "/post" } hx-target="#transfers-results" hx-disabled-elt="this" hx-confirm="Post (settle) this transfer now?">Post</button>
+						<button class="btn danger" hx-on:click="event.stopPropagation()" hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" } hx-target="#transfers-results" hx-disabled-elt="this" hx-confirm="Cancel this pending transfer and release the hold?">Cancel</button>
+					}
+				</td>
+			}
+		</tr>
+	}
+	if nextURL != "" {
+		if canAct {
+			@loadMore(nextURL, 8)
+		} else {
+			@loadMore(nextURL, 7)
+		}
+	}
 }

@@ -230,9 +230,13 @@ denied-action audit log, and per-IP rate limiting.
    deposit + an `approval_request`; the **Approvals** screen lets a *different* admin
    Approve (posts) or Reject (cancels). `approve_request` enforces approver ≠ maker
    (`approved_by` recorded); nav shows a pending-count badge. Reverse still ⬜.
-6. 🟡 **Fuzzy search** ✅ (users/accounts/transfers via pg_trgm). **Transfers** screen
-   now lists the full transfer **history** (newest first, status pills, pending rows
-   actionable) — not just the pending queue. Statement drill-down + auto-refresh ⬜.
+6. 🟡 **Fuzzy search** ✅ (users/accounts/transfers via pg_trgm). **Transfers** = full
+   history (status pills, pending rows actionable). ✅ **Drill-down**: account →
+   **Statement** (ledger w/ running balance, in main panel) and **Transfer detail**
+   (rail: both legs, hold, idempotency key, reverses link, admin **Reverse**). ✅
+   **Pagination**: "Load more" with a **composite (timestamp, id) keyset cursor**
+   (Transfers, Audit, Statement) — correct even when many rows share a timestamp.
+   Auto-refresh ⬜.
 
 > The Post/Cancel actions are ready; the main *producer* of pending transfers is
 > the maker-checker flow (step 5) — above-threshold money moves will call
