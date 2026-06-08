@@ -160,6 +160,9 @@ provided for the common "settle immediately" case. Details in
 | Know the tables, columns, constraints, indexes, ERD | [`02-data-model.md`](02-data-model.md) |
 | Understand the transfer state machine, the DB functions, idempotency, triggers | [`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) |
 | Build or critique the operator console | [`04-admin-ui.md`](04-admin-ui.md) |
+| Deploy (Helm, Gateway, migrations, maintenance) | [`05-deployment.md`](05-deployment.md) |
+| Add the customer-facing surface (deferred plan) | [`06-customer-app-plan.md`](06-customer-app-plan.md) |
+| Harden client auth: refresh tokens + MFA (deferred plan) | [`07-auth-refresh-mfa.md`](07-auth-refresh-mfa.md) |
 
 ---
 

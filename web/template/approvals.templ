@@ -13,7 +13,7 @@ templ ApprovalsPanel(canApprove bool) {
 			<h1>Approvals</h1>
 			<span class="muted small">Four-eyes: a different admin must approve high-value credits.</span>
 		</div>
-		<div id="approvals-results" hx-get="/console/approvals/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+		<div id="approvals-results" hx-get="/console/approvals/results" hx-trigger="load, bank0:refresh from:body, every 15s" hx-swap="innerHTML" hx-disinherit="*"></div>
 	</div>
 }
 
@@ -29,7 +29,8 @@ templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash s
 				<tr>
 					<th>Requested</th>
 					<th>Maker</th>
-					<th>To account</th>
+					<th>From</th>
+					<th>To</th>
 					<th class="num">Amount</th>
 					if canApprove {
 						<th>Decision</th>
@@ -41,12 +42,13 @@ templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash s
 					<tr>
 						<td class="muted">{ a.CreatedAt.Format("2006-01-02 15:04") }</td>
 						<td>{ a.Maker }</td>
+						<td class="mono">{ a.DebitIban }</td>
 						<td class="mono">{ a.CreditIban }</td>
 						<td class="num"><strong>{ money.FormatMinor(a.AmountMinor) }</strong></td>
 						if canApprove {
 							<td class="actions">
-								<button class="btn ok" hx-post={ "/console/approvals/" + a.ID.String() + "/approve" } hx-target="#approvals-results" hx-disabled-elt="this" hx-confirm="Approve and post this credit? (You must not be the maker.)">Approve</button>
-								<button class="btn danger" hx-post={ "/console/approvals/" + a.ID.String() + "/reject" } hx-target="#approvals-results" hx-disabled-elt="this" hx-confirm="Reject this credit and release the hold?">Reject</button>
+								<button class="btn ok" hx-post={ "/console/approvals/" + a.ID.String() + "/approve" } hx-target="#approvals-results" hx-disabled-elt="this" hx-confirm="Approve and POST this money movement? You must not be the maker.">Approve</button>
+								<button class="btn danger" hx-post={ "/console/approvals/" + a.ID.String() + "/reject" } hx-target="#approvals-results" hx-disabled-elt="this" hx-confirm="Reject this request and release the hold?">Reject</button>
 							</td>
 						}
 					</tr>
