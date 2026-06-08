@@ -16,8 +16,9 @@ templ TransfersPanel() {
 	</div>
 }
 
-// TransferTable: full table (first page / search / after an action).
-templ TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, flash string) {
+// TransferTable: full table + pager. Returned for first page, search, an action,
+// or a Prev/Next step — always swapped into #transfers-results (innerHTML).
+templ TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, prevURL string, nextURL string, flash string) {
 	if flash != "" {
 		<div class="flash">{ flash }</div>
 	}
@@ -37,14 +38,15 @@ templ TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string,
 			</tr>
 		</thead>
 		<tbody>
-			@TransferItems(rows, canAct, nextURL)
+			@TransferItems(rows, canAct)
 		</tbody>
 	</table>
+	@pager(prevURL, nextURL, "transfers-results")
 }
 
-// TransferItems: rows (+ a loadMore sentinel). Returned alone on "Load more".
-templ TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) {
-	if len(rows) == 0 && nextURL == "" {
+// TransferItems: just the table rows for the current page.
+templ TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) {
+	if len(rows) == 0 {
 		<tr><td colspan="8" class="muted">No transfers.</td></tr>
 	}
 	for _, t := range rows {
@@ -65,12 +67,5 @@ templ TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string)
 				</td>
 			}
 		</tr>
-	}
-	if nextURL != "" {
-		if canAct {
-			@loadMore(nextURL, 8)
-		} else {
-			@loadMore(nextURL, 7)
-		}
 	}
 }

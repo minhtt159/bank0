@@ -81,20 +81,21 @@ func TestSearchQAndHasCursor(t *testing.T) {
 	if searchQ(r3) != nil {
 		t.Error("absent q should be nil")
 	}
-	if hasCursor(httptest.NewRequest("GET", "/x", nil)) {
-		t.Error("no cursor -> false")
+	if isPagerNav(httptest.NewRequest("GET", "/x", nil)) {
+		t.Error("no nav -> false")
 	}
-	if !hasCursor(httptest.NewRequest("GET", "/x?cursor=2020-01-01T00:00:00Z", nil)) {
-		t.Error("cursor present -> true")
+	if !isPagerNav(httptest.NewRequest("GET", "/x?nav=1", nil)) {
+		t.Error("nav present -> true")
 	}
 }
 
-// The keyset cursor must survive a nextPageURL -> pageCursor round-trip, incl. q.
+// The keyset cursor must survive a buildPageURL -> pageCursor round-trip, incl. q.
 func TestCursorRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 6, 8, 22, 13, 13, 355706000, time.UTC)
 	id := uuid.New()
 	q := "Bulk"
-	u := nextPageURL("/console/transfers/results", ts, id, &q)
+	cursor := ts.Format(time.RFC3339Nano) + "|" + id.String()
+	u := buildPageURL("/console/transfers/results", cursor, nil, &q)
 
 	req := httptest.NewRequest("GET", u, nil)
 	gotTS, gotID := pageCursor(req)
@@ -111,6 +112,36 @@ func TestCursorRoundTrip(t *testing.T) {
 	// First page: no cursor params -> both nil.
 	if ts2, id2 := pageCursor(httptest.NewRequest("GET", "/x", nil)); ts2 != nil || id2 != nil {
 		t.Error("absent cursor should yield (nil,nil)")
+	}
+}
+
+// Prev should pop the history stack and Next should push the current cursor,
+// so a Next then Prev round-trips back to the page we started on.
+func TestPagerPrevNext(t *testing.T) {
+	ts := time.Date(2026, 6, 8, 22, 13, 13, 0, time.UTC)
+	id := uuid.New()
+
+	// First page: a Next link exists, no Prev.
+	prev, next := pagerLinks(httptest.NewRequest("GET", "/console/audit/results", nil),
+		"/console/audit/results", nil, ts, id, true)
+	if prev != "" {
+		t.Errorf("first page should have no prev, got %q", prev)
+	}
+	if next == "" {
+		t.Fatal("first page should have a next link")
+	}
+
+	// Follow Next -> second page. It must offer a Prev back to page one.
+	req2 := httptest.NewRequest("GET", next, nil)
+	prev2, _ := pagerLinks(req2, "/console/audit/results", nil, ts, id, false)
+	if prev2 == "" {
+		t.Fatal("second page should have a prev link")
+	}
+
+	// Following Prev lands on a request with no cursor (the first page).
+	req1 := httptest.NewRequest("GET", prev2, nil)
+	if c, _ := pageCursor(req1); c != nil {
+		t.Error("prev from page two should return to the cursorless first page")
 	}
 }
 

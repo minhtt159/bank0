@@ -100,10 +100,17 @@ const styleTag = `<style>
   .btn.danger:hover { background:rgba(229,72,77,.15); }
   .flash { background:rgba(59,130,246,.15); border:1px solid var(--accent); color:#9ec5ff; padding:.5rem .8rem; border-radius:8px; margin-bottom:.8rem; }
   /* app layout (docs/04 §3 IA) */
-  /* proportional 3-column layout (~14% / 57% / 29%); minmax(0,..) keeps wide
-     content from forcing the grid past the viewport. */
-  .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,4fr) minmax(0,2fr); min-height:calc(100vh - 49px); }
-  @media (max-width:900px) { .layout { grid-template-columns:minmax(0,1fr) minmax(0,3fr) minmax(0,3fr); } }
+  /* The right rail is collapsible. By default it is hidden and the main panel
+     takes the full width (so wide tables aren't clipped); it opens only when a
+     row/detail is loaded into it, and closes via its × button. minmax(0,..)
+     keeps wide content from forcing the grid past the viewport. */
+  .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,6fr) 0; min-height:calc(100vh - 49px); }
+  .layout.rail-open { grid-template-columns:minmax(0,1fr) minmax(0,4fr) minmax(0,2fr); }
+  .layout:not(.rail-open) .rail-wrap { display:none; }
+  @media (max-width:900px) {
+    .layout { grid-template-columns:minmax(0,1fr) minmax(0,5fr) 0; }
+    .layout.rail-open { grid-template-columns:minmax(0,1fr) minmax(0,3fr) minmax(0,3fr); }
+  }
   .leftnav { border-right:1px solid var(--line); padding:.8rem .5rem; display:flex; flex-direction:column; gap:.15rem; background:var(--panel); min-width:0; }
   .navitem { padding:.5rem .7rem; border-radius:8px; color:var(--ink); cursor:pointer; text-decoration:none; font-size:.9rem; }
   .navitem:hover { background:rgba(59,130,246,.12); }
@@ -111,7 +118,11 @@ const styleTag = `<style>
   .badge-count { background:var(--bad); color:#fff; border-radius:999px; padding:0 .4rem; font-size:.72rem; margin-left:.35rem; }
   .navitem.disabled:hover { background:none; }
   #main-panel { padding:1.2rem 1.4rem; overflow:auto; min-width:0; }
-  #rail { border-left:1px solid var(--line); padding:1rem 1.1rem; background:#141b27; overflow:auto; min-width:0; overflow-wrap:anywhere; }
+  .rail-wrap { border-left:1px solid var(--line); background:#141b27; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+  .rail-bar { display:flex; justify-content:flex-end; padding:.4rem .5rem 0; }
+  .rail-close { background:none; border:none; color:var(--muted); font-size:1.4rem; line-height:1; cursor:pointer; padding:0 .4rem; border-radius:6px; }
+  .rail-close:hover { color:var(--ink); background:rgba(255,255,255,.07); }
+  #rail { padding:.2rem 1.1rem 1rem; overflow:auto; min-width:0; overflow-wrap:anywhere; }
   .rail-empty { margin-top:2rem; text-align:center; }
   .panel { min-width:0; }
   .panel-head { display:flex; align-items:center; gap:.8rem; margin-bottom:1rem; }
@@ -125,8 +136,9 @@ const styleTag = `<style>
   .link.sm { margin-left:auto; font-size:.8rem; }
   .kv { display:flex; gap:.8rem; padding:.3rem 0; border-bottom:1px solid var(--line); font-size:.88rem; }
   .kv > span:first-child { color:var(--muted); min-width:96px; }
-  .loadmore-row td { text-align:center; padding:.6rem; }
-  .btn.loadmore { width:100%; max-width:240px; }
+  .pager { display:flex; align-items:center; gap:.6rem; padding:.7rem .2rem; }
+  .pager .btn { min-width:84px; text-align:center; }
+  .pager .btn:disabled { opacity:.4; cursor:default; }
   /* transfer-status pills */
   .pill.posted { color:#3ddc84; border-color:var(--ok); }
   .pill.pending { color:#ffd479; border-color:#ffd479; }
@@ -169,16 +181,22 @@ const styleTag = `<style>
   button.htmx-request, .btn.htmx-request, .primary.htmx-request { opacity:.55; }
 </style>`
 
-// consoleScript adds two small client touches: active left-nav highlighting and a
+// consoleScript adds a few small client touches: active left-nav highlighting, a
 // top progress bar during HTMX requests (skipping the 15s auto-refresh polls so it
-// doesn't flicker). Rendered once in the Shell via templ.Raw.
+// doesn't flicker), and the collapsible right-rail behaviour (opens when content
+// is swapped into #rail, closes via its × button). Rendered once via templ.Raw.
 const consoleScript = `<script>
 (function () {
+  window.openRail = function () { var l = document.getElementById('layout'); if (l) l.classList.add('rail-open'); };
+  window.closeRail = function () { var l = document.getElementById('layout'); if (l) l.classList.remove('rail-open'); };
   document.addEventListener('click', function (e) {
     var item = e.target.closest('.leftnav .navitem');
     if (!item) return;
     document.querySelectorAll('.leftnav .navitem').forEach(function (n) { n.classList.remove('active'); });
     item.classList.add('active');
+  });
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (e.detail && e.detail.target && e.detail.target.id === 'rail') window.openRail();
   });
   if (window.htmx) {
     var bar = function () { return document.getElementById('progress'); };
