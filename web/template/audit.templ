@@ -14,19 +14,20 @@ templ AuditPanel() {
 	</div>
 }
 
-templ AuditRows(rows []sqlc.ListAuditLogRow, nextURL string) {
+templ AuditRows(rows []sqlc.ListAuditLogRow, prevURL string, nextURL string) {
 	<table>
 		<thead>
 			<tr><th>When</th><th>Operator</th><th>Action</th><th>Target</th><th>Detail</th></tr>
 		</thead>
 		<tbody>
-			@AuditItems(rows, nextURL)
+			@AuditItems(rows)
 		</tbody>
 	</table>
+	@pager(prevURL, nextURL, "audit-results")
 }
 
-templ AuditItems(rows []sqlc.ListAuditLogRow, nextURL string) {
-	if len(rows) == 0 && nextURL == "" {
+templ AuditItems(rows []sqlc.ListAuditLogRow) {
+	if len(rows) == 0 {
 		<tr><td colspan="5" class="muted">No audit entries.</td></tr>
 	}
 	for _, a := range rows {
@@ -37,8 +38,5 @@ templ AuditItems(rows []sqlc.ListAuditLogRow, nextURL string) {
 			<td class="muted mono">{ shortID(a.TargetID) }</td>
 			<td class="muted mono">{ string(a.Detail) }</td>
 		</tr>
-	}
-	if nextURL != "" {
-		@loadMore(nextURL, 5)
 	}
 }
