@@ -64,6 +64,23 @@ func (s *Server) GetUser(w http.ResponseWriter, r *http.Request, id openapi_type
 	writeJSON(w, http.StatusOK, u)
 }
 
+// GetMe implements genclient.ServerInterface: the caller's own profile, resolved
+// from the JWT subject. Client surface only (always behind requireJWT); the
+// GetUserByID projection excludes the password hash.
+func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
+	if err != nil {
+		mapDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
 type loginReq struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
