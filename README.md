@@ -24,6 +24,8 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/04-admin-ui.md`](docs/04-admin-ui.md) | Operator console UX, roles, dashboards, maker-checker |
 | [`docs/05-deployment.md`](docs/05-deployment.md) | Modes, two domains, Helm, Gateway API/Envoy, HA, migrations, OpenAPI contract |
 | [`docs/06-customer-app-plan.md`](docs/06-customer-app-plan.md) | Deferred plan for the customer-facing surface (auth, IDOR fix, roadmap) |
+| [`docs/07-auth-refresh-mfa.md`](docs/07-auth-refresh-mfa.md) | Client auth hardening plan: refresh-token rotation, TOTP MFA, step-up |
+| [`docs/08-customer-web-app.md`](docs/08-customer-web-app.md) | Customer web app build plan (SPA/PWA + JWT, Cloudflare Worker, beneficiaries) |
 
 ## Tech stack (carried from tf-backend, refined)
 
