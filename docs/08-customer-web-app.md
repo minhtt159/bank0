@@ -302,14 +302,16 @@ user re-logs in. Good enough to ship; UX is "logged out after ~1h".
    end-to-end on Postgres: `GetMe` scoping + no password-hash leak; beneficiary
    add/list/delete, self-add & duplicate rejection, cross-user 404, masked owner name,
    and a transfer to a saved payee. Migration up/down/up clean.
-2. ⬜ **Worker scaffold**: static assets + `/api/*` proxy, `wrangler.toml`, SPA fallback,
-   security headers.
-3. ⬜ **SPA core**: Vite+Preact, api client (Bearer + Idempotency-Key + error map), auth store,
-   login, accounts home (Flow 1/3).
-4. ⬜ **Account detail + statement** (cursor infinite-scroll) + **profile** (Flows 2).
-5. ⬜ **Transfer card**: fuzzy source/dest, add-payee (resolve→save), confirm, submit, receipt
-   (Flows 4/5/6).
-6. ⬜ **PWA polish**: manifest, install, offline shell, icons, pull-to-refresh.
+2. ✅ **Worker scaffold** (`worker/`): static assets + `/api/*` proxy, `wrangler.toml`, SPA
+   fallback, security headers. `wrangler deploy --dry-run` clean.
+3. ✅ **SPA core** (`web/app/`): Vite+Preact+TS, api client (Bearer + Idempotency-Key + error
+   map), signals auth store, login, accounts home (Flows 1/3).
+4. ✅ **Account detail + statement** (cursor "load more") + **profile** via `GET /me` (Flow 2).
+5. ✅ **Transfer card**: fuzzy source/dest, add-payee (resolve→save), confirm, idempotent
+   submit, receipt (Flows 4/5/6).
+6. ✅ **PWA**: manifest + icon, autoUpdate service worker that precaches the shell and treats
+   `/api/*` as network-only. *Remaining polish:* install prompt, pull-to-refresh.
+   Production build is ~14.5 KB gzipped JS.
 7. ⬜ **Auth hardening hookup** (refresh/MFA via Worker BFF) — consumes [`07`](07-auth-refresh-mfa.md).
 8. ⬜ **SSO/OIDC** via Worker (PKCE) + RS256/JWKS on the API.
 

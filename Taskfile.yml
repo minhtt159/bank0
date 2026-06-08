@@ -75,6 +75,28 @@ tasks:
     cmds:
       - npx --yes @stoplight/spectral-cli lint api/openapi.yaml
 
+  webapp:dev:
+    desc: Run the customer web app (Vite) — proxies /api to VITE_API_PROXY (default :8090)
+    dir: web/app
+    cmds:
+      - npm install
+      - npm run dev
+
+  webapp:build:
+    desc: Build the customer SPA to web/app/dist (typecheck + Vite + PWA)
+    dir: web/app
+    cmds:
+      - npm install
+      - npm run build
+
+  webapp:deploy:
+    desc: Build the SPA then deploy the Cloudflare Worker (needs CF auth)
+    deps: [webapp:build]
+    dir: worker
+    cmds:
+      - npm install
+      - npm run deploy
+
   build:
     desc: Generate then build the binary
     deps: [generate]
