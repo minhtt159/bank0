@@ -7,3 +7,9 @@ coverage.out
 coverage.txt
 .venv/
 __pycache__
+
+# web app / worker (node)
+node_modules/
+web/app/dist/
+worker/dist/
+.wrangler/
