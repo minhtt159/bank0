@@ -30,7 +30,7 @@ jobs:
       TEST_DATABASE_DSN: postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v5
         with:
