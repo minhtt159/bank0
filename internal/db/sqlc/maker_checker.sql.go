@@ -161,3 +161,31 @@ func (q *Queries) RequestDeposit(ctx context.Context, arg RequestDepositParams) 
 	err := row.Scan(&transfer_id)
 	return transfer_id, err
 }
+
+const requestWithdrawal = `-- name: RequestWithdrawal :one
+SELECT request_withdrawal(
+    $1::text,
+    $2::uuid,
+    $3::bigint,
+    $4::text
+) AS transfer_id
+`
+
+type RequestWithdrawalParams struct {
+	IdempotencyKey string    `json:"idempotency_key"`
+	AccountID      uuid.UUID `json:"account_id"`
+	AmountMinor    int64     `json:"amount_minor"`
+	Description    string    `json:"description"`
+}
+
+func (q *Queries) RequestWithdrawal(ctx context.Context, arg RequestWithdrawalParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, requestWithdrawal,
+		arg.IdempotencyKey,
+		arg.AccountID,
+		arg.AmountMinor,
+		arg.Description,
+	)
+	var transfer_id uuid.UUID
+	err := row.Scan(&transfer_id)
+	return transfer_id, err
+}

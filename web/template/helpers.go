@@ -162,4 +162,32 @@ const styleTag = `<style>
   .acct-controls { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
   .acct-controls .inline { margin-bottom:0; }
   .newacct summary { cursor:pointer; color:var(--accent); font-size:.85rem; margin-top:.4rem; }
+  /* active nav + loading feedback */
+  .navitem.active { background:rgba(59,130,246,.18); box-shadow:inset 3px 0 0 var(--accent); color:#fff; }
+  #progress { position:fixed; top:0; left:0; height:2px; width:100%; transform:scaleX(0); transform-origin:left; background:var(--accent); opacity:0; z-index:50; transition:transform .2s ease, opacity .2s ease; }
+  #progress.on { opacity:1; transform:scaleX(0.85); transition:transform 8s cubic-bezier(.1,.7,.1,1), opacity .1s; }
+  button.htmx-request, .btn.htmx-request, .primary.htmx-request { opacity:.55; }
 </style>`
+
+// consoleScript adds two small client touches: active left-nav highlighting and a
+// top progress bar during HTMX requests (skipping the 15s auto-refresh polls so it
+// doesn't flicker). Rendered once in the Shell via templ.Raw.
+const consoleScript = `<script>
+(function () {
+  document.addEventListener('click', function (e) {
+    var item = e.target.closest('.leftnav .navitem');
+    if (!item) return;
+    document.querySelectorAll('.leftnav .navitem').forEach(function (n) { n.classList.remove('active'); });
+    item.classList.add('active');
+  });
+  if (window.htmx) {
+    var bar = function () { return document.getElementById('progress'); };
+    htmx.on('htmx:beforeRequest', function (evt) {
+      var trg = evt.detail && evt.detail.elt && evt.detail.elt.getAttribute('hx-trigger');
+      if (trg && trg.indexOf('every') !== -1) return; // skip auto-refresh polling
+      bar().classList.add('on');
+    });
+    htmx.on('htmx:afterRequest', function () { bar().classList.remove('on'); });
+  }
+})();
+</script>`

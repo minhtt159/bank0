@@ -9,7 +9,7 @@ import (
 // DashboardCards is the main-panel fragment (loaded via hx-get). It refreshes
 // itself when a bank0:refresh event fires on the body (after any mutation).
 templ DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, version string) {
-	<div id="dashboard" hx-get="/console/dashboard" hx-trigger="bank0:refresh from:body" hx-swap="outerHTML" hx-disinherit="*">
+	<div id="dashboard" hx-get="/console/dashboard" hx-trigger="bank0:refresh from:body, every 15s" hx-swap="outerHTML" hx-disinherit="*">
 		<div class="panel-head">
 			<h1>Dashboard</h1>
 			<span class="muted">v{ version }</span>
