@@ -39,7 +39,8 @@ ownership-enforcement layer, and a UI on top of this API.
 2. **Real customer authentication — ✅ basic (JWT access token).** `POST /auth/login`
    issues an HS256 JWT (`sub`, `role`, `username`, `iss=bank0`, `aud=bank0-client`,
    `exp`); `requireJWT` validates it on every client route. *Still to add:* refresh
-   tokens + rotation, MFA/WebAuthn, and step-up for large transfers.
+   tokens + rotation, MFA/WebAuthn, and step-up for large transfers — **designed in
+   [`07-auth-refresh-mfa.md`](07-auth-refresh-mfa.md)**.
 3. **Authorization model.** Customers are `role=customer`; admin ops live only on
    the `portal` surface (cookie session), and the client JWT carries `aud=bank0-client`
    so it can't be replayed against a (future) admin JWT audience. Role is in the
@@ -122,7 +123,8 @@ supports adding a third surface.
 1. ✅ **Gap #1 (ownership scoping)** closed on the client API.
 2. ✅ **JWT validation middleware** (`aud=bank0-client`) + login issues access token.
    *Remaining:* refresh tokens + rotation, MFA, step-up; optionally move to a managed
-   OIDC IdP and asymmetric (RS256/JWKS) keys.
+   OIDC IdP and asymmetric (RS256/JWKS) keys — **planned in
+   [`07-auth-refresh-mfa.md`](07-auth-refresh-mfa.md)**.
 3. ⬜ Customer BFF + PWA: login (MFA), accounts, statement, make a transfer.
 4. ⬜ Self-service profile + session management.
 5. ⬜ Onboarding/KYC flow with operator approval in the console.
