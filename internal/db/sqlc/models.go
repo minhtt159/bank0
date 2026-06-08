@@ -429,6 +429,16 @@ type AdminAction struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
+type Beneficiary struct {
+	ID              uuid.UUID `json:"id"`
+	OwnerUserID     uuid.UUID `json:"owner_user_id"`
+	Label           string    `json:"label"`
+	CreditAccountID uuid.UUID `json:"credit_account_id"`
+	Iban            string    `json:"iban"`
+	OwnerNameMasked string    `json:"owner_name_masked"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 type EnrichedLedger struct {
 	ID                     uuid.UUID      `json:"id"`
 	TransferID             uuid.UUID      `json:"transfer_id"`

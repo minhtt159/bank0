@@ -92,7 +92,7 @@ query/body params without colliding with the admin package.
 
 **(b) Saved beneficiaries** (Flow 5) — new feature, DB-first per [`01`](01-overview.md) §2
 
-- **Migration** `00018_beneficiaries.sql`:
+- **Migration** `00016_beneficiaries.sql`:
   ```sql
   CREATE TABLE beneficiaries (
       id                 UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -296,8 +296,12 @@ user re-logs in. Good enough to ship; UX is "logged out after ~1h".
 
 ## 11. Phased roadmap
 
-1. ⬜ **Backend: `GET /me`** + `00018_beneficiaries.sql` (table, DB fns, sqlc, spec, codegen,
-   handlers, ownership tests). Smallest unblock for Flows 2 & 5.
+1. ✅ **Backend: `GET /me`** + `00016_beneficiaries.sql` (table, DB fns, sqlc, spec, codegen,
+   handlers, ownership tests) — **done**. Confirmation-of-payee `resolve` is hand-written
+   pgx (`resolve_account_by_iban()` RETURNS TABLE, which sqlc can't expand). Verified
+   end-to-end on Postgres: `GetMe` scoping + no password-hash leak; beneficiary
+   add/list/delete, self-add & duplicate rejection, cross-user 404, masked owner name,
+   and a transfer to a saved payee. Migration up/down/up clean.
 2. ⬜ **Worker scaffold**: static assets + `/api/*` proxy, `wrangler.toml`, SPA fallback,
    security headers.
 3. ⬜ **SPA core**: Vite+Preact, api client (Bearer + Idempotency-Key + error map), auth store,
