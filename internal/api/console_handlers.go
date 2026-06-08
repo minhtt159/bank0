@@ -392,6 +392,72 @@ func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
 	s.renderUserDetail(w, r, owner, "Credited "+money.FormatMinor(amount)+".")
 }
 
+func (s *Server) consoleWithdraw(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canActOnMoney)
+	if !ok {
+		return
+	}
+	acctID, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
+		return
+	}
+	owner, ok := s.accountOwnerOrFail(w, r, acctID)
+	if !ok {
+		return
+	}
+	_ = r.ParseForm()
+	amount, perr := money.ParseEuros(r.PostFormValue("amount"))
+	if perr != nil || amount <= 0 {
+		s.renderUserDetail(w, r, owner, "Enter a positive amount.")
+		return
+	}
+	key := strings.TrimSpace(r.PostFormValue("idempotency_key"))
+	if key == "" {
+		key = uuid.NewString()
+	}
+	ctx := r.Context()
+	// Maker-checker: above the threshold, the withdrawal is staged as PENDING
+	// (the hold reserves funds) and routed to Approvals for a second admin.
+	if amount > s.cfg.Admin.MakerCheckerThresholdMinor {
+		tid, err := s.pg.Queries.RequestWithdrawal(ctx, sqlc.RequestWithdrawalParams{
+			IdempotencyKey: key, AccountID: acctID, AmountMinor: amount,
+			Description: "Console withdrawal (awaiting approval)",
+		})
+		if err != nil {
+			s.renderUserDetail(w, r, owner, "Could not submit: "+dbErrorMessage(err))
+			return
+		}
+		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": "withdraw", "account_id": acctID.String()})
+		if _, err := s.pg.Queries.CreateApprovalRequest(ctx, sqlc.CreateApprovalRequestParams{
+			Maker: actor.UserID, TransferID: tid, Detail: detail,
+		}); err != nil {
+			s.renderUserDetail(w, r, owner, "Could not submit for approval: "+dbErrorMessage(err))
+			return
+		}
+		refresh(w)
+		s.audit(ctx, actor, "withdraw_requested", &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
+		s.renderUserDetail(w, r, owner, "Withdrawal of "+money.FormatMinor(amount)+" exceeds the "+
+			money.FormatMinor(s.cfg.Admin.MakerCheckerThresholdMinor)+" threshold — sent to Approvals for a second admin.")
+		return
+	}
+	tid, err := s.pg.Queries.Withdraw(ctx, sqlc.WithdrawParams{
+		IdempotencyKey: key,
+		AccountID:      acctID,
+		AmountMinor:    amount,
+		Description:    "Console withdrawal",
+	})
+	if err != nil {
+		s.renderUserDetail(w, r, owner, "Could not withdraw: "+dbErrorMessage(err))
+		return
+	}
+	refresh(w)
+	s.audit(ctx, actor, "withdraw", &acctID, map[string]any{
+		"amount_minor": amount, "transfer_id": tid.String(),
+	})
+	s.renderUserDetail(w, r, owner, "Withdrew "+money.FormatMinor(amount)+".")
+}
+
 func (s *Server) consoleAccountStatus(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.requireRole(w, r, canActOnMoney)
 	if !ok {

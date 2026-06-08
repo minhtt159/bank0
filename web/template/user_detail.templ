@@ -90,6 +90,11 @@ templ accountCard(a sqlc.ListAccountsByUserRow, canMoney bool) {
 					<input name="amount" type="number" step="0.01" min="0.01" placeholder="€ amount" required/>
 					<button class="btn ok" type="submit" hx-disabled-elt="this" hx-confirm="Credit this account (posts a ledger deposit from external_clearing)?">Add credit</button>
 				</form>
+				<form class="inline" hx-post={ "/console/accounts/" + a.ID.String() + "/withdraw" } hx-target="#rail">
+					<input type="hidden" name="idempotency_key" value={ newKey() }/>
+					<input name="amount" type="number" step="0.01" min="0.01" placeholder="€ amount" required/>
+					<button class="btn danger" type="submit" hx-disabled-elt="this" hx-confirm="Withdraw from this account (posts a ledger debit to external_clearing)?">Withdraw</button>
+				</form>
 				<div class="acct-controls">
 					if a.Status == "active" {
 						<button class="btn" hx-post={ "/console/accounts/" + a.ID.String() + "/status" } hx-vals='{"status":"frozen"}' hx-target="#rail" hx-confirm="Freeze this account?">Freeze</button>

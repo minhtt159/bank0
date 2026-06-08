@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"os"
 	"strings"
 	"testing"
@@ -247,4 +248,58 @@ func clientToken(t *testing.T, ts *httptest.Server, username, password string) s
 		t.Fatalf("no token in login response: %v", err)
 	}
 	return out.Token
+}
+
+// End-to-end maker-checker over the console: an above-threshold credit is staged,
+// the maker cannot approve their own request, a different admin approves, money posts.
+func TestHTTPMakerCheckerFlow(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, makerName := mkUser(t, pg, sqlc.UserRoleAdmin)
+	_, checkerName := mkUser(t, pg, sqlc.UserRoleAdmin)
+	custID, _ := mkUser(t, pg, sqlc.UserRoleCustomer)
+	acct := mkAcct(t, pg, custID, 0)
+
+	maker := login(t, ts, makerName, "pw")
+	checker := login(t, ts, checkerName, "pw")
+
+	// €15,000 > €10,000 threshold -> goes to Approvals, not posted.
+	resp, _ := maker.PostForm(ts.URL+"/console/accounts/"+acct.String()+"/credit",
+		url.Values{"amount": {"15000"}, "idempotency_key": {uuid.NewString()}})
+	if b := body(t, resp); !strings.Contains(b, "sent to Approvals") {
+		t.Fatalf("above-threshold credit should route to approvals; body=%.120s", b)
+	}
+	if bal, _ := acctBalance(t, pg, acct); bal != 0 {
+		t.Fatalf("must not post before approval; balance=%d", bal)
+	}
+
+	// find the pending approval's id from the queue
+	html := body(t, get(t, maker, ts.URL+"/console/approvals/results", nil))
+	m := regexp.MustCompile(`/console/approvals/([0-9a-f-]{36})/approve`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatalf("no pending approval found in queue")
+	}
+	reqID := m[1]
+
+	// maker approving own request -> refused
+	r1, _ := maker.PostForm(ts.URL+"/console/approvals/"+reqID+"/approve", url.Values{})
+	if b := body(t, r1); !strings.Contains(b, "cannot approve your own request") {
+		t.Errorf("self-approval should be refused; body=%.160s", b)
+	}
+	// a different admin approves -> posts
+	r2, _ := checker.PostForm(ts.URL+"/console/approvals/"+reqID+"/approve", url.Values{})
+	if b := body(t, r2); !strings.Contains(b, "Approved and posted") {
+		t.Errorf("checker approval should succeed; body=%.160s", b)
+	}
+	if bal, _ := acctBalance(t, pg, acct); bal != 1_500_000 {
+		t.Errorf("after approval balance = %d, want 1500000", bal)
+	}
+}
+
+func acctBalance(t *testing.T, pg *db.Postgres, acct uuid.UUID) (int64, int64) {
+	t.Helper()
+	a, err := pg.Queries.GetAccount(context.Background(), acct)
+	if err != nil {
+		t.Fatalf("get account: %v", err)
+	}
+	return a.BalanceMinor, a.AvailableMinor
 }
