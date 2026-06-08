@@ -36,7 +36,7 @@ func ApprovalsPanel(canApprove bool) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"panel\"><div class=\"panel-head\"><h1>Approvals</h1><span class=\"muted small\">Four-eyes: a different admin must approve high-value credits.</span></div><div id=\"approvals-results\" hx-get=\"/console/approvals/results\" hx-trigger=\"load, bank0:refresh from:body\" hx-swap=\"innerHTML\" hx-disinherit=\"*\"></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"panel\"><div class=\"panel-head\"><h1>Approvals</h1><span class=\"muted small\">Four-eyes: a different admin must approve high-value credits.</span></div><div id=\"approvals-results\" hx-get=\"/console/approvals/results\" hx-trigger=\"load, bank0:refresh from:body, every 15s\" hx-swap=\"innerHTML\" hx-disinherit=\"*\"></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -90,7 +90,7 @@ func ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash st
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<table><thead><tr><th>Requested</th><th>Maker</th><th>To account</th><th class=\"num\">Amount</th>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<table><thead><tr><th>Requested</th><th>Maker</th><th>From</th><th>To</th><th class=\"num\">Amount</th>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -112,7 +112,7 @@ func ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash st
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(a.CreatedAt.Format("2006-01-02 15:04"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 42, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 43, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -125,7 +125,7 @@ func ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash st
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(a.Maker)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 43, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 44, Col: 19}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -136,69 +136,82 @@ func ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash st
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var6 string
-				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(a.CreditIban)
+				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(a.DebitIban)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 44, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 45, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</td><td class=\"num\"><strong>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</td><td class=\"mono\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
-				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(money.FormatMinor(a.AmountMinor))
+				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(a.CreditIban)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 45, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 46, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</strong></td>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</td><td class=\"num\"><strong>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(money.FormatMinor(a.AmountMinor))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 47, Col: 64}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</strong></td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if canApprove {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<td class=\"actions\"><button class=\"btn ok\" hx-post=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var8 string
-					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/approvals/" + a.ID.String() + "/approve")
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 48, Col: 91}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Approve and post this credit? (You must not be the maker.)\">Approve</button> <button class=\"btn danger\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<td class=\"actions\"><button class=\"btn ok\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var9 string
-					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/approvals/" + a.ID.String() + "/reject")
+					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/approvals/" + a.ID.String() + "/approve")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 49, Col: 94}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 50, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Reject this credit and release the hold?\">Reject</button></td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Approve and POST this money movement? You must not be the maker.\">Approve</button> <button class=\"btn danger\" hx-post=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var10 string
+					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/approvals/" + a.ID.String() + "/reject")
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/approvals.templ`, Line: 51, Col: 94}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Reject this request and release the hold?\">Reject</button></td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</tbody></table>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</tbody></table>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -294,18 +294,23 @@ func TestPaginationKeysetCoversTies(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 1_000_000)
 
-	tag := "keyset-" + uniqHex(8) // unique marker so we only page our own rows
+	// High-entropy marker (no shared prefix) so we page only our own rows and
+	// remain robust to data left in the test DB by previous runs.
+	tag := "kt" + uniqHex(12)
 	const n = 25
+	created := make(map[uuid.UUID]bool, n)
 	tx, err := pg.Pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
-		if _, err := tx.Exec(ctx, `SELECT transfer($1,$2,$3,$4,$5,'transfer')`,
-			uuid.NewString(), a, b, int64(100), fmt.Sprintf("%s #%d", tag, i)); err != nil {
+		var id uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT transfer_id FROM transfer($1,$2,$3,$4,$5,'transfer')`,
+			uuid.NewString(), a, b, int64(100), fmt.Sprintf("%s #%d", tag, i)).Scan(&id); err != nil {
 			tx.Rollback(ctx)
 			t.Fatalf("seed transfer %d: %v", i, err)
 		}
+		created[id] = true
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -337,7 +342,55 @@ func TestPaginationKeysetCoversTies(t *testing.T) {
 			break
 		}
 	}
-	if len(seen) != n {
-		t.Fatalf("keyset pagination covered %d rows, want %d (timestamp ties were skipped)", len(seen), n)
+	// Every created row shares one requested_at; all must be reachable across
+	// pages. A timestamp-only cursor would skip the ties and miss some.
+	for id := range created {
+		if !seen[id] {
+			t.Fatalf("keyset pagination SKIPPED a tied row: %s", id)
+		}
 	}
+}
+
+func TestWithdrawAndMakerCheckerWithdrawal(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	acct := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, acct, 10_000)
+
+	// Small withdrawal auto-posts (money leaves to external_clearing).
+	if _, err := pg.Queries.Withdraw(ctx, sqlc.WithdrawParams{
+		IdempotencyKey: uuid.NewString(), AccountID: acct, AmountMinor: 3_000, Description: "wd",
+	}); err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+	if lb, _ := balance(t, pg, acct); lb != 7_000 {
+		t.Errorf("balance after withdraw = %d, want 7000", lb)
+	}
+	reconcileClean(t, pg)
+
+	// Large withdrawal staged PENDING: the hold reserves funds, ledger unchanged.
+	tid, err := pg.Queries.RequestWithdrawal(ctx, sqlc.RequestWithdrawalParams{
+		IdempotencyKey: uuid.NewString(), AccountID: acct, AmountMinor: 5_000, Description: "big wd",
+	})
+	if err != nil {
+		t.Fatalf("request_withdrawal: %v", err)
+	}
+	if led, avail := balance(t, pg, acct); led != 7_000 || avail != 2_000 {
+		t.Errorf("pending withdrawal: ledger=%d available=%d, want 7000/2000", led, avail)
+	}
+
+	// A different admin approves -> the withdrawal posts; balance drops.
+	maker := mkCustomer(t, pg)
+	checker := mkCustomer(t, pg)
+	var reqID uuid.UUID
+	if err := pg.Pool.QueryRow(ctx, `SELECT create_approval_request($1,$2,$3)`, maker, tid, []byte(`{}`)).Scan(&reqID); err != nil {
+		t.Fatalf("create_approval_request: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `SELECT approve_request($1,$2)`, reqID, checker); err != nil {
+		t.Fatalf("approve withdrawal: %v", err)
+	}
+	if lb, _ := balance(t, pg, acct); lb != 2_000 {
+		t.Errorf("balance after approved withdrawal = %d, want 2000", lb)
+	}
+	reconcileClean(t, pg)
 }

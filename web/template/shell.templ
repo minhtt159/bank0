@@ -14,6 +14,7 @@ templ Shell(username string, role string, pendingApprovals int) {
 			@templ.Raw(styleTag)
 		</head>
 		<body>
+			<div id="progress"></div>
 			<header class="topbar">
 				<strong>bank0</strong>
 				<span class="muted">operator console</span>
@@ -44,6 +45,7 @@ templ Shell(username string, role string, pendingApprovals int) {
 					<div class="rail-empty muted">Select a user or row to see details.</div>
 				</aside>
 			</div>
+			@templ.Raw(consoleScript)
 		</body>
 	</html>
 }

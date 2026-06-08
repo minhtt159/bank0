@@ -41,6 +41,7 @@ func (s *Server) registerConsole(r *mux.Router) {
 	// Account statement (drill-down, paginated) + money/admin actions
 	r.HandleFunc("/console/accounts/{id}/statement", s.consoleStatement).Methods(http.MethodGet)
 	r.HandleFunc("/console/accounts/{id}/credit", s.consoleCredit).Methods(http.MethodPost)
+	r.HandleFunc("/console/accounts/{id}/withdraw", s.consoleWithdraw).Methods(http.MethodPost)
 	r.HandleFunc("/console/accounts/{id}/status", s.consoleAccountStatus).Methods(http.MethodPost)
 	r.HandleFunc("/console/accounts/{id}/limit", s.consoleAccountLimit).Methods(http.MethodPost)
 	r.HandleFunc("/console/accounts/{id}/default", s.consoleAccountDefault).Methods(http.MethodPost)

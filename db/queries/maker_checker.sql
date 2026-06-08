@@ -39,3 +39,11 @@ JOIN accounts ca  ON ca.id = t.credit_account_id
 WHERE aa.action = 'approval_request' AND aa.approved_by IS NULL AND t.status = 'pending'
 ORDER BY aa.created_at DESC
 LIMIT sqlc.arg(page_limit)::int;
+
+-- name: RequestWithdrawal :one
+SELECT request_withdrawal(
+    sqlc.arg(idempotency_key)::text,
+    sqlc.arg(account_id)::uuid,
+    sqlc.arg(amount_minor)::bigint,
+    sqlc.arg(description)::text
+) AS transfer_id;

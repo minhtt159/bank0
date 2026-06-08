@@ -13,8 +13,10 @@
 > with `hx-confirm` + per-form idempotency key), **see/edit user details**, and
 > **see/edit accounts** (freeze/unfreeze, set default, set transfer limit) — all
 > role-gated (auditor read-only). Mutations fire `HX-Trigger: bank0:refresh` so the
-> main-panel lists self-refresh. Still to build: Withdraw, maker-checker Approvals
-> (§4.4), account statement drill-down, audit log, search, auto-refresh.
+> main-panel lists self-refresh. The console is now feature-complete: users,
+> accounts, credit/withdraw, maker-checker approvals, transfers + drill-down,
+> statement, audit, reconcile, search, pagination, auto-refresh. Out of scope:
+> client-facing app, JWT refresh/MFA (see 06).
 
 ---
 
@@ -222,8 +224,8 @@ denied-action audit log, and per-IP rate limiting.
    role-gated (operator/admin act; auditor read-only, 403 on direct POST).
 4. ✅ **IA shell (nav + main + rail) + Users/Accounts management**: create users,
    create accounts, add **credit** (deposit, confirm + idempotency key), edit user
-   details, edit accounts (freeze/unfreeze, set default, transfer limit). 🟡 Withdraw
-   not yet exposed.
+   details, edit accounts (freeze/unfreeze, set default, transfer limit). ✅ **Withdraw**
+   (debit → external_clearing) with the same maker-checker routing as credit.
 5. ✅ **Audit log** — every operator action written to `admin_actions` (actor +
    action + target + JSON detail), searchable screen, pairing with the ledger.
    ✅ **Maker-checker** — console credits **strictly above €10,000** become a PENDING
@@ -236,7 +238,8 @@ denied-action audit log, and per-IP rate limiting.
    (rail: both legs, hold, idempotency key, reverses link, admin **Reverse**). ✅
    **Pagination**: "Load more" with a **composite (timestamp, id) keyset cursor**
    (Transfers, Audit, Statement) — correct even when many rows share a timestamp.
-   Auto-refresh ⬜.
+   ✅ **Auto-refresh**: Dashboard + Approvals poll every 15s (`hx-trigger="every 15s"`);
+   the top progress bar skips those polls. Active left-nav highlight + loading states added.
 
 > The Post/Cancel actions are ready; the main *producer* of pending transfers is
 > the maker-checker flow (step 5) — above-threshold money moves will call

@@ -37,7 +37,7 @@ func DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.Reco
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"dashboard\" hx-get=\"/console/dashboard\" hx-trigger=\"bank0:refresh from:body\" hx-swap=\"outerHTML\" hx-disinherit=\"*\"><div class=\"panel-head\"><h1>Dashboard</h1><span class=\"muted\">v")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"dashboard\" hx-get=\"/console/dashboard\" hx-trigger=\"bank0:refresh from:body, every 15s\" hx-swap=\"outerHTML\" hx-disinherit=\"*\"><div class=\"panel-head\"><h1>Dashboard</h1><span class=\"muted\">v")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
