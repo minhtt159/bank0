@@ -51,8 +51,8 @@ func TransfersPanel() templ.Component {
 	})
 }
 
-// TransferTable: full table (first page / search / after an action).
-func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, flash string) templ.Component {
+// TransferTable: full table + pager (first page / search / action / Prev-Next).
+func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, prevURL string, nextURL string, flash string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -106,7 +106,7 @@ func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = TransferItems(rows, canAct, nextURL).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TransferItems(rows, canAct).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -114,12 +114,16 @@ func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = pager(prevURL, nextURL, "transfers-results").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		return nil
 	})
 }
 
-// TransferItems: rows (+ a loadMore sentinel). Returned alone on "Load more".
-func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) templ.Component {
+// TransferItems: just the table rows for the current page.
+func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -140,7 +144,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		if len(rows) == 0 && nextURL == "" {
+		if len(rows) == 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<tr><td colspan=\"8\" class=\"muted\">No transfers.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -322,19 +326,6 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
-			}
-		}
-		if nextURL != "" {
-			if canAct {
-				templ_7745c5c3_Err = loadMore(nextURL, 8).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = loadMore(nextURL, 7).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
 			}
 		}
 		return nil

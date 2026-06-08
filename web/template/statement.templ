@@ -7,7 +7,7 @@ import (
 
 // StatementView: an account's ledger (running balance), in the main panel. Rows
 // drill into the transfer detail (rail). Paginated by posted_at cursor.
-templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, nextURL string) {
+templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, prevURL string, nextURL string) {
 	<div class="panel">
 		<div class="panel-head">
 			<h1>Statement</h1>
@@ -19,26 +19,35 @@ templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, ne
 			<div class="card"><span>Available</span><strong>{ money.FormatMinor(acct.AvailableMinor) }</strong></div>
 			<div class="card"><span>Transfer limit</span><strong>{ money.FormatMinor(acct.TransferLimitMinor) }</strong></div>
 		</div>
-		<table>
-			<thead>
-				<tr>
-					<th>Posted</th>
-					<th>Counterparty</th>
-					<th>Kind</th>
-					<th class="num">Amount</th>
-					<th class="num">Balance</th>
-					<th>Description</th>
-				</tr>
-			</thead>
-			<tbody>
-				@StatementItems(rows, nextURL)
-			</tbody>
-		</table>
+		<div id="statement-results">
+			@StatementBody(rows, prevURL, nextURL)
+		</div>
 	</div>
 }
 
-templ StatementItems(rows []sqlc.AccountStatementRow, nextURL string) {
-	if len(rows) == 0 && nextURL == "" {
+// StatementBody: the paginated table + pager. Swapped into #statement-results on
+// a Prev/Next step.
+templ StatementBody(rows []sqlc.AccountStatementRow, prevURL string, nextURL string) {
+	<table>
+		<thead>
+			<tr>
+				<th>Posted</th>
+				<th>Counterparty</th>
+				<th>Kind</th>
+				<th class="num">Amount</th>
+				<th class="num">Balance</th>
+				<th>Description</th>
+			</tr>
+		</thead>
+		<tbody>
+			@StatementItems(rows)
+		</tbody>
+	</table>
+	@pager(prevURL, nextURL, "statement-results")
+}
+
+templ StatementItems(rows []sqlc.AccountStatementRow) {
+	if len(rows) == 0 {
 		<tr><td colspan="6" class="muted">No ledger entries.</td></tr>
 	}
 	for _, e := range rows {
@@ -50,8 +59,5 @@ templ StatementItems(rows []sqlc.AccountStatementRow, nextURL string) {
 			<td class="num">{ money.FormatMinor(e.BalanceAfter) }</td>
 			<td class="muted">{ e.Description }</td>
 		</tr>
-	}
-	if nextURL != "" {
-		@loadMore(nextURL, 6)
 	}
 }
