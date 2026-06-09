@@ -20,7 +20,7 @@ export function Login() {
     setErr("");
     try {
       const r = await api.login(username, password);
-      setAuth({ token: r.token, userId: r.user_id, expiresAt: r.expires_at });
+      setAuth({ token: r.token, userId: r.user_id, expiresAt: r.expires_at, refreshToken: r.refresh_token });
       route("/", true);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Sign in failed");

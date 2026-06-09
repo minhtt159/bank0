@@ -93,6 +93,9 @@ type LoginRequest struct {
 type LoginResponse struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 
+	// RefreshToken Opaque refresh token. POST to /auth/refresh to rotate it for a new pair.
+	RefreshToken *string `json:"refresh_token,omitempty"`
+
 	// Token JWT access token (HS256). Send as 'Authorization: Bearer <token>'.
 	Token     *string             `json:"token,omitempty"`
 	TokenType *string             `json:"token_type,omitempty"`
@@ -102,6 +105,11 @@ type LoginResponse struct {
 // ReasonRequest defines model for ReasonRequest.
 type ReasonRequest struct {
 	Reason *string `json:"reason,omitempty"`
+}
+
+// RefreshRequest defines model for RefreshRequest.
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 // ResolvedAccount defines model for ResolvedAccount.
@@ -190,6 +198,12 @@ type CreateTransferParams struct {
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// LogoutJSONRequestBody defines body for Logout for application/json ContentType.
+type LogoutJSONRequestBody = RefreshRequest
+
+// RefreshJSONRequestBody defines body for Refresh for application/json ContentType.
+type RefreshJSONRequestBody = RefreshRequest
+
 // AddBeneficiaryJSONRequestBody defines body for AddBeneficiary for application/json ContentType.
 type AddBeneficiaryJSONRequestBody = AddBeneficiaryRequest
 
@@ -210,6 +224,15 @@ type ServerInterface interface {
 	// Verify credentials (bcrypt). Establishes a session in the portal.
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
+	// Revoke the presented refresh token (single-session logout)
+	// (POST /auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request)
+	// Revoke all of the caller's refresh tokens (log out everywhere)
+	// (POST /auth/logout-all)
+	LogoutAll(w http.ResponseWriter, r *http.Request)
+	// Rotate a refresh token for a new access + refresh token pair
+	// (POST /auth/refresh)
+	Refresh(w http.ResponseWriter, r *http.Request)
 	// List the caller's saved beneficiaries (fuzzy search is client-side)
 	// (GET /beneficiaries)
 	ListBeneficiaries(w http.ResponseWriter, r *http.Request)
@@ -340,6 +363,48 @@ func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LogoutAll operation middleware
+func (siw *ServerInterfaceWrapper) LogoutAll(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LogoutAll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Refresh operation middleware
+func (siw *ServerInterfaceWrapper) Refresh(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Refresh(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -731,6 +796,12 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/accounts/{id}/ledger", wrapper.GetAccountLedger).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/auth/login", wrapper.Login).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/logout", wrapper.Logout).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/logout-all", wrapper.LogoutAll).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/refresh", wrapper.Refresh).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/beneficiaries", wrapper.ListBeneficiaries).Methods(http.MethodGet)
 

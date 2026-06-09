@@ -338,8 +338,13 @@ CI on postgres:18):
 
 ## 12. Phased roadmap
 
-1. ⬜ **Refresh tokens** — `00016`, `/auth/refresh` + `/auth/logout`, rotation + reuse
-   detection, shorten access TTL, console "Revoke sessions". *(Self-contained; ship first.)*
+1. ✅ **Refresh tokens** — `00017_refresh_tokens.sql`, `/auth/refresh` + `/auth/logout` +
+   `/auth/logout-all`, rotation with **reuse detection** (a replayed rotated token revokes the
+   whole family, via a separate committing statement since rotate's RAISE rolls back its own
+   work). Login now returns a refresh token; the web app refreshes transparently on 401
+   (single-flight, same Idempotency-Key on retry). Verified end-to-end on Postgres.
+   *Remaining:* shorten the access TTL once clients have adopted refresh, and add the console
+   "Revoke sessions" action (`revoke_user_refresh`).
 2. ⬜ **TOTP MFA** — `00017`, enroll/confirm/verify, recovery codes, throttle.
 3. ⬜ **Step-up** for money moves (`amr`/`auth_time` + `step_up_limit_minor`).
 4. ⬜ **WebAuthn** credential type (same tables) — passkeys.

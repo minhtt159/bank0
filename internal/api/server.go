@@ -27,15 +27,24 @@ type Server struct {
 	cfg       config.Config
 	log       *slog.Logger
 	pg        *db.Postgres
-	spec      []byte        // raw openapi.yaml, served at /openapi.yaml
-	jwtSecret []byte        // HS256 signing key for the client surface
-	jwtTTL    time.Duration // access-token lifetime
+	spec       []byte        // raw openapi.yaml, served at /openapi.yaml
+	jwtSecret  []byte        // HS256 signing key for the client surface
+	jwtTTL     time.Duration // access-token lifetime
+	refreshTTL time.Duration // refresh-token idle window (slid on rotate)
+	refreshAbs time.Duration // refresh-token absolute cap per family
 }
 
 func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
-	s := &Server{cfg: cfg, log: log, pg: pg, jwtTTL: cfg.Auth.JWTTTL}
+	s := &Server{cfg: cfg, log: log, pg: pg, jwtTTL: cfg.Auth.JWTTTL,
+		refreshTTL: cfg.Auth.RefreshTTL, refreshAbs: cfg.Auth.RefreshAbsoluteTTL}
 	if s.jwtTTL <= 0 {
 		s.jwtTTL = time.Hour
+	}
+	if s.refreshTTL <= 0 {
+		s.refreshTTL = 720 * time.Hour
+	}
+	if s.refreshAbs <= 0 {
+		s.refreshAbs = 2160 * time.Hour
 	}
 	if cfg.Auth.JWTSecret == "" {
 		log.Warn("auth.jwt_secret is empty — using an insecure dev secret; set APP_AUTH_JWT_SECRET in production")
@@ -78,9 +87,13 @@ func (s *Server) Router() http.Handler {
 		r.Handle("/transfers/pending", s.requireSession(http.HandlerFunc(s.listPendingJSON))).Methods(http.MethodGet)
 	}
 	if apiOn {
-		// Public: login issues the JWT. Everything else on the client surface
-		// requires a valid bearer token.
+		// Public: login issues the JWT + refresh token; refresh/logout take the
+		// refresh token itself (the access token may be expired). Registered on the
+		// parent ahead of the JWT-guarded subrouter so they aren't shadowed.
+		// (logout-all needs the subject, so it stays on the guarded subrouter.)
 		r.HandleFunc("/auth/login", s.Login).Methods(http.MethodPost)
+		r.HandleFunc("/auth/refresh", s.Refresh).Methods(http.MethodPost)
+		r.HandleFunc("/auth/logout", s.Logout).Methods(http.MethodPost)
 		cr := r.PathPrefix("/").Subrouter()
 		cr.Use(s.requireJWT)
 		genclient.HandlerFromMux(s, cr)
