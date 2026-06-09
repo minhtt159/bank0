@@ -342,10 +342,10 @@ CI on postgres:18):
    `/auth/logout-all`, rotation with **reuse detection** (a replayed rotated token revokes the
    whole family, via a separate committing statement since rotate's RAISE rolls back its own
    work). Login now returns a refresh token; the web app refreshes transparently on 401
-   (single-flight, same Idempotency-Key on retry). Verified end-to-end on Postgres.
-   *Remaining:* shorten the access TTL once clients have adopted refresh, and add the console
-   "Revoke sessions" action (`revoke_user_refresh`).
-2. ⬜ **TOTP MFA** — `00017`, enroll/confirm/verify, recovery codes, throttle.
+   (single-flight, same Idempotency-Key on retry). Access TTL shortened to 15m, and the
+   console user-detail screen has an admin-only **"Revoke app sessions"** action
+   (`revoke_user_refresh`). Verified end-to-end on PostgreSQL 18 (native `uuidv7()`).
+2. ⬜ **TOTP MFA** — `00018`, enroll/confirm/verify, recovery codes, throttle.
 3. ⬜ **Step-up** for money moves (`amr`/`auth_time` + `step_up_limit_minor`).
 4. ⬜ **WebAuthn** credential type (same tables) — passkeys.
 5. ⬜ **RS256/JWKS + managed OIDC** when the customer app/BFF lands (`06`).

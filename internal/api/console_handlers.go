@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -274,6 +275,28 @@ func (s *Server) consoleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	refresh(w)
 	s.audit(r.Context(), actor, "update_user", &id, map[string]any{"status": r.PostFormValue("status")})
 	s.renderUserDetail(w, r, id, "Details saved.")
+}
+
+// consoleRevokeSessions force-revokes every active refresh token for a user
+// (docs/07 "log out everywhere" / operator force-revoke). Admin only.
+func (s *Server) consoleRevokeSessions(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canManageUsers)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		return
+	}
+	n, err := s.pg.RevokeUserRefresh(r.Context(), id)
+	if err != nil {
+		s.renderUserDetail(w, r, id, "Could not revoke sessions: "+dbErrorMessage(err))
+		return
+	}
+	refresh(w)
+	s.audit(r.Context(), actor, "revoke_sessions", &id, map[string]any{"revoked": n})
+	s.renderUserDetail(w, r, id, fmt.Sprintf("Revoked %d active app session(s).", n))
 }
 
 // ---- accounts (rail actions; re-render the owner's detail) --------------

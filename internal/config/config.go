@@ -107,7 +107,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("admin.run_maintenance", true)
 
 	v.SetDefault("auth.jwt_secret", "")
-	v.SetDefault("auth.jwt_ttl", "1h")
+	v.SetDefault("auth.jwt_ttl", "15m") // short access token; clients rotate via /auth/refresh
 	v.SetDefault("auth.jwt_issuer", "bank0")
 	v.SetDefault("auth.jwt_audience", "bank0-client")
 	v.SetDefault("auth.refresh_ttl", "720h")          // 30d idle

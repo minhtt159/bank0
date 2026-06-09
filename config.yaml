@@ -35,7 +35,7 @@ auth:
   # sessions, not JWT. Set jwt_secret via APP_AUTH_JWT_SECRET in production and
   # share it across all api replicas (empty => insecure dev fallback + warning).
   jwt_secret: ""
-  jwt_ttl: 1h
+  jwt_ttl: 15m                  # short-lived access token; clients rotate via /auth/refresh
   jwt_issuer: bank0
   jwt_audience: bank0-client
   # Refresh tokens (docs/07): login issues an opaque refresh token; POST

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -120,5 +121,37 @@ func TestHTTPLogoutAndLogoutAll(t *testing.T) {
 	resp2, _ := http.Post(ts.URL+"/auth/logout-all", "application/json", nil)
 	if resp2.StatusCode != 401 {
 		t.Errorf("logout-all without token = %d, want 401", resp2.StatusCode)
+	}
+}
+
+// An admin operator force-revoking a customer's app sessions from the console
+// kills that customer's refresh token (docs/07 operator force-revoke).
+func TestHTTPConsoleRevokeSessions(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
+	custID, custName := mkUser(t, pg, sqlc.UserRoleCustomer)
+
+	lr := clientLogin(t, ts, custName, "pw")
+	if _, code := doRefresh(t, ts, lr.RefreshToken); code != 200 {
+		t.Fatalf("precondition refresh = %d, want 200", code)
+	}
+
+	// a non-admin (auditor) cannot revoke
+	_, audName := mkUser(t, pg, sqlc.UserRoleAuditor)
+	aud := login(t, ts, audName, "pw")
+	if r, _ := aud.PostForm(ts.URL+"/console/users/"+custID.String()+"/revoke-sessions", url.Values{}); r.StatusCode != 403 {
+		t.Errorf("auditor revoke = %d, want 403", r.StatusCode)
+	}
+
+	// admin revokes from the user-detail rail
+	admin := login(t, ts, adminName, "pw")
+	r, err := admin.PostForm(ts.URL+"/console/users/"+custID.String()+"/revoke-sessions", url.Values{})
+	if err != nil || r.StatusCode != 200 {
+		t.Fatalf("admin revoke err=%v status=%v, want 200", err, r.StatusCode)
+	}
+
+	// the customer's latest refresh token is now dead -> must re-login
+	if _, code := doRefresh(t, ts, lr.RefreshToken); code != 401 {
+		t.Errorf("refresh after console revoke = %d, want 401", code)
 	}
 }

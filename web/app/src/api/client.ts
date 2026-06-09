@@ -73,11 +73,12 @@ function tryRefresh(): Promise<boolean> {
 async function req<T>(method: string, path: string, opts: Opts = {}, retried = false): Promise<T> {
   const resp = await fetch(BASE + path, buildInit(method, opts));
 
-  if (resp.status === 401) {
-    // Try a one-shot transparent refresh, except for the auth endpoints
-    // themselves (a 401 there is terminal).
-    if (!retried && !path.startsWith("/auth/") && refreshToken.value) {
-      if (await tryRefresh()) return req<T>(method, path, opts, true);
+  // A 401 on a protected route means the access token died: try a one-shot
+  // transparent refresh, else sign out. Auth endpoints (login/refresh) fall
+  // through so their real error ("invalid username or password") is surfaced.
+  if (resp.status === 401 && !path.startsWith("/auth/")) {
+    if (!retried && refreshToken.value && (await tryRefresh())) {
+      return req<T>(method, path, opts, true);
     }
     logout();
     throw new ApiError(401, "unauthorized", "Your session expired — please sign in again.");
