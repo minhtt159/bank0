@@ -54,6 +54,24 @@ func (p *Postgres) RequestTransfer(
 	return r, err
 }
 
+// ResolvedAccount mirrors resolve_account_by_iban()'s RETURNS TABLE. Used by the
+// customer app's confirmation-of-payee: a masked owner name, never the balance.
+type ResolvedAccount struct {
+	AccountID       uuid.UUID `json:"account_id"`
+	Iban            string    `json:"iban"`
+	OwnerNameMasked string    `json:"owner_name_masked"`
+}
+
+// ResolveAccountByIban looks up an active customer account by IBAN. The function
+// RAISEs (mapped to 404) when no active account matches, so a not-found surfaces
+// as a PgError rather than ErrNoRows.
+func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string) (ResolvedAccount, error) {
+	const q = `SELECT account_id, iban, owner_name_masked FROM resolve_account_by_iban($1::varchar)`
+	var a ResolvedAccount
+	err := p.Pool.QueryRow(ctx, q, iban).Scan(&a.AccountID, &a.Iban, &a.OwnerNameMasked)
+	return a, err
+}
+
 // maintenanceLockKey is the advisory-lock key guarding periodic maintenance so
 // that with many replicas only one actually runs the sweep per tick.
 const maintenanceLockKey int64 = 912000001
@@ -81,6 +99,10 @@ func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessio
 		return 0, 0, 0, false, err
 	}
 	if err = tx.QueryRow(ctx, "SELECT cleanup_sessions()").Scan(&sessions); err != nil {
+		return 0, 0, 0, false, err
+	}
+	var refreshCleaned int32
+	if err = tx.QueryRow(ctx, "SELECT cleanup_refresh_tokens()").Scan(&refreshCleaned); err != nil {
 		return 0, 0, 0, false, err
 	}
 	if err = tx.Commit(ctx); err != nil {

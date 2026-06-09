@@ -54,6 +54,121 @@ paths:
               schema: { $ref: "#/components/schemas/LoginResponse" }
         "401": { $ref: "#/components/responses/Error" }
 
+  /auth/refresh:
+    post:
+      operationId: refresh
+      tags: [client]
+      summary: Rotate a refresh token for a new access + refresh token pair
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200":
+          description: rotated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [client]
+      summary: Revoke the presented refresh token (single-session logout)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "204": { description: logged out }
+
+  /auth/logout-all:
+    post:
+      operationId: logoutAll
+      tags: [client]
+      summary: Revoke all of the caller's refresh tokens (log out everywhere)
+      responses:
+        "204": { description: logged out everywhere }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [client]
+      summary: The authenticated customer's own profile (resolved from the JWT subject)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /beneficiaries:
+    get:
+      operationId: listBeneficiaries
+      tags: [client]
+      summary: List the caller's saved beneficiaries (fuzzy search is client-side)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Beneficiary" }
+    post:
+      operationId: addBeneficiary
+      tags: [client]
+      summary: Save a beneficiary by IBAN (resolves it to a destination account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddBeneficiaryRequest" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Beneficiary" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /beneficiaries/resolve:
+    get:
+      operationId: resolveBeneficiary
+      tags: [client]
+      summary: Confirmation of payee — resolve an IBAN to a masked owner name
+      parameters:
+        - name: iban
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolvedAccount" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /beneficiaries/{id}:
+    delete:
+      operationId: deleteBeneficiary
+      tags: [client]
+      summary: Remove a saved beneficiary (scoped to the caller)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "204": { description: deleted }
+        "404": { $ref: "#/components/responses/Error" }
+
   /users:
     post:
       operationId: createUser
@@ -402,6 +517,12 @@ components:
         token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'." }
         token_type: { type: string, example: Bearer }
         expires_at: { type: string, format: date-time }
+        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair." }
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
     IdResponse:
       type: object
       properties:
@@ -518,6 +639,27 @@ components:
       type: object
       properties:
         reversal_id: { type: string, format: uuid }
+    Beneficiary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        credit_account_id: { type: string, format: uuid }
+        iban: { type: string }
+        owner_name_masked: { type: string }
+        created_at: { type: string, format: date-time }
+    AddBeneficiaryRequest:
+      type: object
+      required: [label, iban]
+      properties:
+        label: { type: string }
+        iban: { type: string }
+    ResolvedAccount:
+      type: object
+      properties:
+        account_id: { type: string, format: uuid }
+        iban: { type: string }
+        owner_name_masked: { type: string }
     LedgerEntry:
       type: object
       properties:

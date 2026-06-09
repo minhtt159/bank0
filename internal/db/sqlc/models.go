@@ -429,6 +429,16 @@ type AdminAction struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
+type Beneficiary struct {
+	ID              uuid.UUID `json:"id"`
+	OwnerUserID     uuid.UUID `json:"owner_user_id"`
+	Label           string    `json:"label"`
+	CreditAccountID uuid.UUID `json:"credit_account_id"`
+	Iban            string    `json:"iban"`
+	OwnerNameMasked string    `json:"owner_name_masked"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 type EnrichedLedger struct {
 	ID                     uuid.UUID      `json:"id"`
 	TransferID             uuid.UUID      `json:"transfer_id"`
@@ -484,6 +494,20 @@ type LedgerEntry struct {
 	BalanceAfter int64          `json:"balance_after"`
 	Currency     string         `json:"currency"`
 	PostedAt     time.Time      `json:"posted_at"`
+}
+
+type RefreshToken struct {
+	ID            string     `json:"id"`
+	FamilyID      uuid.UUID  `json:"family_id"`
+	UserID        uuid.UUID  `json:"user_id"`
+	ParentID      *string    `json:"parent_id"`
+	IssuedAt      time.Time  `json:"issued_at"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	RotatedAt     *time.Time `json:"rotated_at"`
+	RevokedAt     *time.Time `json:"revoked_at"`
+	RevokedReason *string    `json:"revoked_reason"`
+	UserAgent     *string    `json:"user_agent"`
+	Ip            *string    `json:"ip"`
 }
 
 type Session struct {

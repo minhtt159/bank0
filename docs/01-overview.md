@@ -17,14 +17,18 @@ cent, double-spending, or double-posting on a retry.
 - A **transfer state machine** with authorization holds (pending → posted /
   failed / reversed).
 - **Database-enforced idempotency** for every money movement.
-- An **operator console** (admin UI) for support/ops staff.
+- An **operator console** (admin UI) for support/ops staff
+  ([`05-admin-ui.md`](05-admin-ui.md)).
+- A **customer client API** ([`06-client-api.md`](06-client-api.md)) and a
+  **PWA** over it ([`07-client-web-app.md`](07-client-web-app.md)).
 
 **Out of scope (PoC simplifications, called out where they matter)**
 - Multi-currency and FX (single currency keeps double-entry trivially balanced).
 - Real payment rails (SEPA/SWIFT/card networks) — we *model* their lifecycle, we
   don't connect to them.
 - Interest accrual, statements/PDF generation, KYC/AML workflows.
-- Customer-facing app (only the operator console is built).
+- Customer MFA / step-up and onboarding/KYC (designed, not built — see
+  [`06-client-api.md`](06-client-api.md) §6).
 
 These can each be layered on later without reshaping the core; see the "future
 extension" notes in [`02-data-model.md`](02-data-model.md) and
@@ -159,10 +163,10 @@ provided for the common "settle immediately" case. Details in
 | Understand scope and *why* the design is shaped this way | this file |
 | Know the tables, columns, constraints, indexes, ERD | [`02-data-model.md`](02-data-model.md) |
 | Understand the transfer state machine, the DB functions, idempotency, triggers | [`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) |
-| Build or critique the operator console | [`04-admin-ui.md`](04-admin-ui.md) |
-| Deploy (Helm, Gateway, migrations, maintenance) | [`05-deployment.md`](05-deployment.md) |
-| Add the customer-facing surface (deferred plan) | [`06-customer-app-plan.md`](06-customer-app-plan.md) |
-| Harden client auth: refresh tokens + MFA (deferred plan) | [`07-auth-refresh-mfa.md`](07-auth-refresh-mfa.md) |
+| Deploy: topology, Cloudflare edge, Helm/Gateway option, migrations | [`04-deployment.md`](04-deployment.md) |
+| Build or critique the operator console (admin UI) | [`05-admin-ui.md`](05-admin-ui.md) |
+| Use the customer client API: endpoints, JWT + refresh auth, ownership, MFA plan | [`06-client-api.md`](06-client-api.md) |
+| Build/run the customer PWA (Cloudflare Workers) | [`07-client-web-app.md`](07-client-web-app.md) |
 
 ---
 
@@ -176,13 +180,16 @@ Resolved (2026-06-05):
 3. **Hold expiry cadence.** ✅ **In-process Go ticker**, guarded by a Postgres
    advisory lock so it's safe across N replicas (runs on portal pods). A
    `bank0 maintenance` subcommand exists for a CronJob alternative. See
-   [`05-deployment.md`](05-deployment.md).
+   [`04-deployment.md`](04-deployment.md).
 4. **Maker-checker threshold.** ✅ **€10,000** (`admin.maker_checker_threshold_minor`).
 
 Still deferred:
 
 2. **Overdraft.** Customer accounts currently `CHECK (balance_minor >= 0)`. Do any
    account types allow negative balances (credit lines)? (Default: no.)
-5. **Customer-facing surface.** Out of scope for now; plan recorded in
-   [`06-customer-app-plan.md`](06-customer-app-plan.md). Key pre-req flagged there:
-   ownership scoping (IDOR) on the client API.
+
+Resolved since:
+
+5. **Customer-facing surface.** ✅ **Built** — client API
+   ([`06-client-api.md`](06-client-api.md), ownership/IDOR closed, JWT + refresh)
+   and a Cloudflare-hosted PWA ([`07-client-web-app.md`](07-client-web-app.md)).

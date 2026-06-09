@@ -1,11 +1,45 @@
 # bank0 — Deployment, Scaling & API Contract
 
-> How bank0 runs: one image, two domains, HA replicas, in-cluster migrations,
-> and a contract-first OpenAPI surface.
+> How bank0 runs: three public surfaces, one Go image (two run modes), a
+> Cloudflare edge, in-cluster migrations, and a contract-first OpenAPI surface.
 
 ---
 
-## 1. One image, three modes
+## 0. Topology — three surfaces, three hosts
+
+| Host | Surface | Tech | Served by |
+|------|---------|------|-----------|
+| `portal.bank0.hnimn.art` | **Admin UI** — operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal` ([`05-admin-ui.md`](05-admin-ui.md)) |
+| `api.bank0.hnimn.art` | **Client API** — customer JSON API | Go (same binary), `mode=api` | bank0 binary, **behind a Cloudflare proxy** ([`06-client-api.md`](06-client-api.md)) |
+| `bank0.hnimn.art` | **Client web app** — customer PWA | TypeScript (Preact/Vite) | **Cloudflare Worker** (static assets + `/api/*` proxy) ([`07-client-web-app.md`](07-client-web-app.md)) |
+
+The two Go surfaces are the *same* binary in different modes (§1). The PWA is not
+served by Go at all — it lives on a Cloudflare Worker that also proxies the
+browser's `/api/*` calls to `api.bank0.hnimn.art`, so the browser stays
+same-origin (no CORS) and tokens never traverse a third origin.
+
+```mermaid
+graph LR
+    Op([Operator]) -->|HTTPS| Portal[portal.bank0.hnimn.art<br/>Go portal]
+    Cust([Customer browser]) -->|HTTPS| CFW[bank0.hnimn.art<br/>Cloudflare Worker · PWA]
+    CFW -->|/api/* proxy| CF[Cloudflare proxy]
+    CF --> API[api.bank0.hnimn.art<br/>Go api mode]
+    Portal --> PG[(Postgres)]
+    API --> PG
+```
+
+### Edge: Cloudflare now, Gateway API as an option
+
+**Today** the client API sits **behind a Cloudflare proxy** (TLS termination,
+WAF/rate-limiting, DDoS protection at the edge); the PWA is a Cloudflare Worker.
+This needs no in-cluster ingress for the customer surfaces. The **Helm + Gateway
+API/Envoy** setup in §3 remains a fully-supported **alternative/cluster-internal**
+path (e.g. self-hosted, or to expose `portal.*`) — choose one edge per host; the
+Go app is identical either way.
+
+---
+
+## 1. One image, run modes (`api` · `portal` · `all`)
 
 The binary serves different route surfaces based on `server.mode`
 (`APP_SERVER_MODE`):
@@ -38,7 +72,7 @@ bank0 maintenance      # run expire_holds + cleanup once
 
 | Surface | Mechanism | Public routes |
 |---------|-----------|---------------|
-| `api` (client) | **JWT bearer** (HS256). `POST /auth/login` issues a token (`aud=bank0-client`); `requireJWT` validates it and ownership-scopes every request to the subject. | `/auth/login`, `/health`, `/docs`, `/openapi.yaml` |
+| `api` (client) | **JWT bearer** (HS256) + rotating **refresh tokens**. `POST /auth/login` issues an access token (`aud=bank0-client`) + refresh token; `requireJWT` validates and ownership-scopes every request to the subject ([`06-client-api.md`](06-client-api.md)). | `/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`, `/docs`, `/openapi.yaml` |
 | `portal` (admin) | **DB-backed cookie session** (`bank0_session`), staff-role check, 30-min sliding idle. | `/login`, `/logout`, `/health`, `/docs`, `/openapi.yaml` |
 
 Set the JWT key via `APP_AUTH_JWT_SECRET` (Helm: `auth.existingSecret` or

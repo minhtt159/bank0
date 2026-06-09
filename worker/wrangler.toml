@@ -1,0 +1,19 @@
+name = "bank0-webapp"
+main = "index.ts"
+compatibility_date = "2026-01-01"
+
+# Bind the public hostname. Adjust zone_name to your Cloudflare zone.
+# (Top-level key — must precede any [table] header.)
+routes = [{ pattern = "bank0.hnimn.art/*", zone_name = "hnimn.art" }]
+
+# Serve the built SPA. not_found_handling = single-page-application returns
+# index.html for unknown client routes so deep links work.
+[assets]
+directory = "../web/app/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Upstream client API. The Worker proxies /api/* here so the browser stays
+# same-origin (no CORS) — and this is the seam for a future token-holding BFF.
+[vars]
+API_ORIGIN = "https://api.bank0.hnimn.art"

@@ -15,8 +15,10 @@
 > role-gated (auditor read-only). Mutations fire `HX-Trigger: bank0:refresh` so the
 > main-panel lists self-refresh. The console is now feature-complete: users,
 > accounts, credit/withdraw, maker-checker approvals, transfers + drill-down,
-> statement, audit, reconcile, search, pagination, auto-refresh. Out of scope:
-> client-facing app, JWT refresh/MFA (see 06).
+> statement, audit, reconcile, search, pagination, auto-refresh, and an admin-only
+> **"Revoke app sessions"** action. The client-facing app is a separate surface —
+> its API is [`06-client-api.md`](06-client-api.md), its PWA is
+> [`07-client-web-app.md`](07-client-web-app.md).
 
 ---
 
@@ -206,6 +208,9 @@ with the "logic in the DB" principle:
   login) injected into request context for per-action gating (next step).
 - Expired sessions are swept by the advisory-locked maintenance loop
   (`cleanup_sessions()`).
+- **Revoke app sessions** (user-detail rail, admin only): `revoke_user_refresh`
+  force-revokes every refresh token of any user — the operator-side control that
+  complements the customer's own "log out everywhere" ([`06-client-api.md`](06-client-api.md) §3.3).
 - Every portal route (admin JSON API **and** console HTML) is behind the
   `requireSession` middleware; browsers/HTMX get a redirect to `/login`,
   programmatic callers get `401`. `/health`, `/docs`, `/openapi.yaml`, `/login`
@@ -254,6 +259,7 @@ denied-action audit log, and per-IP rate limiting.
 2. **Idle session timeout** (§7): **30 min** (`admin.session_idle_timeout = 30m`).
 3. **Auto-post default**: **yes** — `POST /transfers` and the console "send" settle
    immediately. The pending queue still exists for deferred/maker-checker cases.
-4. **Customer-facing surface**: **out of scope for now.** The operator console is the
-   only UI in the PoC. A plan for the future customer app is sketched in
-   [`06-customer-app-plan.md`](06-customer-app-plan.md).
+4. **Customer-facing surface**: **built** — a separate Cloudflare-hosted PWA
+   ([`07-client-web-app.md`](07-client-web-app.md)) over the client API
+   ([`06-client-api.md`](06-client-api.md)). The operator console remains the only
+   *server-rendered* UI.
