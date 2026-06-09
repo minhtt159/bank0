@@ -88,7 +88,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span><form method=\"post\" action=\"/logout\" style=\"margin:0\"><button class=\"linkbtn\" type=\"submit\">Sign out</button></form></header><div class=\"layout\"><nav class=\"leftnav\"><a class=\"navitem\" hx-get=\"/console/dashboard\" hx-target=\"#main-panel\">Dashboard</a> <a class=\"navitem\" hx-get=\"/console/users\" hx-target=\"#main-panel\">Users</a> <a class=\"navitem\" hx-get=\"/console/accounts\" hx-target=\"#main-panel\">Accounts</a> <a class=\"navitem\" hx-get=\"/console/pending\" hx-target=\"#main-panel\">Transfers</a> <a class=\"navitem\" hx-get=\"/console/reconcile\" hx-target=\"#main-panel\">Reconciliation</a> <a class=\"navitem\" hx-get=\"/console/approvals\" hx-target=\"#main-panel\">Approvals ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span><form method=\"post\" action=\"/logout\" style=\"margin:0\"><button class=\"linkbtn\" type=\"submit\">Sign out</button></form></header><div class=\"layout\" id=\"layout\"><nav class=\"leftnav\"><a class=\"navitem\" hx-get=\"/console/dashboard\" hx-target=\"#main-panel\">Dashboard</a> <a class=\"navitem\" hx-get=\"/console/users\" hx-target=\"#main-panel\">Users</a> <a class=\"navitem\" hx-get=\"/console/accounts\" hx-target=\"#main-panel\">Accounts</a> <a class=\"navitem\" hx-get=\"/console/pending\" hx-target=\"#main-panel\">Transfers</a> <a class=\"navitem\" hx-get=\"/console/reconcile\" hx-target=\"#main-panel\">Reconciliation</a> <a class=\"navitem\" hx-get=\"/console/approvals\" hx-target=\"#main-panel\">Approvals ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -111,7 +111,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\">Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail\"><div class=\"rail-empty muted\">Select a user or row to see details.</div></aside></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\">Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" onclick=\"closeRail()\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty muted\">Select a user or row to see details.</div></div></aside></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
