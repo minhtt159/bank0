@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Saved payees for the customer web app (docs/08). A beneficiary is a directory
+-- Saved payees for the customer web app (docs/07). A beneficiary is a directory
 -- entry the customer can fuzzy-search and transfer to; it carries the resolved
 -- destination account id so createTransfer is unchanged. No money state lives
 -- here — ownership is always scoped to owner_user_id (the JWT subject).

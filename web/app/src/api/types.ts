@@ -1,5 +1,5 @@
 // Mirrors the client-tagged schemas in api/openapi.yaml. Hand-kept small; could
-// be generated with openapi-typescript later (docs/08 §6).
+// be generated with openapi-typescript later (docs/07 §6).
 
 export interface LoginResponse {
   user_id: string;

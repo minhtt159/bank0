@@ -1,4 +1,4 @@
-// Cloudflare Worker for the bank0 customer app (docs/08).
+// Cloudflare Worker for the bank0 customer app (docs/07).
 //   - serves the built SPA from the ASSETS binding (SPA fallback in wrangler.toml)
 //   - proxies /api/* to the client API so the browser is always same-origin
 //     (no CORS); this is also the seam for a future token-holding BFF.

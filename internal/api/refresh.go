@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// Refresh-token rotation for the client (api) surface (docs/07 §4). The refresh
+// Refresh-token rotation for the client (api) surface (docs/06 §3). The refresh
 // token is an opaque random string; the DB stores only sha256(token). Rotation
 // is atomic with reuse detection in rotate_refresh_token().
 

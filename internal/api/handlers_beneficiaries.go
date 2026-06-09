@@ -10,7 +10,7 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-// Beneficiaries are the customer app's saved payees (docs/08). Every operation is
+// Beneficiaries are the customer app's saved payees (docs/07). Every operation is
 // scoped to the JWT subject; they are a lookup/directory only — money still moves
 // through createTransfer, which independently enforces debit-account ownership.
 

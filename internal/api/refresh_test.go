@@ -125,7 +125,7 @@ func TestHTTPLogoutAndLogoutAll(t *testing.T) {
 }
 
 // An admin operator force-revoking a customer's app sessions from the console
-// kills that customer's refresh token (docs/07 operator force-revoke).
+// kills that customer's refresh token (docs/06 operator force-revoke).
 func TestHTTPConsoleRevokeSessions(t *testing.T) {
 	ts, pg := newTestServer(t)
 	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)

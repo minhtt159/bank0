@@ -1,5 +1,5 @@
 // Money is int64 minor units end-to-end; format for display only, never compute
-// on floats (docs/08 §8).
+// on floats (docs/07 §8).
 
 export function formatMinor(minor: number, currency = "EUR"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(minor / 100);

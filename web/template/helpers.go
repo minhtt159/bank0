@@ -45,7 +45,7 @@ func uuidStr(id *uuid.UUID) string {
 }
 
 // newKey mints a fresh idempotency key when a money form is rendered, so a
-// double-submit of the same form replays rather than duplicating (docs/04 §5.2).
+// double-submit of the same form replays rather than duplicating (docs/05 §5.2).
 func newKey() string { return uuid.NewString() }
 
 // shortID renders the first 8 chars of an optional uuid (nil -> "—").
@@ -99,7 +99,7 @@ const styleTag = `<style>
   .btn.danger { border-color:var(--bad); color:#ff7b7b; }
   .btn.danger:hover { background:rgba(229,72,77,.15); }
   .flash { background:rgba(59,130,246,.15); border:1px solid var(--accent); color:#9ec5ff; padding:.5rem .8rem; border-radius:8px; margin-bottom:.8rem; }
-  /* app layout (docs/04 §3 IA) */
+  /* app layout (docs/05 §3 IA) */
   /* proportional 3-column layout (~14% / 57% / 29%); minmax(0,..) keeps wide
      content from forcing the grid past the viewport. */
   .layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,4fr) minmax(0,2fr); min-height:calc(100vh - 49px); }

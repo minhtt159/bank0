@@ -278,7 +278,7 @@ func (s *Server) consoleUpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // consoleRevokeSessions force-revokes every active refresh token for a user
-// (docs/07 "log out everywhere" / operator force-revoke). Admin only.
+// (docs/06 "log out everywhere" / operator force-revoke). Admin only.
 func (s *Server) consoleRevokeSessions(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.requireRole(w, r, canManageUsers)
 	if !ok {

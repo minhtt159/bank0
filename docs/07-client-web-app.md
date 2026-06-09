@@ -1,11 +1,11 @@
-# bank0 — Customer Web App (SPA/PWA + JWT) — build plan
+# bank0 — Client Web App (PWA, Cloudflare Workers)
 
-> **Status: plan, no code yet.** Turns the deferred customer surface
-> ([`06-customer-app-plan.md`](06-customer-app-plan.md)) into a concrete build for a
-> **lightweight, mobile-first SPA/PWA** hosted on a **Cloudflare Worker** at
-> `bank0.hnimn.art`, talking to the existing JWT client API at
-> `api.bank0.hnimn.art`. Auth hardening (refresh/MFA/step-up) stays in
-> [`07-auth-refresh-mfa.md`](07-auth-refresh-mfa.md); this doc consumes it when it lands.
+> **Status: built.** A **lightweight, mobile-first PWA** (TypeScript / Preact +
+> Vite, ~15 KB gzip) hosted on a **Cloudflare Worker** at `bank0.hnimn.art`, over
+> the client API at `api.bank0.hnimn.art` ([`06-client-api.md`](06-client-api.md)).
+> The six customer flows below are implemented; auth (JWT + refresh, with MFA/step-up
+> planned) lives in [`06-client-api.md`](06-client-api.md). Source: `web/app/`
+> (SPA) and `worker/` (Worker).
 
 ---
 
@@ -50,10 +50,10 @@ The Worker does two jobs:
 
 **Why proxy instead of calling `api.*` directly:** the browser only ever talks to its own
 origin (`bank0.hnimn.art`), so there is **no CORS** and **no backend change** to the api
-surface. It also positions the Worker as the future **BFF** ([`06`](06-customer-app-plan.md) §3):
-once refresh tokens exist ([`07`](07-auth-refresh-mfa.md)), the Worker can hold the refresh
-token in an `httpOnly; Secure; SameSite=Strict` cookie and inject the access token server-side,
-keeping tokens out of browser JS — **without changing the SPA**.
+surface. It also positions the Worker as the future **BFF**
+([`06-client-api.md`](06-client-api.md) §6.3): refresh tokens already exist, so the Worker can
+later hold the refresh token in an `httpOnly; Secure; SameSite=Strict` cookie and inject the
+access token server-side, keeping tokens out of browser JS — **without changing the SPA**.
 
 **MVP token handling:** the access token (1h TTL today) lives in the SPA in memory + a
 `sessionStorage` mirror (survives reload, cleared on tab close). The Worker forwards it as
@@ -80,7 +80,7 @@ BFF upgrade is a Worker-only change later.
 Both are **client-tagged**, ownership-scoped to the JWT `sub` (the `clientSubject`
 pattern already used by `getAccount`/`listUserAccounts`), generated into `genclient`,
 audited where they mutate. Mind the **shared-op `Params` constraint**
-([`05-deployment.md`](05-deployment.md) §4): keep these **client-only** so they may carry
+([`04-deployment.md`](04-deployment.md) §4): keep these **client-only** so they may carry
 query/body params without colliding with the admin package.
 
 **(a) `GET /me` — own profile** (Flow 2)
@@ -259,18 +259,19 @@ Worker logic:
 
 ## 9. Auth lifecycle & SSO (later)
 
-**Today (MVP):** username/password → `POST /auth/login` → 1h HS256 access token. On expiry the
-user re-logs in. Good enough to ship; UX is "logged out after ~1h".
+**Today (built):** username/password → `POST /auth/login` → short (15m) HS256 access token
+**+ refresh token**. The SPA refreshes transparently on a 401 (single-flight; the same
+`Idempotency-Key` rides the retry so a transfer can't double-post) and revokes server-side on
+sign-out. Full design in [`06-client-api.md`](06-client-api.md) §3.
 
-**Next (already designed, [`07-auth-refresh-mfa.md`](07-auth-refresh-mfa.md)):**
-- **Refresh tokens + rotation** → short access TTL, silent refresh. The **Worker/BFF** holds
-  the refresh token in an `httpOnly` cookie and calls `/auth/refresh`; the SPA only ever sees a
-  short-lived access token in memory. SPA code is unaffected.
+**Next (designed, [`06-client-api.md`](06-client-api.md) §6):**
+- **Move refresh to the Worker/BFF** — hold the refresh token in an `httpOnly` cookie so the SPA
+  only ever sees a short-lived access token in memory. SPA code is unaffected.
 - **MFA (TOTP)** at login + **step-up** for large transfers — the transfer screen handles a
   `step_up_required` 403 by routing to an MFA-verify step, then retrying with the same
   `Idempotency-Key`.
 
-**SSO / OIDC (future, [`06`](06-customer-app-plan.md) §3):**
+**SSO / OIDC (future, [`06-client-api.md`](06-client-api.md) §6.3):**
 - Move customer identity to OAuth2/OIDC (managed IdP or embedded). The Worker runs the
   **authorization-code + PKCE** flow, exchanges the code server-side, and holds tokens in
   httpOnly cookies — the SPA stays a pure relying party.
@@ -312,7 +313,7 @@ user re-logs in. Good enough to ship; UX is "logged out after ~1h".
 6. ✅ **PWA**: manifest + icon, autoUpdate service worker that precaches the shell and treats
    `/api/*` as network-only. *Remaining polish:* install prompt, pull-to-refresh.
    Production build is ~14.5 KB gzipped JS.
-7. ⬜ **Auth hardening hookup** (refresh/MFA via Worker BFF) — consumes [`07`](07-auth-refresh-mfa.md).
+7. 🟡 **Auth hardening hookup** — refresh is live (transparent 401 refresh); BFF cookie + MFA via the Worker still to do ([`06-client-api.md`](06-client-api.md) §6).
 8. ⬜ **SSO/OIDC** via Worker (PKCE) + RS256/JWKS on the API.
 
 ---

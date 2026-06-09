@@ -1,4 +1,4 @@
-// Tiny subsequence fuzzy matcher (docs/08 §4). Lists here are small (own
+// Tiny subsequence fuzzy matcher (docs/07 §4). Lists here are small (own
 // accounts + saved payees), so a hand-rolled scorer beats pulling in a dep.
 
 export function fuzzyScore(query: string, text: string): number {
