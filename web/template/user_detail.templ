@@ -37,6 +37,15 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 				}
 			</form>
 		</section>
+		if canManageUsers {
+			<section class="block">
+				<h3>Security</h3>
+				<form hx-post={ "/console/users/" + u.ID.String() + "/revoke-sessions" } hx-target="#rail">
+					<button class="btn danger sm" type="submit" hx-disabled-elt="this" hx-confirm="Revoke all of this user's refresh tokens? They will be signed out of the app everywhere and must log in again.">Revoke app sessions</button>
+				</form>
+				<p class="muted">Invalidates every active refresh token (forces re-login on the customer app).</p>
+			</section>
+		}
 		<section class="block">
 			<h3>Accounts</h3>
 			if len(accounts) == 0 {

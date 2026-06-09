@@ -21,9 +21,10 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/01-overview.md`](docs/01-overview.md) | Scope, design principles, tech stack, request lifecycle |
 | [`docs/02-data-model.md`](docs/02-data-model.md) | Consolidated ERD, every table, invariants, indexes |
 | [`docs/03-ledger-lifecycle-idempotency.md`](docs/03-ledger-lifecycle-idempotency.md) | Transfer state machine, DB functions, idempotency, triggers |
-| [`docs/04-admin-ui.md`](docs/04-admin-ui.md) | Operator console UX, roles, dashboards, maker-checker |
-| [`docs/05-deployment.md`](docs/05-deployment.md) | Modes, two domains, Helm, Gateway API/Envoy, HA, migrations, OpenAPI contract |
-| [`docs/06-customer-app-plan.md`](docs/06-customer-app-plan.md) | Deferred plan for the customer-facing surface (auth, IDOR fix, roadmap) |
+| [`docs/04-deployment.md`](docs/04-deployment.md) | Topology (3 hosts), Cloudflare edge + Worker, Helm/Gateway option, modes, migrations, OpenAPI contract |
+| [`docs/05-admin-ui.md`](docs/05-admin-ui.md) | Operator console (portal) UX, roles, dashboards, maker-checker |
+| [`docs/06-client-api.md`](docs/06-client-api.md) | Client API (api.\*): endpoints, JWT + refresh-token auth, ownership, MFA/step-up plan |
+| [`docs/07-client-web-app.md`](docs/07-client-web-app.md) | Customer PWA (bank0.\*, Cloudflare Workers): flows, beneficiaries, idempotency |
 
 ## Tech stack (carried from tf-backend, refined)
 
@@ -41,15 +42,19 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | API docs | **OpenAPI 3.1, contract-first** (oapi-codegen + Scalar UI) | replaces swaggo annotations |
 | Deploy | **Helm chart + container image** | api/portal split, HPA, in-cluster migrations |
 
-## Two surfaces, one image
+## Three surfaces, three hosts
 
-`server.mode` selects the route surface — separated **in the app**, not just at the edge:
+Two are the same Go binary in different `server.mode`s (separated **in the app**,
+not just at the edge); the third is a Cloudflare Worker. See
+[`docs/04-deployment.md`](docs/04-deployment.md).
 
-| Mode | Serves | Auth | Domain |
-|------|--------|------|--------|
-| `api` | client JSON API + `/docs` | **JWT bearer** (login issues HS256 token; ownership-scoped) | `api.bank0.hnimn.art` (HA, autoscaled) |
-| `portal` | admin API + operator console + `/docs` | **DB-backed cookie session** (staff roles, 30-min idle) | `portal.bank0.hnimn.art` |
-| `all` | everything | both | local docker-compose |
+| Host | Surface | Tech | Auth |
+|------|---------|------|------|
+| `portal.bank0.hnimn.art` | admin API + operator console | Go `mode=portal` (Templ/HTMX) | **DB cookie session** (staff roles, 30-min idle) |
+| `api.bank0.hnimn.art` | client JSON API | Go `mode=api`, **behind Cloudflare proxy** | **JWT bearer + refresh tokens** (ownership-scoped) |
+| `bank0.hnimn.art` | customer PWA | **Cloudflare Worker** (Preact/Vite, ~15 KB gzip) | proxies `/api/*` to the client API |
+
+`server.mode=all` serves both Go surfaces in one container for local docker-compose.
 
 ## Quick start (local)
 
@@ -78,7 +83,7 @@ helm install bank0 deploy/helm/bank0 --set database.existingSecret=bank0-db
 
 Creates `bank0-api` (mode=api, HPA 3–10) and `bank0-portal` (mode=portal) from one
 image, **Gateway API HTTPRoutes (Envoy Gateway)** for the two hosts, and a
-pre-upgrade migrate Job. See [`docs/05-deployment.md`](docs/05-deployment.md).
+pre-upgrade migrate Job. See [`docs/04-deployment.md`](docs/04-deployment.md).
 
 ## Status
 

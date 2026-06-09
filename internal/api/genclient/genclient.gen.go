@@ -28,6 +28,22 @@ type Account struct {
 	UserId             *openapi_types.UUID `json:"user_id,omitempty"`
 }
 
+// AddBeneficiaryRequest defines model for AddBeneficiaryRequest.
+type AddBeneficiaryRequest struct {
+	Iban  string `json:"iban"`
+	Label string `json:"label"`
+}
+
+// Beneficiary defines model for Beneficiary.
+type Beneficiary struct {
+	CreatedAt       *time.Time          `json:"created_at,omitempty"`
+	CreditAccountId *openapi_types.UUID `json:"credit_account_id,omitempty"`
+	Iban            *string             `json:"iban,omitempty"`
+	Id              *openapi_types.UUID `json:"id,omitempty"`
+	Label           *string             `json:"label,omitempty"`
+	OwnerNameMasked *string             `json:"owner_name_masked,omitempty"`
+}
+
 // CreateTransferRequest defines model for CreateTransferRequest.
 type CreateTransferRequest struct {
 	AmountMinor   int64              `json:"amount_minor"`
@@ -77,6 +93,9 @@ type LoginRequest struct {
 type LoginResponse struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 
+	// RefreshToken Opaque refresh token. POST to /auth/refresh to rotate it for a new pair.
+	RefreshToken *string `json:"refresh_token,omitempty"`
+
 	// Token JWT access token (HS256). Send as 'Authorization: Bearer <token>'.
 	Token     *string             `json:"token,omitempty"`
 	TokenType *string             `json:"token_type,omitempty"`
@@ -86,6 +105,18 @@ type LoginResponse struct {
 // ReasonRequest defines model for ReasonRequest.
 type ReasonRequest struct {
 	Reason *string `json:"reason,omitempty"`
+}
+
+// RefreshRequest defines model for RefreshRequest.
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// ResolvedAccount defines model for ResolvedAccount.
+type ResolvedAccount struct {
+	AccountId       *openapi_types.UUID `json:"account_id,omitempty"`
+	Iban            *string             `json:"iban,omitempty"`
+	OwnerNameMasked *string             `json:"owner_name_masked,omitempty"`
 }
 
 // StatusResponse defines model for StatusResponse.
@@ -117,6 +148,19 @@ type TransferResult struct {
 	WasReplay  *bool               `json:"was_replay,omitempty"`
 }
 
+// User defines model for User.
+type User struct {
+	CreatedAt   *time.Time          `json:"created_at,omitempty"`
+	Email       *string             `json:"email,omitempty"`
+	FullName    *string             `json:"full_name,omitempty"`
+	Id          *openapi_types.UUID `json:"id,omitempty"`
+	PhoneNumber *string             `json:"phone_number,omitempty"`
+	Role        *string             `json:"role,omitempty"`
+	Status      *string             `json:"status,omitempty"`
+	UpdatedAt   *time.Time          `json:"updated_at,omitempty"`
+	Username    *string             `json:"username,omitempty"`
+}
+
 // Cursor defines model for Cursor.
 type Cursor = time.Time
 
@@ -141,6 +185,11 @@ type GetAccountLedgerParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ResolveBeneficiaryParams defines parameters for ResolveBeneficiary.
+type ResolveBeneficiaryParams struct {
+	Iban string `form:"iban" json:"iban"`
+}
+
 // CreateTransferParams defines parameters for CreateTransfer.
 type CreateTransferParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
@@ -148,6 +197,15 @@ type CreateTransferParams struct {
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// LogoutJSONRequestBody defines body for Logout for application/json ContentType.
+type LogoutJSONRequestBody = RefreshRequest
+
+// RefreshJSONRequestBody defines body for Refresh for application/json ContentType.
+type RefreshJSONRequestBody = RefreshRequest
+
+// AddBeneficiaryJSONRequestBody defines body for AddBeneficiary for application/json ContentType.
+type AddBeneficiaryJSONRequestBody = AddBeneficiaryRequest
 
 // CreateTransferJSONRequestBody defines body for CreateTransfer for application/json ContentType.
 type CreateTransferJSONRequestBody = CreateTransferRequest
@@ -166,9 +224,33 @@ type ServerInterface interface {
 	// Verify credentials (bcrypt). Establishes a session in the portal.
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
+	// Revoke the presented refresh token (single-session logout)
+	// (POST /auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request)
+	// Revoke all of the caller's refresh tokens (log out everywhere)
+	// (POST /auth/logout-all)
+	LogoutAll(w http.ResponseWriter, r *http.Request)
+	// Rotate a refresh token for a new access + refresh token pair
+	// (POST /auth/refresh)
+	Refresh(w http.ResponseWriter, r *http.Request)
+	// List the caller's saved beneficiaries (fuzzy search is client-side)
+	// (GET /beneficiaries)
+	ListBeneficiaries(w http.ResponseWriter, r *http.Request)
+	// Save a beneficiary by IBAN (resolves it to a destination account)
+	// (POST /beneficiaries)
+	AddBeneficiary(w http.ResponseWriter, r *http.Request)
+	// Confirmation of payee — resolve an IBAN to a masked owner name
+	// (GET /beneficiaries/resolve)
+	ResolveBeneficiary(w http.ResponseWriter, r *http.Request, params ResolveBeneficiaryParams)
+	// Remove a saved beneficiary (scoped to the caller)
+	// (DELETE /beneficiaries/{id})
+	DeleteBeneficiary(w http.ResponseWriter, r *http.Request, id Id)
 	// Liveness/version probe
 	// (GET /health)
 	Health(w http.ResponseWriter, r *http.Request)
+	// The authenticated customer's own profile (resolved from the JWT subject)
+	// (GET /me)
+	GetMe(w http.ResponseWriter, r *http.Request)
 	// Create a transfer (auto-posts by default). Idempotent.
 	// (POST /transfers)
 	CreateTransfer(w http.ResponseWriter, r *http.Request, params CreateTransferParams)
@@ -290,11 +372,154 @@ func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request)
 	handler.ServeHTTP(w, r)
 }
 
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LogoutAll operation middleware
+func (siw *ServerInterfaceWrapper) LogoutAll(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LogoutAll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Refresh operation middleware
+func (siw *ServerInterfaceWrapper) Refresh(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Refresh(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBeneficiaries operation middleware
+func (siw *ServerInterfaceWrapper) ListBeneficiaries(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBeneficiaries(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddBeneficiary operation middleware
+func (siw *ServerInterfaceWrapper) AddBeneficiary(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddBeneficiary(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResolveBeneficiary operation middleware
+func (siw *ServerInterfaceWrapper) ResolveBeneficiary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ResolveBeneficiaryParams
+
+	// ------------- Required query parameter "iban" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "iban", r.URL.Query(), &params.Iban, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "iban"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "iban", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolveBeneficiary(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteBeneficiary operation middleware
+func (siw *ServerInterfaceWrapper) DeleteBeneficiary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteBeneficiary(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Health operation middleware
 func (siw *ServerInterfaceWrapper) Health(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Health(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMe(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -572,7 +797,23 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 
 	r.HandleFunc(options.BaseURL+"/auth/login", wrapper.Login).Methods(http.MethodPost)
 
+	r.HandleFunc(options.BaseURL+"/auth/logout", wrapper.Logout).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/logout-all", wrapper.LogoutAll).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/refresh", wrapper.Refresh).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/beneficiaries", wrapper.ListBeneficiaries).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/beneficiaries", wrapper.AddBeneficiary).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/beneficiaries/resolve", wrapper.ResolveBeneficiary).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/beneficiaries/{id}", wrapper.DeleteBeneficiary).Methods(http.MethodDelete)
+
 	r.HandleFunc(options.BaseURL+"/health", wrapper.Health).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/me", wrapper.GetMe).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.CreateTransfer).Methods(http.MethodPost)
 

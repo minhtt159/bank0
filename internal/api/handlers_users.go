@@ -64,6 +64,23 @@ func (s *Server) GetUser(w http.ResponseWriter, r *http.Request, id openapi_type
 	writeJSON(w, http.StatusOK, u)
 }
 
+// GetMe implements genclient.ServerInterface: the caller's own profile, resolved
+// from the JWT subject. Client surface only (always behind requireJWT); the
+// GetUserByID projection excludes the password hash.
+func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
+	if err != nil {
+		mapDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
 type loginReq struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -95,10 +112,17 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
+	refresh := newSessionToken()
+	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
+		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r)); err != nil {
+		mapDBError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":    id,
-		"token":      token,
-		"token_type": "Bearer",
-		"expires_at": exp,
+		"user_id":       id,
+		"token":         token,
+		"token_type":    "Bearer",
+		"expires_at":    exp,
+		"refresh_token": refresh,
 	})
 }
