@@ -88,7 +88,7 @@ func (p *Postgres) RevokeSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
-// --- client (api) refresh tokens (docs/07 §4) ---
+// --- client (api) refresh tokens (docs/06 §3) ---
 
 // IssueRefreshToken opens a new token family at login and returns the family id.
 func (p *Postgres) IssueRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, idleSeconds int, userAgent, ip string) (uuid.UUID, error) {

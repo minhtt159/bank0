@@ -8,7 +8,7 @@ import (
 
 // registerConsole mounts the operator console (server-rendered Templ + HTMX).
 // Only mounted in "portal"/"all" modes, behind requireSession. Layout follows
-// docs/04 §3: nav -> #main-panel, drill-down/forms -> #rail.
+// docs/05 §3: nav -> #main-panel, drill-down/forms -> #rail.
 func (s *Server) registerConsole(r *mux.Router) {
 	// Shell + main-panel screens (panels: search box + results container)
 	r.HandleFunc("/", s.consoleHome).Methods(http.MethodGet)

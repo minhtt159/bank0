@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Client (api) refresh tokens (docs/07 §4). Mirrors the sessions discipline: the
+-- Client (api) refresh tokens (docs/06 §3). Mirrors the sessions discipline: the
 -- PK is sha256(token) hex, so a DB leak never yields a live token. A "family" is
 -- one login; rotation chains tokens via parent_id, and presenting an already-used
 -- token (theft signal) revokes the whole family. Access JWTs stay stateless.

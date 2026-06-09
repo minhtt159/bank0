@@ -1,6 +1,6 @@
 import { signal, computed } from "@preact/signals";
 
-// Token handling (docs/07 + docs/08 §2): a short-lived access token plus a
+// Token handling (docs/06 + docs/07 §2): a short-lived access token plus a
 // rotating refresh token. Both live in memory mirrored to sessionStorage (survive
 // reload, clear on tab close). The future BFF moves the refresh token to an
 // httpOnly cookie — a Worker-only change.
