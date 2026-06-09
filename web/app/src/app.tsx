@@ -1,6 +1,7 @@
 import { LocationProvider, Router, Route, useLocation } from "preact-iso";
 import type { ComponentChildren } from "preact";
-import { isAuthed, logout } from "./store/auth";
+import { isAuthed } from "./store/auth";
+import { api } from "./api/client";
 import { Login } from "./routes/Login";
 import { Home } from "./routes/Home";
 import { Account } from "./routes/Account";
@@ -26,7 +27,7 @@ function Shell({ children }: { children: ComponentChildren }) {
         <a class="brand" href="/">bank0</a>
         <nav>
           <a href="/profile" class={path === "/profile" ? "active" : ""}>Profile</a>
-          <button class="link" onClick={() => logout()}>Sign out</button>
+          <button class="link" onClick={() => api.logout()}>Sign out</button>
         </nav>
       </header>
       <main>{children}</main>

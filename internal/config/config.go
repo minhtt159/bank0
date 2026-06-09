@@ -24,10 +24,12 @@ type Config struct {
 // production / multi-replica; an empty secret falls back to an insecure dev value
 // with a loud warning.
 type AuthConfig struct {
-	JWTSecret   string        `mapstructure:"jwt_secret"`
-	JWTTTL      time.Duration `mapstructure:"jwt_ttl"`
-	JWTIssuer   string        `mapstructure:"jwt_issuer"`
-	JWTAudience string        `mapstructure:"jwt_audience"`
+	JWTSecret          string        `mapstructure:"jwt_secret"`
+	JWTTTL             time.Duration `mapstructure:"jwt_ttl"`
+	JWTIssuer          string        `mapstructure:"jwt_issuer"`
+	JWTAudience        string        `mapstructure:"jwt_audience"`
+	RefreshTTL         time.Duration `mapstructure:"refresh_ttl"`          // idle window, slid on rotate
+	RefreshAbsoluteTTL time.Duration `mapstructure:"refresh_absolute_ttl"` // hard cap per family
 }
 
 type AppConfig struct {
@@ -108,6 +110,8 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("auth.jwt_ttl", "1h")
 	v.SetDefault("auth.jwt_issuer", "bank0")
 	v.SetDefault("auth.jwt_audience", "bank0-client")
+	v.SetDefault("auth.refresh_ttl", "720h")          // 30d idle
+	v.SetDefault("auth.refresh_absolute_ttl", "2160h") // 90d hard cap
 
 	v.AddConfigPath(path)
 	v.SetConfigName("config")

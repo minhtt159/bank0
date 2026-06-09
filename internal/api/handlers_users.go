@@ -112,10 +112,17 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
+	refresh := newSessionToken()
+	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
+		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r)); err != nil {
+		mapDBError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":    id,
-		"token":      token,
-		"token_type": "Bearer",
-		"expires_at": exp,
+		"user_id":       id,
+		"token":         token,
+		"token_type":    "Bearer",
+		"expires_at":    exp,
+		"refresh_token": refresh,
 	})
 }

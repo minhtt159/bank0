@@ -38,3 +38,7 @@ auth:
   jwt_ttl: 1h
   jwt_issuer: bank0
   jwt_audience: bank0-client
+  # Refresh tokens (docs/07): login issues an opaque refresh token; POST
+  # /auth/refresh rotates it (reuse of a rotated token revokes the whole family).
+  refresh_ttl: 720h           # idle window, slid on each rotate (30d)
+  refresh_absolute_ttl: 2160h # hard cap per family regardless of activity (90d)

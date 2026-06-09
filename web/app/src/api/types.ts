@@ -6,6 +6,7 @@ export interface LoginResponse {
   token: string;
   token_type: string;
   expires_at: string;
+  refresh_token: string;
 }
 
 export interface User {

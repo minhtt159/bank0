@@ -101,6 +101,10 @@ func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessio
 	if err = tx.QueryRow(ctx, "SELECT cleanup_sessions()").Scan(&sessions); err != nil {
 		return 0, 0, 0, false, err
 	}
+	var refreshCleaned int32
+	if err = tx.QueryRow(ctx, "SELECT cleanup_refresh_tokens()").Scan(&refreshCleaned); err != nil {
+		return 0, 0, 0, false, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return 0, 0, 0, false, err
 	}

@@ -1,4 +1,4 @@
-import { token, logout } from "../store/auth";
+import { token, refreshToken, setAuth, clearAuth, logout } from "../store/auth";
 import type {
   Account,
   Beneficiary,
@@ -29,22 +29,60 @@ interface Opts {
   idempotencyKey?: string;
 }
 
-async function req<T>(method: string, path: string, opts: Opts = {}): Promise<T> {
+function buildInit(method: string, opts: Opts): RequestInit {
   const headers: Record<string, string> = {};
   if (token.value) headers["Authorization"] = `Bearer ${token.value}`;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  // The same Idempotency-Key rides every retry of one attempt, so a transparent
+  // token refresh can never double-post a transfer.
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
-
-  const resp = await fetch(BASE + path, {
+  return {
     method,
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
+  };
+}
+
+// Single-flight refresh: concurrent 401s share one /auth/refresh round-trip.
+let refreshing: Promise<boolean> | null = null;
+
+function tryRefresh(): Promise<boolean> {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    const rt = refreshToken.value;
+    if (!rt) return false;
+    try {
+      const resp = await fetch(`${BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!resp.ok) return false;
+      const d = (await resp.json()) as LoginResponse;
+      setAuth({ token: d.token, userId: d.user_id, expiresAt: d.expires_at, refreshToken: d.refresh_token });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+async function req<T>(method: string, path: string, opts: Opts = {}, retried = false): Promise<T> {
+  const resp = await fetch(BASE + path, buildInit(method, opts));
 
   if (resp.status === 401) {
+    // Try a one-shot transparent refresh, except for the auth endpoints
+    // themselves (a 401 there is terminal).
+    if (!retried && !path.startsWith("/auth/") && refreshToken.value) {
+      if (await tryRefresh()) return req<T>(method, path, opts, true);
+    }
     logout();
     throw new ApiError(401, "unauthorized", "Your session expired — please sign in again.");
   }
+
   if (resp.status === 204) return undefined as T;
 
   const text = await resp.text();
@@ -58,6 +96,23 @@ async function req<T>(method: string, path: string, opts: Opts = {}): Promise<T>
 export const api = {
   login: (username: string, password: string) =>
     req<LoginResponse>("POST", "/auth/login", { body: { username, password } }),
+  // Best-effort server-side revoke of the refresh token, then clear local state.
+  logout: async () => {
+    const rt = refreshToken.value;
+    if (rt) {
+      try {
+        await fetch(`${BASE}/auth/logout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: rt }),
+        });
+      } catch {
+        /* ignore — clearing local state below is what matters */
+      }
+    }
+    clearAuth();
+    location.hash = "/login";
+  },
   me: () => req<User>("GET", "/me"),
   accounts: (uid: string) => req<Account[]>("GET", `/users/${uid}/accounts`),
   account: (id: string) => req<Account>("GET", `/accounts/${id}`),
