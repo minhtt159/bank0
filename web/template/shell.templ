@@ -25,7 +25,7 @@ templ Shell(username string, role string, pendingApprovals int) {
 					<button class="linkbtn" type="submit">Sign out</button>
 				</form>
 			</header>
-			<div class="layout">
+			<div class="layout" id="layout">
 				<nav class="leftnav">
 					<a class="navitem" hx-get="/console/dashboard" hx-target="#main-panel">Dashboard</a>
 					<a class="navitem" hx-get="/console/users" hx-target="#main-panel">Users</a>
@@ -41,8 +41,13 @@ templ Shell(username string, role string, pendingApprovals int) {
 					<a class="navitem" hx-get="/console/audit" hx-target="#main-panel">Audit log</a>
 				</nav>
 				<main id="main-panel" hx-get="/console/dashboard" hx-trigger="load"></main>
-				<aside id="rail">
-					<div class="rail-empty muted">Select a user or row to see details.</div>
+				<aside id="rail-wrap" class="rail-wrap">
+					<div class="rail-bar">
+						<button class="rail-close" type="button" onclick="closeRail()" title="Close panel" aria-label="Close panel">×</button>
+					</div>
+					<div id="rail">
+						<div class="rail-empty muted">Select a user or row to see details.</div>
+					</div>
 				</aside>
 			</div>
 			@templ.Raw(consoleScript)

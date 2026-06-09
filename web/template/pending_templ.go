@@ -51,8 +51,9 @@ func TransfersPanel() templ.Component {
 	})
 }
 
-// TransferTable: full table (first page / search / after an action).
-func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, flash string) templ.Component {
+// TransferTable: full table + pager. Returned for first page, search, an action,
+// or a Prev/Next step — always swapped into #transfers-results (innerHTML).
+func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, prevURL string, nextURL string, flash string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -81,7 +82,7 @@ func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, 
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(flash)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 22, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 23, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -106,7 +107,7 @@ func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = TransferItems(rows, canAct, nextURL).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TransferItems(rows, canAct).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -114,12 +115,16 @@ func TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = pager(prevURL, nextURL, "transfers-results").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		return nil
 	})
 }
 
-// TransferItems: rows (+ a loadMore sentinel). Returned alone on "Load more".
-func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) templ.Component {
+// TransferItems: just the table rows for the current page.
+func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -140,7 +145,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		if len(rows) == 0 && nextURL == "" {
+		if len(rows) == 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<tr><td colspan=\"8\" class=\"muted\">No transfers.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -154,7 +159,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/transfers/" + t.ID.String() + "/detail")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 51, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 53, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
@@ -167,7 +172,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(t.RequestedAt.Format("2006-01-02 15:04"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 52, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 54, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -180,7 +185,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(t.Debit)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 53, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 55, Col: 16}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -193,7 +198,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(t.Credit)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 54, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 56, Col: 17}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -206,7 +211,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(string(t.Kind))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 55, Col: 42}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 57, Col: 42}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
@@ -241,7 +246,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(string(t.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 56, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 58, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {
@@ -254,7 +259,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(money.FormatMinor(t.AmountMinor))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 57, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 59, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
@@ -267,7 +272,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(t.Description)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 58, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 60, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -290,7 +295,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/transfers/" + t.ID.String() + "/post")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 62, Col: 124}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 64, Col: 124}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 					if templ_7745c5c3_Err != nil {
@@ -303,7 +308,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 					var templ_7745c5c3_Var16 string
 					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/transfers/" + t.ID.String() + "/cancel")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 63, Col: 130}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 65, Col: 130}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 					if templ_7745c5c3_Err != nil {
@@ -322,19 +327,6 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool, nextURL string) 
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
-			}
-		}
-		if nextURL != "" {
-			if canAct {
-				templ_7745c5c3_Err = loadMore(nextURL, 8).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = loadMore(nextURL, 7).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
 			}
 		}
 		return nil

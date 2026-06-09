@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -54,7 +55,13 @@ func strOrNil(s string) *string {
 
 func pathID(r *http.Request) (uuid.UUID, error) { return uuid.Parse(mux.Vars(r)["id"]) }
 
-// --- cursor pagination helpers (Load more) -------------------------------
+// --- cursor pagination helpers (Prev / Next) -----------------------------
+//
+// Keyset (cursor) pagination is forward-only by nature, but Prev/Next needs to
+// step backwards too. We stay stateless on the server by carrying the stack of
+// cursors for the pages already visited in a ?hist param. "Next" pushes the
+// current page's cursor; "Prev" pops the stack. No page numbers, no COUNT(*),
+// and each page is still a single indexed keyset query.
 
 // pageCursor reads the composite keyset cursor (?cursor timestamp + ?cid id).
 // Both nil = first page. The id tiebreak makes pagination correct even when many
@@ -75,17 +82,82 @@ func pageCursor(r *http.Request) (*time.Time, *uuid.UUID) {
 	return ts, id
 }
 
-func hasCursor(r *http.Request) bool { return r.URL.Query().Get("cursor") != "" }
+// isPagerNav reports whether the request came from a Prev/Next button (vs. the
+// first render of a drill-down view). Drives whether a fragment or full view
+// is returned for the statement screen.
+func isPagerNav(r *http.Request) bool { return r.URL.Query().Get("nav") == "1" }
 
-// nextPageURL builds the "Load more" URL carrying the next keyset cursor (+ optional q).
-func nextPageURL(base string, ts time.Time, id uuid.UUID, q *string) string {
+// currentCursorStr encodes the cursor that produced the page being rendered
+// ("" for the first page) as "ts|cid".
+func currentCursorStr(r *http.Request) string {
+	c := r.URL.Query().Get("cursor")
+	if c == "" {
+		return ""
+	}
+	return c + "|" + r.URL.Query().Get("cid")
+}
+
+// pageHistory decodes the ?hist stack (cursors of the preceding pages).
+func pageHistory(r *http.Request) []string {
+	s := r.URL.Query().Get("hist")
+	if s == "" {
+		return nil
+	}
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return nil
+	}
+	var h []string
+	if json.Unmarshal(b, &h) != nil {
+		return nil
+	}
+	return h
+}
+
+func encodeHistory(h []string) string {
+	if len(h) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(h)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// buildPageURL assembles a results URL for a given cursor + history stack.
+func buildPageURL(base, cursor string, hist []string, q *string) string {
 	v := url.Values{}
-	v.Set("cursor", ts.Format(time.RFC3339Nano))
-	v.Set("cid", id.String())
+	v.Set("nav", "1")
+	if cursor != "" {
+		parts := strings.SplitN(cursor, "|", 2)
+		v.Set("cursor", parts[0])
+		if len(parts) == 2 {
+			v.Set("cid", parts[1])
+		}
+	}
+	if h := encodeHistory(hist); h != "" {
+		v.Set("hist", h)
+	}
 	if q != nil {
 		v.Set("q", *q)
 	}
 	return base + "?" + v.Encode()
+}
+
+// pagerLinks builds the Prev/Next URLs for a keyset-paginated list. lastTs/lastID
+// are the cursor of the last row on the current page; hasMore says whether a
+// following page exists. An empty string means "no such direction".
+func pagerLinks(r *http.Request, base string, q *string, lastTs time.Time, lastID uuid.UUID, hasMore bool) (prev, next string) {
+	hist := pageHistory(r)
+	if len(hist) > 0 {
+		// Prev: pop the cursor of the immediately preceding page.
+		prev = buildPageURL(base, hist[len(hist)-1], hist[:len(hist)-1], q)
+	}
+	if hasMore {
+		// Next: push the current page's cursor onto the stack.
+		newHist := append(append([]string{}, hist...), currentCursorStr(r))
+		nextCursor := lastTs.Format(time.RFC3339Nano) + "|" + lastID.String()
+		next = buildPageURL(base, nextCursor, newHist, q)
+	}
+	return prev, next
 }
 
 // ---- shell + main-panel screens ----------------------------------------
@@ -581,31 +653,27 @@ func (s *Server) consoleTransfers(w http.ResponseWriter, r *http.Request) {
 // consoleTransfersResults shows ALL transfers (history), newest first, filtered
 // by ?q and paginated by ?cursor. Pending rows are actionable for staff.
 func (s *Server) consoleTransfersResults(w http.ResponseWriter, r *http.Request) {
-	rows, next, canAct, err := s.transfersPage(r)
+	rows, prev, next, canAct, err := s.transfersPage(r)
 	if err != nil {
 		http.Error(w, "transfers error", http.StatusInternalServerError)
 		return
 	}
 	s.html(w)
-	if hasCursor(r) {
-		_ = template.TransferItems(rows, canAct, next).Render(r.Context(), w)
-	} else {
-		_ = template.TransferTable(rows, canAct, next, "").Render(r.Context(), w)
-	}
+	_ = template.TransferTable(rows, canAct, prev, next, "").Render(r.Context(), w)
 }
 
 // renderTransfers re-renders the full table (used after post/cancel; no cursor).
 func (s *Server) renderTransfers(w http.ResponseWriter, r *http.Request, flash string) {
-	rows, next, canAct, err := s.transfersPage(r)
+	rows, prev, next, canAct, err := s.transfersPage(r)
 	if err != nil {
 		http.Error(w, "transfers error", http.StatusInternalServerError)
 		return
 	}
 	s.html(w)
-	_ = template.TransferTable(rows, canAct, next, flash).Render(r.Context(), w)
+	_ = template.TransferTable(rows, canAct, prev, next, flash).Render(r.Context(), w)
 }
 
-func (s *Server) transfersPage(r *http.Request) ([]sqlc.SearchTransfersRow, string, bool, error) {
+func (s *Server) transfersPage(r *http.Request) ([]sqlc.SearchTransfersRow, string, string, bool, error) {
 	ctx := r.Context()
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
@@ -615,19 +683,24 @@ func (s *Server) transfersPage(r *http.Request) ([]sqlc.SearchTransfersRow, stri
 	})
 	if err != nil {
 		s.log.Error("list transfers", "err", err)
-		return nil, "", false, err
+		return nil, "", "", false, err
 	}
-	next := ""
-	if int32(len(rows)) > limit {
+	hasMore := int32(len(rows)) > limit
+	if hasMore {
 		rows = rows[:limit]
-		last := rows[limit-1]
-		next = nextPageURL("/console/transfers/results", last.RequestedAt, last.ID, q)
 	}
+	var lastTs time.Time
+	var lastID uuid.UUID
+	if hasMore {
+		last := rows[len(rows)-1]
+		lastTs, lastID = last.RequestedAt, last.ID
+	}
+	prev, next := pagerLinks(r, "/console/transfers/results", q, lastTs, lastID, hasMore)
 	canAct := false
 	if su, ok := userFromContext(ctx); ok {
 		canAct = canActOnMoney(su.Role)
 	}
-	return rows, next, canAct, nil
+	return rows, prev, next, canAct, nil
 }
 
 func (s *Server) consolePostTransfer(w http.ResponseWriter, r *http.Request) {
@@ -676,18 +749,19 @@ func (s *Server) consoleAuditResults(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "audit error", http.StatusInternalServerError)
 		return
 	}
-	next := ""
-	if int32(len(rows)) > limit {
+	hasMore := int32(len(rows)) > limit
+	if hasMore {
 		rows = rows[:limit]
-		last := rows[limit-1]
-		next = nextPageURL("/console/audit/results", last.CreatedAt, last.ID, q)
 	}
+	var lastTs time.Time
+	var lastID uuid.UUID
+	if hasMore {
+		last := rows[len(rows)-1]
+		lastTs, lastID = last.CreatedAt, last.ID
+	}
+	prev, next := pagerLinks(r, "/console/audit/results", q, lastTs, lastID, hasMore)
 	s.html(w)
-	if hasCursor(r) {
-		_ = template.AuditItems(rows, next).Render(r.Context(), w)
-	} else {
-		_ = template.AuditRows(rows, next).Render(r.Context(), w)
-	}
+	_ = template.AuditRows(rows, prev, next).Render(r.Context(), w)
 }
 
 // ---- statement + transfer detail (drill-down) ---------------------------
@@ -708,15 +782,20 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 		mapDBError(w, err)
 		return
 	}
-	next := ""
-	if int32(len(rows)) > limit {
+	hasMore := int32(len(rows)) > limit
+	if hasMore {
 		rows = rows[:limit]
-		last := rows[limit-1]
-		next = nextPageURL("/console/accounts/"+id.String()+"/statement", last.PostedAt, last.ID, nil)
 	}
+	var lastTs time.Time
+	var lastID uuid.UUID
+	if hasMore {
+		last := rows[len(rows)-1]
+		lastTs, lastID = last.PostedAt, last.ID
+	}
+	prev, next := pagerLinks(r, "/console/accounts/"+id.String()+"/statement", nil, lastTs, lastID, hasMore)
 	s.html(w)
-	if hasCursor(r) {
-		_ = template.StatementItems(rows, next).Render(ctx, w)
+	if isPagerNav(r) {
+		_ = template.StatementBody(rows, prev, next).Render(ctx, w)
 		return
 	}
 	acct, err := s.pg.Queries.GetAccount(ctx, id)
@@ -724,7 +803,7 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 		mapDBError(w, err)
 		return
 	}
-	_ = template.StatementView(acct, rows, next).Render(ctx, w)
+	_ = template.StatementView(acct, rows, prev, next).Render(ctx, w)
 }
 
 func (s *Server) consoleTransferDetail(w http.ResponseWriter, r *http.Request) {
