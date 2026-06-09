@@ -62,9 +62,12 @@ BFF upgrade is a Worker-only change later.
 
 ---
 
-## 3. What exists vs. what we add
+## 3. The client API behind these flows
 
-### 3.1 Already on the client surface (no change) — `api/openapi.yaml`, `tags:[client]`
+Full reference: [`06-client-api.md`](06-client-api.md). The flows map onto these
+endpoints.
+
+### 3.1 Reused as-is — `api/openapi.yaml`, `tags:[client]`
 
 | Flow | Endpoint |
 |------|----------|
@@ -75,11 +78,11 @@ BFF upgrade is a Worker-only change later.
 | 4 Create transfer | `POST /transfers` (+`Idempotency-Key` header) → `TransferResult` |
 | 6 Transfer detail | `GET /transfers/{id}` → `Transfer` |
 
-### 3.2 Backend additions (decided)
+### 3.2 Backend additions built for this app
 
 Both are **client-tagged**, ownership-scoped to the JWT `sub` (the `clientSubject`
-pattern already used by `getAccount`/`listUserAccounts`), generated into `genclient`,
-audited where they mutate. Mind the **shared-op `Params` constraint**
+pattern used by `getAccount`/`listUserAccounts`), generated into `genclient`.
+They followed the **shared-op `Params` constraint**
 ([`04-deployment.md`](04-deployment.md) §4): keep these **client-only** so they may carry
 query/body params without colliding with the admin package.
 
@@ -195,45 +198,51 @@ Details per flow:
 ## 6. Repo layout & build
 
 ```
-web/app/                     # the customer SPA (new; sibling of web/template/ which is the portal)
-  index.html
+web/app/                     # the customer SPA (sibling of web/template/, the portal UI)
+  index.html                 # public/icon.svg
   src/
-    main.tsx  router.tsx
-    api/client.ts            # fetch wrapper: base /api, Bearer, Idempotency-Key, error map
-    api/types.ts             # generated/derived from openapi schemas
-    store/auth.ts  store/accounts.ts
+    main.tsx  app.tsx        # render + router/guard/shell (preact-iso)
+    api/client.ts            # fetch wrapper: base /api, Bearer, Idempotency-Key, 401 refresh, error map
+    api/types.ts             # hand-kept mirror of the openapi client schemas
+    store/auth.ts            # @preact/signals: token + refresh token (sessionStorage)
     routes/{Login,Home,Account,Profile,Transfer,Receipt}.tsx
-    lib/{money.ts,fuzzy.ts}
-    pwa/manifest.webmanifest  pwa/sw.ts
-  vite.config.ts             # + vite-plugin-pwa
+    lib/{money.ts,fuzzy.ts}  styles.css
+  vite.config.ts             # @preact/preset-vite + vite-plugin-pwa; dev proxy /api -> :8090
 worker/
   index.ts                   # static-asset serving + /api/* proxy to api.bank0.hnimn.art
-  wrangler.toml              # routes bank0.hnimn.art/*, [assets] binding, env API_ORIGIN
+  wrangler.toml              # route bank0.hnimn.art/*, [assets] binding, API_ORIGIN var
 ```
 
-- **Type safety:** generate `src/api/types.ts` from `api/openapi.yaml` (e.g.
-  `openapi-typescript`) so SPA types track the contract, mirroring the Go codegen discipline.
-- **CI:** add a `web-app` job — `npm ci && npm run build` (typecheck + Vite) and
-  `wrangler deploy --dry-run` to validate the Worker. Keep it separate from the Go pipeline.
-- **Taskfile:** `task webapp:dev` (Vite + `wrangler dev`), `task webapp:build`,
-  `task webapp:deploy`.
+- **Type safety:** `src/api/types.ts` is a hand-kept mirror of the client schemas;
+  it could be generated with `openapi-typescript` later to track the contract like the Go side.
+- **Tooling:** `task webapp:dev` (Vite + `/api` proxy), `task webapp:build`
+  (`tsc --noEmit` + Vite + PWA), `task webapp:deploy` (build + `wrangler deploy`).
+- **CI (TODO):** a `web-app` job running `npm ci && npm run build` and
+  `wrangler deploy --dry-run`, separate from the Go pipeline.
 
 ---
 
 ## 7. Cloudflare Worker
 
+`worker/wrangler.toml` (the route is a top-level key — it must precede any `[table]`,
+or TOML folds it into `[vars]`):
+
 ```toml
-# worker/wrangler.toml (sketch)
 name = "bank0-webapp"
-main = "worker/index.ts"
+main = "index.ts"
 compatibility_date = "2026-01-01"
 routes = [{ pattern = "bank0.hnimn.art/*", zone_name = "hnimn.art" }]
-assets = { directory = "web/app/dist", binding = "ASSETS" }
+
+[assets]
+directory = "../web/app/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
 [vars]
 API_ORIGIN = "https://api.bank0.hnimn.art"
 ```
 
-Worker logic:
+Worker logic (`worker/index.ts`):
 - `GET /api/*` (and other methods): rewrite path (drop `/api`), `fetch(API_ORIGIN + rest)`,
   pass through `Authorization`, `Idempotency-Key`, body, method; return the upstream response.
 - Everything else: serve from `ASSETS`; **SPA fallback** → `index.html` for unknown paths so
