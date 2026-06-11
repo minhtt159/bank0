@@ -14,6 +14,7 @@ import (
 	"github.com/minhtt159/bank0/internal/api/genclient"
 	"github.com/minhtt159/bank0/internal/config"
 	"github.com/minhtt159/bank0/internal/db"
+	webstatic "github.com/minhtt159/bank0/web/static"
 	"log/slog"
 )
 
@@ -82,6 +83,9 @@ func (s *Server) Router() http.Handler {
 		r.HandleFunc("/login", s.consoleLoginForm).Methods(http.MethodGet)
 		r.HandleFunc("/login", s.consoleLoginSubmit).Methods(http.MethodPost)
 		r.HandleFunc("/logout", s.consoleLogout).Methods(http.MethodPost)
+		// Embedded console assets (CSS/JS). Public: the login page is styled too.
+		r.PathPrefix("/static/").Handler(http.StripPrefix("/static/",
+			staticCache(http.FileServerFS(webstatic.FS)))).Methods(http.MethodGet)
 		// Static admin route registered on the parent BEFORE the client subrouter,
 		// so it isn't shadowed by the client's greedy /transfers/{id} in "all" mode.
 		r.Handle("/transfers/pending", s.requireSession(http.HandlerFunc(s.listPendingJSON))).Methods(http.MethodGet)
@@ -107,6 +111,15 @@ func (s *Server) Router() http.Handler {
 	}
 	s.log.Info("router built", "mode", mode)
 	return r
+}
+
+// staticCache lets browsers cache the embedded console assets briefly (the
+// embed FS has no modtimes, so there is nothing to revalidate against).
+func staticCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // limitOr clamps the optional ?limit to the configured default/bounds.

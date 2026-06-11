@@ -40,11 +40,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templ.Raw(styleTag).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</head><body><div id=\"progress\"></div><header class=\"topbar\"><span class=\"logo\">b0</span> <strong>bank0</strong> <span class=\"muted\">operator console</span> <span class=\"spacer\"></span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<link rel=\"stylesheet\" href=\"/static/console.css\"></head><body><div id=\"progress\"></div><header class=\"topbar\"><span class=\"logo\">b0</span> <strong>bank0</strong> <span class=\"muted\">operator console</span> <span class=\"spacer\"></span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -104,7 +100,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(i64(int64(pendingApprovals)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 58, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 60, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -115,15 +111,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z\"></path><path d=\"M14 3v6h6\"></path><path d=\"M9 13h6\"></path><path d=\"M9 17h6\"></path></svg> Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" onclick=\"closeRail()\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M9 18l6-6-6-6\"></path></svg><p>Select a user or row to see details.</p></div></div></aside></div><div id=\"toasts\"></div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templ.Raw(consoleScript).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z\"></path><path d=\"M14 3v6h6\"></path><path d=\"M9 13h6\"></path><path d=\"M9 17h6\"></path></svg> Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" onclick=\"closeRail()\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M9 18l6-6-6-6\"></path></svg><p>Select a user or row to see details.</p></div></div></aside></div><div id=\"toasts\"></div><script src=\"/static/console.js\"></script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

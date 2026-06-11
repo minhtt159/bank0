@@ -9,7 +9,7 @@ templ layout(title string, username string) {
 			<title>{ "bank0 · " + title }</title>
 			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
 			@templ.Raw(themeScript)
-			@templ.Raw(styleTag)
+			<link rel="stylesheet" href="/static/console.css"/>
 		</head>
 		<body>
 			<header class="topbar">

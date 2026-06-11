@@ -12,7 +12,7 @@ templ Shell(username string, role string, pendingApprovals int) {
 			<title>bank0 · operator console</title>
 			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
 			@templ.Raw(themeScript)
-			@templ.Raw(styleTag)
+			<link rel="stylesheet" href="/static/console.css"/>
 		</head>
 		<body>
 			<div id="progress"></div>
@@ -79,7 +79,7 @@ templ Shell(username string, role string, pendingApprovals int) {
 				</aside>
 			</div>
 			<div id="toasts"></div>
-			@templ.Raw(consoleScript)
+			<script src="/static/console.js"></script>
 		</body>
 	</html>
 }
