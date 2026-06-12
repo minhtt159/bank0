@@ -2,6 +2,11 @@
 
 > How bank0 runs: three public surfaces, one Go image (two run modes), a
 > Cloudflare edge, in-cluster migrations, and a contract-first OpenAPI surface.
+>
+> **This is the self-managed (Postgres + Kubernetes/Helm) path.** For the
+> managed/serverless path — **Supabase + Google Cloud Run + Cloudflare** — see
+> [`08-deployment-cloud-run-supabase.md`](08-deployment-cloud-run-supabase.md).
+> The application code is identical across both; only §§2–3 (hosting) differ.
 
 ---
 
