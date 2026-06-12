@@ -8,15 +8,23 @@ templ layout(title string, username string) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ "bank0 · " + title }</title>
 			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
-			@templ.Raw(styleTag)
+			@templ.Raw(themeScript)
+			<link rel="stylesheet" href="/static/console.css"/>
 		</head>
 		<body>
 			<header class="topbar">
+				<span class="logo">b0</span>
 				<strong>bank0</strong>
 				<span>operator console</span>
+				<span class="spacer"></span>
 				if username != "" {
-					<span class="spacer"></span>
 					<span class="muted">{ username }</span>
+				}
+				<button class="iconbtn" type="button" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+					<svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+				<svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+				</button>
+				if username != "" {
 					<form method="post" action="/logout" style="margin:0">
 						<button class="linkbtn" type="submit">Sign out</button>
 					</form>

@@ -1,6 +1,44 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ]
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "description": "Bundle non-major PWA (web/app) updates into one PR.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["web/app/**"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "web app (PWA) deps"
+    },
+    {
+      "description": "Bundle non-major Cloudflare worker updates into one PR.",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["worker/**"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "cloudflare worker deps"
+    },
+    {
+      "description": "Gate JS major upgrades behind manual dashboard approval (breaking changes; no JS build in CI).",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "addLabels": ["deps:major"]
+    },
+    {
+      "description": "Pin GitHub Actions to commit SHAs for supply-chain safety; group their bumps.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "github actions"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "minimumReleaseAge": "0 days"
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  }
 }
