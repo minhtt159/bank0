@@ -25,6 +25,7 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/05-admin-ui.md`](docs/05-admin-ui.md) | Operator console (portal) UX, roles, dashboards, maker-checker |
 | [`docs/06-client-api.md`](docs/06-client-api.md) | Client API (api.\*): endpoints, JWT + refresh-token auth, ownership, MFA/step-up plan |
 | [`docs/07-client-web-app.md`](docs/07-client-web-app.md) | Customer PWA (bank0.\*, Cloudflare Workers): flows, beneficiaries, idempotency |
+| [`docs/08-fraudbank-bff-plan.md`](docs/08-fraudbank-bff-plan.md) | fraudbank clients: BFF/CORS plan for the Worker, client-API feature gaps (P0–P2), aggregation endpoints |
 
 ## Tech stack (carried from tf-backend, refined)
 
