@@ -36,11 +36,11 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templ.Raw(styleTag).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = templ.Raw(themeScript).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</head><body><div id=\"progress\"></div><header class=\"topbar\"><strong>bank0</strong> <span class=\"muted\">operator console</span> <span class=\"spacer\"></span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<link rel=\"stylesheet\" href=\"/static/console.css\"></head><body><div id=\"progress\"></div><header class=\"topbar\"><span class=\"logo\">b0</span> <strong>bank0</strong> <span class=\"muted\">operator console</span> <span class=\"spacer\"></span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -69,7 +69,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 22, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 24, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -82,13 +82,13 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 23, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 25, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span><form method=\"post\" action=\"/logout\" style=\"margin:0\"><button class=\"linkbtn\" type=\"submit\">Sign out</button></form></header><div class=\"layout\" id=\"layout\"><nav class=\"leftnav\"><a class=\"navitem\" hx-get=\"/console/dashboard\" hx-target=\"#main-panel\">Dashboard</a> <a class=\"navitem\" hx-get=\"/console/users\" hx-target=\"#main-panel\">Users</a> <a class=\"navitem\" hx-get=\"/console/accounts\" hx-target=\"#main-panel\">Accounts</a> <a class=\"navitem\" hx-get=\"/console/pending\" hx-target=\"#main-panel\">Transfers</a> <a class=\"navitem\" hx-get=\"/console/reconcile\" hx-target=\"#main-panel\">Reconciliation</a> <a class=\"navitem\" hx-get=\"/console/approvals\" hx-target=\"#main-panel\">Approvals ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span> <button class=\"iconbtn\" type=\"button\" onclick=\"toggleTheme()\" title=\"Toggle theme\" aria-label=\"Toggle theme\"><svg class=\"icon-sun\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\"><circle cx=\"12\" cy=\"12\" r=\"4\"></circle><path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\"></path></svg> <svg class=\"icon-moon\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z\"></path></svg></button><form method=\"post\" action=\"/logout\" style=\"margin:0\"><button class=\"linkbtn\" type=\"submit\">Sign out</button></form></header><div class=\"layout\" id=\"layout\"><nav class=\"leftnav\"><a class=\"navitem\" hx-get=\"/console/dashboard\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"></rect><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"></rect><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"></rect><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"></rect></svg> Dashboard</a> <a class=\"navitem\" hx-get=\"/console/users\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\"><circle cx=\"12\" cy=\"8\" r=\"4\"></circle><path d=\"M4 21c0-4 3.6-6 8-6s8 2 8 6\"></path></svg> Users</a> <a class=\"navitem\" hx-get=\"/console/accounts\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"><rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2.5\"></rect><path d=\"M2 10h20\"></path></svg> Accounts</a> <a class=\"navitem\" hx-get=\"/console/pending\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 7h13\"></path><path d=\"M14 4l3 3-3 3\"></path><path d=\"M20 17H7\"></path><path d=\"M10 14l-3 3 3 3\"></path></svg> Transfers</a> <a class=\"navitem\" hx-get=\"/console/reconcile\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3v18\"></path><path d=\"M7 21h10\"></path><path d=\"M4 7h16\"></path><path d=\"M6 7l-3 6a3.2 3.2 0 0 0 6 0z\"></path><path d=\"M18 7l-3 6a3.2 3.2 0 0 0 6 0z\"></path></svg> Reconciliation</a> <a class=\"navitem\" hx-get=\"/console/approvals\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path d=\"M8.5 12.5l2.5 2.5 4.5-5\"></path></svg> Approvals ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -100,7 +100,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(i64(int64(pendingApprovals)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 38, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/shell.templ`, Line: 60, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -111,15 +111,7 @@ func Shell(username string, role string, pendingApprovals int) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\">Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" onclick=\"closeRail()\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty muted\">Select a user or row to see details.</div></div></aside></div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templ.Raw(consoleScript).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</a> <a class=\"navitem\" hx-get=\"/console/audit\" hx-target=\"#main-panel\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z\"></path><path d=\"M14 3v6h6\"></path><path d=\"M9 13h6\"></path><path d=\"M9 17h6\"></path></svg> Audit log</a></nav><main id=\"main-panel\" hx-get=\"/console/dashboard\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" onclick=\"closeRail()\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M9 18l6-6-6-6\"></path></svg><p>Select a user or row to see details.</p></div></div></aside></div><div id=\"toasts\"></div><script src=\"/static/console.js\"></script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
