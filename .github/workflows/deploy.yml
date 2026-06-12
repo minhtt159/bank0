@@ -1,0 +1,169 @@
+name: Deploy
+
+# Managed/serverless deploy path (docs/08): Supabase migrations, then the two Go
+# surfaces on Cloud Run + the maintenance Job, then the PWA on Cloudflare.
+#
+# Safety model: everything that touches prod references the `prod` GitHub
+# Environment, which has required reviewers — so a human approves before the DB is
+# migrated or any service ships. Migrations run before app deploys (DB-before-app).
+#
+# Required GitHub config (see deploy/cloudrun/README.md):
+#   Variables : GCP_PROJECT_ID, GCP_REGION, GAR_REPO, GCP_WIF_PROVIDER,
+#               GCP_SERVICE_ACCOUNT, CF_API_ORIGIN (optional)
+#   Secrets   : SUPABASE_SESSION_DSN, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   GCP Secret Manager (referenced by the services, not GitHub):
+#               bank0-db-dsn, bank0-jwt-secret
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # for GCP Workload Identity Federation (keyless auth)
+
+env:
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPO }}/bank0:${{ github.sha }}
+
+jobs:
+  # 1) Build the single image once; api, portal, and the maintenance Job all run it.
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+      - name: Build & push
+        run: |
+          docker build -f deploy/Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  # 2) Migrate Supabase BEFORE any app deploy. Gated by the prod environment.
+  migrate:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: goose up (embedded migrations via the bank0 binary)
+        env:
+          APP_DATABASE_DSN: ${{ secrets.SUPABASE_SESSION_DSN }}
+        run: go run ./cmd/app migrate up
+
+  # 3) Deploy the two Go surfaces — same image, different mode. DB-config and the
+  #    JWT secret come from GCP Secret Manager, not GitHub.
+  deploy-api:
+    needs: [build-push, migrate]
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy bank0-api (mode=api)
+        run: |
+          gcloud run deploy bank0-api \
+            --image "$IMAGE" \
+            --region "${{ vars.GCP_REGION }}" \
+            --port 8080 \
+            --min-instances 0 --max-instances 3 \
+            --allow-unauthenticated \
+            --set-env-vars APP_SERVER_MODE=api,APP_APP_ENV=production,APP_SERVER_AUTO_MIGRATE=false,APP_ADMIN_RUN_MAINTENANCE=false,APP_DATABASE_MAX_OPEN_CONNS=5,APP_DATABASE_MAX_IDLE_CONNS=2 \
+            --set-secrets APP_DATABASE_DSN=bank0-db-dsn:latest,APP_AUTH_JWT_SECRET=bank0-jwt-secret:latest
+
+  deploy-portal:
+    needs: [build-push, migrate]
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy bank0-portal (mode=portal)
+        run: |
+          gcloud run deploy bank0-portal \
+            --image "$IMAGE" \
+            --region "${{ vars.GCP_REGION }}" \
+            --port 8080 \
+            --min-instances 0 --max-instances 3 \
+            --allow-unauthenticated \
+            --set-env-vars APP_SERVER_MODE=portal,APP_APP_ENV=production,APP_SERVER_AUTO_MIGRATE=false,APP_ADMIN_RUN_MAINTENANCE=false,APP_DATABASE_MAX_OPEN_CONNS=5,APP_DATABASE_MAX_IDLE_CONNS=2 \
+            --set-secrets APP_DATABASE_DSN=bank0-db-dsn:latest,APP_AUTH_JWT_SECRET=bank0-jwt-secret:latest
+
+  # 4) Maintenance: scale-to-zero means no in-process sweep, so expire_holds +
+  #    cleanup run as a Cloud Run Job triggered by Cloud Scheduler (set up once,
+  #    see README). Here we just roll the Job to the new image.
+  deploy-maintenance:
+    needs: [build-push, migrate]
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy bank0-maintenance Job (bank0 maintenance)
+        run: |
+          gcloud run jobs deploy bank0-maintenance \
+            --image "$IMAGE" \
+            --region "${{ vars.GCP_REGION }}" \
+            --args maintenance \
+            --max-retries 1 --task-timeout 120s \
+            --set-env-vars APP_APP_ENV=production,APP_DATABASE_MAX_OPEN_CONNS=2 \
+            --set-secrets APP_DATABASE_DSN=bank0-db-dsn:latest
+
+  # 5) PWA -> Cloudflare Worker. Independent of the Go deploy; only runs when the
+  #    app or worker changed.
+  deploy-pwa:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check for web/worker changes
+        id: changed
+        run: |
+          before="${{ github.event.before }}"
+          # workflow_dispatch (or an initial push) has no usable 'before' SHA —
+          # deploy unconditionally in that case rather than silently skipping.
+          if [ -z "$before" ] || ! git rev-parse --quiet --verify "$before^{commit}" >/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$before" "${{ github.sha }}" | grep -qE '^(web/app/|worker/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No web/app or worker changes; skipping PWA deploy."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.run == 'true'
+        with:
+          node-version: 22
+      - name: Build SPA
+        if: steps.changed.outputs.run == 'true'
+        working-directory: web/app
+        run: npm ci && npm run build
+      - name: Deploy Worker
+        if: steps.changed.outputs.run == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
