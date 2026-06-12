@@ -5,15 +5,26 @@ on:
     branches: [main]
   pull_request:
 
+# Pinned generator versions — keep in lockstep with CLAUDE.md. If these drift,
+# the generate-drift gate below will fail with a churned generated file.
+env:
+  SQLC_VERSION: v1.31.1
+  OAPI_CODEGEN_VERSION: v2.7.0
+  TEMPL_VERSION: v0.3.1020
+  GOOSE_VERSION: v3.27.1
+
 jobs:
   test:
     runs-on: ubuntu-latest
 
     # Real Postgres for the DB + HTTP integration tests. The tests apply the
     # embedded migrations themselves; they skip unless TEST_DATABASE_DSN is set.
+    # NOTE: postgres:18 -> postgres:17 to match the Supabase deploy target
+    # (docs/08). uuidv7() is supplied by the polyfill in migration 00001, so this
+    # exercises the exact code path production runs.
     services:
       postgres:
-        image: postgres:18
+        image: postgres:17
         env:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: admin
@@ -45,3 +56,72 @@ jobs:
 
       - name: Test (unit + DB/HTTP integration, race detector)
         run: go test -race ./...
+
+  # Contract-first gate: regenerating from the sources must produce no diff, i.e.
+  # the committed sqlc / oapi-codegen / templ output is in sync with the spec,
+  # queries, migrations, and templates. Drift here is a build error by policy
+  # (CLAUDE.md rule 3).
+  generate-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install pinned generators
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION}
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@${OAPI_CODEGEN_VERSION}
+          go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
+
+      - name: Regenerate
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          sqlc generate -f db/sqlc.yaml
+          oapi-codegen -config api/oapi-codegen.client.yaml api/openapi.yaml
+          oapi-codegen -config api/oapi-codegen.admin.yaml api/openapi.yaml
+          templ generate
+
+      - name: Fail on drift
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Generated code is out of date. Run 'task generate' and commit the result." >&2
+            exit 1
+          fi
+
+  # Every migration must be reversible (CLAUDE.md): up -> reset(down all) -> up on
+  # a throwaway PG17, the same version Supabase runs.
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: bank0_mig
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d bank0_mig"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DSN: postgres://admin:admin@localhost:5432/bank0_mig?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install goose
+        run: go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
+      - name: up -> reset -> up
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          goose -dir db/migrations postgres "$DSN" up
+          goose -dir db/migrations postgres "$DSN" reset
+          goose -dir db/migrations postgres "$DSN" up

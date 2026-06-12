@@ -52,8 +52,8 @@ type DatabaseConfig struct {
 }
 
 type ServerConfig struct {
-	Port             int    `mapstructure:"port"`
-	DefaultPageLimit int32  `mapstructure:"default_page_limit"`
+	Port             int   `mapstructure:"port"`
+	DefaultPageLimit int32 `mapstructure:"default_page_limit"`
 	// Mode selects which route surface this instance serves:
 	//   "api"    -> client API only      (api.bank0.hnimn.art)
 	//   "portal" -> admin API + console   (portal.bank0.hnimn.art)
@@ -110,7 +110,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("auth.jwt_ttl", "15m") // short access token; clients rotate via /auth/refresh
 	v.SetDefault("auth.jwt_issuer", "bank0")
 	v.SetDefault("auth.jwt_audience", "bank0-client")
-	v.SetDefault("auth.refresh_ttl", "720h")          // 30d idle
+	v.SetDefault("auth.refresh_ttl", "720h")           // 30d idle
 	v.SetDefault("auth.refresh_absolute_ttl", "2160h") // 90d hard cap
 
 	v.AddConfigPath(path)
@@ -120,6 +120,11 @@ func LoadConfig(path string) (Config, error) {
 	v.SetEnvPrefix("APP")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+
+	// Cloud Run (and most PaaS) inject the listen port as $PORT, not
+	// $APP_SERVER_PORT. Bind both so the app honors the platform's port without
+	// dropping the existing APP_-prefixed override. See docs/08 §2.1.
+	_ = v.BindEnv("server.port", "APP_SERVER_PORT", "PORT")
 
 	if err := v.ReadInConfig(); err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
