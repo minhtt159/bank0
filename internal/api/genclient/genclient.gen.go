@@ -110,6 +110,24 @@ func (e TransferSuggestionSource) Valid() bool {
 	}
 }
 
+// Defines values for GetAccountLedgerParamsDirection.
+const (
+	Credit GetAccountLedgerParamsDirection = "credit"
+	Debit  GetAccountLedgerParamsDirection = "debit"
+)
+
+// Valid indicates whether the value is a known member of the GetAccountLedgerParamsDirection enum.
+func (e GetAccountLedgerParamsDirection) Valid() bool {
+	switch e {
+	case Credit:
+		return true
+	case Debit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	AvailableMinor     *int64              `json:"available_minor,omitempty"`
@@ -342,8 +360,30 @@ type sessionCookieContextKey string
 // GetAccountLedgerParams defines parameters for GetAccountLedger.
 type GetAccountLedgerParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// CursorId id of the last row seen; with `cursor` forms the composite keyset tie-break.
+	CursorId *openapi_types.UUID `form:"cursor_id,omitempty" json:"cursor_id,omitempty"`
+	Limit    *Limit              `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// From only entries posted at or after this instant (inclusive).
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To only entries posted strictly before this instant (exclusive).
+	To        *time.Time                       `form:"to,omitempty" json:"to,omitempty"`
+	Direction *GetAccountLedgerParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
+
+	// Q free-text match over description, counterparty IBAN, and counterparty owner.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// MinMinor minimum absolute amount in minor units (inclusive).
+	MinMinor *int64 `form:"min_minor,omitempty" json:"min_minor,omitempty"`
+
+	// MaxMinor maximum absolute amount in minor units (inclusive).
+	MaxMinor *int64 `form:"max_minor,omitempty" json:"max_minor,omitempty"`
 }
+
+// GetAccountLedgerParamsDirection defines parameters for GetAccountLedger.
+type GetAccountLedgerParamsDirection string
 
 // ResolveBeneficiaryParams defines parameters for ResolveBeneficiary.
 type ResolveBeneficiaryParams struct {
@@ -402,7 +442,7 @@ type ServerInterface interface {
 	// Get an account with ledger + available balance
 	// (GET /accounts/{id})
 	GetAccount(w http.ResponseWriter, r *http.Request, id Id)
-	// Account statement (cursor-paginated, running balance)
+	// Account statement (composite-keyset cursor, running balance, filterable)
 	// (GET /accounts/{id}/ledger)
 	GetAccountLedger(w http.ResponseWriter, r *http.Request, id Id, params GetAccountLedgerParams)
 	// Verify credentials (bcrypt). Establishes a session in the portal.
@@ -536,6 +576,19 @@ func (siw *ServerInterfaceWrapper) GetAccountLedger(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// ------------- Optional query parameter "cursor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor_id", r.URL.Query(), &params.CursorId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor_id", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -545,6 +598,84 @@ func (siw *ServerInterfaceWrapper) GetAccountLedger(w http.ResponseWriter, r *ht
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "direction" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "direction", r.URL.Query(), &params.Direction, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "direction"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "direction", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "min_minor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "min_minor", r.URL.Query(), &params.MinMinor, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "min_minor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "min_minor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "max_minor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "max_minor", r.URL.Query(), &params.MaxMinor, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "max_minor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "max_minor", Err: err})
 		}
 		return
 	}
