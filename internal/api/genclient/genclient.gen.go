@@ -364,6 +364,19 @@ type ResolvedAccount struct {
 	OwnerNameMasked *string             `json:"owner_name_masked,omitempty"`
 }
 
+// Session One active refresh-token family (a device/login). No token material.
+type Session struct {
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+
+	// Current true when this is the family of the presented X-Refresh-Token
+	Current     *bool               `json:"current,omitempty"`
+	DeviceLabel *string             `json:"device_label,omitempty"`
+	FamilyId    *openapi_types.UUID `json:"family_id,omitempty"`
+	Ip          *string             `json:"ip,omitempty"`
+	LastSeenAt  *time.Time          `json:"last_seen_at,omitempty"`
+	UserAgent   *string             `json:"user_agent,omitempty"`
+}
+
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
 	Id     *openapi_types.UUID `json:"id,omitempty"`
@@ -459,6 +472,9 @@ type User struct {
 // Cursor defines model for Cursor.
 type Cursor = time.Time
 
+// FamilyId defines model for FamilyId.
+type FamilyId = openapi_types.UUID
+
 // Id defines model for Id.
 type Id = openapi_types.UUID
 
@@ -467,6 +483,9 @@ type IdempotencyKey = string
 
 // Limit defines model for Limit.
 type Limit = int
+
+// SessionToken defines model for SessionToken.
+type SessionToken = string
 
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
@@ -511,6 +530,12 @@ type ResolveBeneficiaryParams struct {
 type ListMyDisputesParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListSessionsParams defines parameters for ListSessions.
+type ListSessionsParams struct {
+	// XRefreshToken The caller's current refresh token. Optional; when present, the matching family is flagged current:true in GET /me/sessions. Never logged.
+	XRefreshToken *SessionToken `json:"X-Refresh-Token,omitempty"`
 }
 
 // ListMyTransfersParams defines parameters for ListMyTransfers.
@@ -636,6 +661,12 @@ type ServerInterface interface {
 	// Change the authenticated customer's password (revokes other sessions)
 	// (POST /me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
+	// List the caller's active sessions (refresh-token families = devices)
+	// (GET /me/sessions)
+	ListSessions(w http.ResponseWriter, r *http.Request, params ListSessionsParams)
+	// Revoke one session/device (selective sign-out). Idempotent.
+	// (DELETE /me/sessions/{family_id})
+	RevokeSession(w http.ResponseWriter, r *http.Request, familyId FamilyId)
 	// List the caller's transfers across all their accounts (keyset-paginated)
 	// (GET /transfers)
 	ListMyTransfers(w http.ResponseWriter, r *http.Request, params ListMyTransfersParams)
@@ -1105,6 +1136,73 @@ func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ChangePassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSessions operation middleware
+func (siw *ServerInterfaceWrapper) ListSessions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSessionsParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "X-Refresh-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Refresh-Token")]; found {
+		var XRefreshToken SessionToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Refresh-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Refresh-Token", valueList[0], &XRefreshToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Refresh-Token", Err: err})
+			return
+		}
+
+		params.XRefreshToken = &XRefreshToken
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSessions(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeSession operation middleware
+func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "family_id" -------------
+	var familyId FamilyId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "family_id", mux.Vars(r)["family_id"], &familyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "family_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeSession(w, r, familyId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1616,6 +1714,10 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/me", wrapper.UpdateMe).Methods(http.MethodPatch)
 
 	r.HandleFunc(options.BaseURL+"/me/password", wrapper.ChangePassword).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/me/sessions", wrapper.ListSessions).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/me/sessions/{family_id}", wrapper.RevokeSession).Methods(http.MethodDelete)
 
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.ListMyTransfers).Methods(http.MethodGet)
 

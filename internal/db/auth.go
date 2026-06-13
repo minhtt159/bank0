@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -91,13 +92,65 @@ func (p *Postgres) RevokeSession(ctx context.Context, tokenHash string) error {
 // --- client (api) refresh tokens (docs/06 §3) ---
 
 // IssueRefreshToken opens a new token family at login and returns the family id.
-func (p *Postgres) IssueRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, idleSeconds int, userAgent, ip string) (uuid.UUID, error) {
+// deviceLabel is an optional client hint shown in GET /me/sessions ("" -> NULL).
+func (p *Postgres) IssueRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, idleSeconds int, userAgent, ip, deviceLabel string) (uuid.UUID, error) {
 	var family uuid.UUID
 	err := p.Pool.QueryRow(ctx,
-		`SELECT issue_refresh_token($1::uuid, $2::text, $3::int, $4::text, $5::text)`,
-		userID, tokenHash, idleSeconds, userAgent, ip,
+		`SELECT issue_refresh_token($1::uuid, $2::text, $3::int, $4::text, $5::text, $6::text)`,
+		userID, tokenHash, idleSeconds, userAgent, ip, nullIfEmpty(deviceLabel),
 	).Scan(&family)
 	return family, err
+}
+
+// nullIfEmpty returns nil for an empty string so pgx binds SQL NULL (not '').
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// Session is one active refresh-token family (a device/login) for GET /me/sessions.
+// It never exposes any token material — only the opaque family id and login hints.
+type Session struct {
+	FamilyID    uuid.UUID `json:"family_id"`
+	DeviceLabel *string   `json:"device_label,omitempty"`
+	UserAgent   *string   `json:"user_agent,omitempty"`
+	IP          *string   `json:"ip,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	Current     bool      `json:"current"`
+}
+
+// ListUserSessions returns the caller's active sessions, newest activity first.
+// (list_user_sessions RETURNS TABLE, which sqlc can't expand — hand-written pgx.)
+func (p *Postgres) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error) {
+	rows, err := p.Pool.Query(ctx,
+		`SELECT family_id, device_label, user_agent, ip, created_at, last_seen_at
+		   FROM list_user_sessions($1::uuid)`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Session{} // non-nil so an empty list marshals as [] not null
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.FamilyID, &s.DeviceLabel, &s.UserAgent, &s.IP, &s.CreatedAt, &s.LastSeenAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// RevokeUserFamily revokes one refresh family iff owned by userID. Returns the count
+// of live tokens revoked; 0 => not found / not owned / already revoked (the handler
+// disambiguates not-owned -> 404 with an ownership probe).
+func (p *Postgres) RevokeUserFamily(ctx context.Context, userID, familyID uuid.UUID) (int, error) {
+	var n int
+	err := p.Pool.QueryRow(ctx,
+		`SELECT revoke_refresh_family_scoped($1::uuid, $2::uuid)`, userID, familyID).Scan(&n)
+	return n, err
 }
 
 // RotateRefreshToken consumes oldHash and mints newHash atomically. On reuse it

@@ -622,6 +622,7 @@ type RefreshToken struct {
 	RevokedReason *string    `json:"revoked_reason"`
 	UserAgent     *string    `json:"user_agent"`
 	Ip            *string    `json:"ip"`
+	DeviceLabel   *string    `json:"device_label"`
 }
 
 type Session struct {

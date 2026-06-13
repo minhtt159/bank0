@@ -148,7 +148,7 @@ Found while building (and planning past) the fraudbank clients. *Where it belong
 > (guided), the disputes domain (client + admin), and the **admin-JSON RBAC** hardening
 > ([`10-security-review.md`](10-security-review.md)), and the **ledger composite-cursor
 > tie-skip fix + server-side filters**. **Open:** token-holding Worker BFF (§1.1),
-> customer account opening, transfer-limit requests, device/session
+> customer account opening, transfer-limit requests
 > list. **Deferred:** self-registration, step-up MFA.
 
 ### P0 — blocks or distorts the v1 clients
