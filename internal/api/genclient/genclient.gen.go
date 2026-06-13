@@ -92,6 +92,24 @@ func (e RaiseDisputeRequestCategory) Valid() bool {
 	}
 }
 
+// Defines values for TransferListItemDirection.
+const (
+	TransferListItemDirectionIn  TransferListItemDirection = "in"
+	TransferListItemDirectionOut TransferListItemDirection = "out"
+)
+
+// Valid indicates whether the value is a known member of the TransferListItemDirection enum.
+func (e TransferListItemDirection) Valid() bool {
+	switch e {
+	case TransferListItemDirectionIn:
+		return true
+	case TransferListItemDirectionOut:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransferSuggestionSource.
 const (
 	OwnAccount TransferSuggestionSource = "own_account"
@@ -122,6 +140,81 @@ func (e GetAccountLedgerParamsDirection) Valid() bool {
 	case Credit:
 		return true
 	case Debit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListMyTransfersParamsStatus.
+const (
+	Canceled ListMyTransfersParamsStatus = "canceled"
+	Failed   ListMyTransfersParamsStatus = "failed"
+	Pending  ListMyTransfersParamsStatus = "pending"
+	Posted   ListMyTransfersParamsStatus = "posted"
+	Reversed ListMyTransfersParamsStatus = "reversed"
+)
+
+// Valid indicates whether the value is a known member of the ListMyTransfersParamsStatus enum.
+func (e ListMyTransfersParamsStatus) Valid() bool {
+	switch e {
+	case Canceled:
+		return true
+	case Failed:
+		return true
+	case Pending:
+		return true
+	case Posted:
+		return true
+	case Reversed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListMyTransfersParamsKind.
+const (
+	ListMyTransfersParamsKindAdjustment ListMyTransfersParamsKind = "adjustment"
+	ListMyTransfersParamsKindDeposit    ListMyTransfersParamsKind = "deposit"
+	ListMyTransfersParamsKindFee        ListMyTransfersParamsKind = "fee"
+	ListMyTransfersParamsKindReversal   ListMyTransfersParamsKind = "reversal"
+	ListMyTransfersParamsKindTransfer   ListMyTransfersParamsKind = "transfer"
+	ListMyTransfersParamsKindWithdrawal ListMyTransfersParamsKind = "withdrawal"
+)
+
+// Valid indicates whether the value is a known member of the ListMyTransfersParamsKind enum.
+func (e ListMyTransfersParamsKind) Valid() bool {
+	switch e {
+	case ListMyTransfersParamsKindAdjustment:
+		return true
+	case ListMyTransfersParamsKindDeposit:
+		return true
+	case ListMyTransfersParamsKindFee:
+		return true
+	case ListMyTransfersParamsKindReversal:
+		return true
+	case ListMyTransfersParamsKindTransfer:
+		return true
+	case ListMyTransfersParamsKindWithdrawal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListMyTransfersParamsDirection.
+const (
+	ListMyTransfersParamsDirectionIn  ListMyTransfersParamsDirection = "in"
+	ListMyTransfersParamsDirectionOut ListMyTransfersParamsDirection = "out"
+)
+
+// Valid indicates whether the value is a known member of the ListMyTransfersParamsDirection enum.
+func (e ListMyTransfersParamsDirection) Valid() bool {
+	switch e {
+	case ListMyTransfersParamsDirectionIn:
+		return true
+	case ListMyTransfersParamsDirectionOut:
 		return true
 	default:
 		return false
@@ -293,6 +386,30 @@ type Transfer struct {
 	Status          *string             `json:"status,omitempty"`
 }
 
+// TransferListItem A transfer in the caller's cross-account history (direction is caller-relative).
+type TransferListItem struct {
+	AmountMinor      *int64  `json:"amount_minor,omitempty"`
+	CounterpartyIban *string `json:"counterparty_iban,omitempty"`
+
+	// CounterpartyOwner Masked owner name of the other party.
+	CounterpartyOwner *string             `json:"counterparty_owner,omitempty"`
+	CreditAccountId   *openapi_types.UUID `json:"credit_account_id,omitempty"`
+	Currency          *string             `json:"currency,omitempty"`
+	DebitAccountId    *openapi_types.UUID `json:"debit_account_id,omitempty"`
+	Description       *string             `json:"description,omitempty"`
+
+	// Direction Relative to the caller.
+	Direction   *TransferListItemDirection `json:"direction,omitempty"`
+	Id          *openapi_types.UUID        `json:"id,omitempty"`
+	Kind        *string                    `json:"kind,omitempty"`
+	PostedAt    *time.Time                 `json:"posted_at,omitempty"`
+	RequestedAt *time.Time                 `json:"requested_at,omitempty"`
+	Status      *string                    `json:"status,omitempty"`
+}
+
+// TransferListItemDirection Relative to the caller.
+type TransferListItemDirection string
+
 // TransferResult defines model for TransferResult.
 type TransferResult struct {
 	Status     *string             `json:"status,omitempty"`
@@ -396,6 +513,38 @@ type ListMyDisputesParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListMyTransfersParams defines parameters for ListMyTransfers.
+type ListMyTransfersParams struct {
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// CursorId id of the last row seen; with `cursor` forms the composite keyset tie-break.
+	CursorId *openapi_types.UUID `form:"cursor_id,omitempty" json:"cursor_id,omitempty"`
+	Limit    *Limit              `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// From only transfers requested at or after this instant (inclusive).
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To only transfers requested strictly before this instant (exclusive).
+	To     *time.Time                   `form:"to,omitempty" json:"to,omitempty"`
+	Status *ListMyTransfersParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Kind   *ListMyTransfersParamsKind   `form:"kind,omitempty" json:"kind,omitempty"`
+
+	// Direction Relative to the caller: out = caller's account is the debit side; in = the credit side.
+	Direction *ListMyTransfersParamsDirection `form:"direction,omitempty" json:"direction,omitempty"`
+
+	// Q free-text match over description and either side's IBAN.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// ListMyTransfersParamsStatus defines parameters for ListMyTransfers.
+type ListMyTransfersParamsStatus string
+
+// ListMyTransfersParamsKind defines parameters for ListMyTransfers.
+type ListMyTransfersParamsKind string
+
+// ListMyTransfersParamsDirection defines parameters for ListMyTransfers.
+type ListMyTransfersParamsDirection string
+
 // CreateTransferParams defines parameters for CreateTransfer.
 type CreateTransferParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
@@ -487,6 +636,9 @@ type ServerInterface interface {
 	// Change the authenticated customer's password (revokes other sessions)
 	// (POST /me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
+	// List the caller's transfers across all their accounts (keyset-paginated)
+	// (GET /transfers)
+	ListMyTransfers(w http.ResponseWriter, r *http.Request, params ListMyTransfersParams)
 	// Create a transfer (auto-posts by default). Idempotent.
 	// (POST /transfers)
 	CreateTransfer(w http.ResponseWriter, r *http.Request, params CreateTransferParams)
@@ -962,6 +1114,143 @@ func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyTransfers operation middleware
+func (siw *ServerInterfaceWrapper) ListMyTransfers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMyTransfersParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor_id", r.URL.Query(), &params.CursorId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "direction" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "direction", r.URL.Query(), &params.Direction, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "direction"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "direction", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyTransfers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateTransfer operation middleware
 func (siw *ServerInterfaceWrapper) CreateTransfer(w http.ResponseWriter, r *http.Request) {
 
@@ -1327,6 +1616,8 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/me", wrapper.UpdateMe).Methods(http.MethodPatch)
 
 	r.HandleFunc(options.BaseURL+"/me/password", wrapper.ChangePassword).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/transfers", wrapper.ListMyTransfers).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.CreateTransfer).Methods(http.MethodPost)
 

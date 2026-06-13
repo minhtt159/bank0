@@ -1,5 +1,13 @@
 # Spec — `GET /transfers` : list the caller's transfers across all their accounts
 
+> ✅ **IMPLEMENTED (2026-06-14, `improve/add-features`)** — the **bare-array** variant
+> (no `TransferPage` envelope, per [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md)
+> §0.2): `GET /transfers` returns a bare array with a composite `(requested_at, id)`
+> cursor (`cursor`+`cursor_id`) and filters `status`/`kind`/`from`/`to`/`direction`/`q`.
+> Query `ListMyTransfers` in `db/queries/transfers.sql`; handler in
+> `internal/api/handlers_transfers.go`; test `internal/api/transfers_list_test.go`. The
+> envelope/`cursor.go` sections below are superseded; the query + ownership design stands.
+>
 > Status: **spec, ready to implement.** Completes the "List my transfers (across
 > accounts)" P1 row in [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md)
 > §2. Depends on the pagination envelope + opaque composite cursor defined in
