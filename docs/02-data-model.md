@@ -366,6 +366,26 @@ Note this logs the *act of an operator deciding something*. The financial effect
 is still the ledger. Together they answer both "what moved?" (ledger) and "who
 authorized it and why?" (admin_actions).
 
+### 3.8 `guided_scenarios` — fraudbank "Guided transaction" demo config
+
+Demo/config only — **no money state** (migration `00019`). One row maps an active named
+scenario to a target ("mule") `accounts(id)` that `GET /transfers/suggestion` suggests:
+optionally per-user (`target_user_id`), gated by `min_amount_minor`, ordered by
+`priority`. Empty by default, so the resolver (`suggest_transfer_destination()`) falls
+back to the caller's own other active account. The response never exposes more than
+confirmation-of-payee (masked owner name + iban via `mask_name()`).
+
+### 3.9 `disputes` — customer "I don't recognise this" cases
+
+A dispute against a `transfers(id)` the raiser is a party to (migration `00020`). **Not
+money state** — the ledger stays append-only; remedy is the operator's existing
+`reverse_transfer`. Only this row's `status` (`open` / `under_review` / `resolved` /
+`rejected`) + `resolution_note` / `resolver_user_id` mutate (state machine in
+`resolve_dispute`). A partial unique index on `(transfer_id, raised_by_user_id) WHERE
+status IN ('open','under_review')` enforces one open dispute per raiser (→ 409). Raising
+(`raise_dispute`) emits an `admin_actions` `dispute_raised` row — the flag-only
+fraud-engine seam.
+
 ---
 
 ## 4. Invariants (the correctness contract)
