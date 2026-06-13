@@ -9,7 +9,7 @@ on:
 # the generate-drift gate below will fail with a churned generated file.
 env:
   SQLC_VERSION: v1.31.1
-  OAPI_CODEGEN_VERSION: v2.7.0
+  OAPI_CODEGEN_VERSION: v2.7.1
   TEMPL_VERSION: v0.3.1020
   GOOSE_VERSION: v3.27.1
 

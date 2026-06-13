@@ -71,7 +71,7 @@ task webapp:build    # typecheck + Vite build the PWA
 
 ```bash
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
-go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.0
+go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1
 go install github.com/a-h/templ/cmd/templ@v0.3.1020
 ```
 
