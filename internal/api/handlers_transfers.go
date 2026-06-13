@@ -170,6 +170,9 @@ func (s *Server) CancelTransfer(w http.ResponseWriter, r *http.Request, id opena
 
 // ReverseTransfer implements genadmin.ServerInterface.
 func (s *Server) ReverseTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.ReverseTransferParams) {
+	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+		return
+	}
 	var req reasonReq
 	if !decodeJSON(w, r, &req) {
 		return

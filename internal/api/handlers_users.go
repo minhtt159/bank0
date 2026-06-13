@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -28,6 +29,9 @@ func validRole(r string) bool {
 
 // CreateUser implements genadmin.ServerInterface.
 func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireRole(w, r, canManageUsers); !ok {
+		return
+	}
 	var req createUserReq
 	if !decodeJSON(w, r, &req) {
 		return
@@ -71,6 +75,57 @@ func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 	subj, ok := clientSubject(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
+	if err != nil {
+		mapDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+type updateMeReq struct {
+	FullName    *string `json:"full_name"`
+	Email       *string `json:"email"`
+	PhoneNumber *string `json:"phone_number"`
+}
+
+// looksLikeEmail is a cheap shape check for a friendlier 422 than the raw DB CHECK
+// message; the users.email CHECK constraint remains the authority.
+func looksLikeEmail(e string) bool {
+	at := strings.IndexByte(e, '@')
+	return at > 0 && strings.IndexByte(e[at+1:], '.') > 0
+}
+
+// UpdateMe implements genclient.ServerInterface: self-service profile edit, scoped
+// to the JWT subject (no user_id is accepted, so it's IDOR-proof by construction).
+// It reuses update_user_info with password+status pinned nil, so the client surface
+// can never change a password (use POST /me/password), unlock an account, or
+// escalate role. See docs/specs/spec-self-service-profile.md.
+func (s *Server) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	var req updateMeReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Email != nil && *req.Email != "" && !looksLikeEmail(*req.Email) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_email", "email is not a valid address")
+		return
+	}
+	if err := s.pg.Queries.UpdateUserInfo(r.Context(), sqlc.UpdateUserInfoParams{
+		UserID:      subj,
+		FullName:    req.FullName,
+		Email:       req.Email,
+		PhoneNumber: req.PhoneNumber,
+		Password:    nil,                   // escalation guard: never settable here
+		Status:      sqlc.NullUserStatus{}, // escalation guard: never settable here
+	}); err != nil {
+		mapDBError(w, err) // 23505 -> 409 (email/phone taken); 23514 -> 422 (bad email)
 		return
 	}
 	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
