@@ -13,6 +13,80 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
+func validTransferStatus(s sqlc.TransferStatus) bool {
+	switch s {
+	case sqlc.TransferStatusPending, sqlc.TransferStatusPosted, sqlc.TransferStatusFailed,
+		sqlc.TransferStatusCanceled, sqlc.TransferStatusReversed:
+		return true
+	}
+	return false
+}
+
+func validTransferKind(k sqlc.TransferKind) bool {
+	switch k {
+	case sqlc.TransferKindTransfer, sqlc.TransferKindDeposit, sqlc.TransferKindWithdrawal,
+		sqlc.TransferKindReversal, sqlc.TransferKindFee, sqlc.TransferKindAdjustment:
+		return true
+	}
+	return false
+}
+
+// ListMyTransfers implements genclient.ServerInterface: the caller's cross-account
+// transfer history, newest first. Ownership (caller owns debit OR credit) and paging
+// live in SQL; the response is a bare array with a composite (requested_at, id)
+// keyset cursor — pass the last row's requested_at as cursor + its id as cursor_id.
+// Read-only, no idempotency. See docs/specs/spec-list-my-transfers.md.
+func (s *Server) ListMyTransfers(w http.ResponseWriter, r *http.Request, params genclient.ListMyTransfersParams) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	q := sqlc.ListMyTransfersParams{
+		Subject:   subj,
+		Cursor:    params.Cursor,
+		CursorID:  params.CursorId, // openapi_types.UUID is an alias of uuid.UUID
+		FromTs:    params.From,
+		ToTs:      params.To,
+		Q:         params.Q,
+		PageLimit: s.limitOr(params.Limit),
+	}
+	if params.Status != nil {
+		st := sqlc.TransferStatus(*params.Status)
+		if !validTransferStatus(st) {
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid status")
+			return
+		}
+		q.Status = sqlc.NullTransferStatus{TransferStatus: st, Valid: true}
+	}
+	if params.Kind != nil {
+		k := sqlc.TransferKind(*params.Kind)
+		if !validTransferKind(k) {
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid kind")
+			return
+		}
+		q.Kind = sqlc.NullTransferKind{TransferKind: k, Valid: true}
+	}
+	if params.Direction != nil {
+		d := string(*params.Direction)
+		if d != "out" && d != "in" {
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid direction")
+			return
+		}
+		q.Dir = &d
+	}
+	if params.From != nil && params.To != nil && !params.From.Before(*params.To) {
+		writeError(w, http.StatusBadRequest, "bad_request", "from must be before to")
+		return
+	}
+	rows, err := s.pg.Queries.ListMyTransfers(r.Context(), q)
+	if err != nil {
+		mapDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows) // writeJSON coerces a nil slice -> []
+}
+
 type createTransferReq struct {
 	DebitAccount  string `json:"debit_account"`
 	CreditAccount string `json:"credit_account"`

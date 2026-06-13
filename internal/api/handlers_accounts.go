@@ -89,9 +89,21 @@ func (s *Server) GetAccountLedger(w http.ResponseWriter, r *http.Request, id ope
 			return
 		}
 	}
+	var direction *string
+	if params.Direction != nil {
+		d := string(*params.Direction)
+		direction = &d
+	}
 	rows, err := s.pg.Queries.GetAccountLedger(r.Context(), sqlc.GetAccountLedgerParams{
 		AccountID: uuid.UUID(id),
 		Cursor:    params.Cursor,
+		CursorID:  params.CursorId, // openapi_types.UUID is an alias of uuid.UUID
+		FromTs:    params.From,
+		ToTs:      params.To,
+		Direction: direction,
+		MinMinor:  params.MinMinor,
+		MaxMinor:  params.MaxMinor,
+		Q:         params.Q,
 		PageLimit: s.limitOr(params.Limit),
 	})
 	if err != nil {

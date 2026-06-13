@@ -169,7 +169,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
-		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r)); err != nil {
+		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r), ""); err != nil {
 		mapDBError(w, err)
 		return
 	}

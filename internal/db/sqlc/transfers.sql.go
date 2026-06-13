@@ -114,14 +114,31 @@ SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signe
        counterparty_iban, counterparty_owner
 FROM enriched_ledger
 WHERE account_id = $1::uuid
-  AND posted_at < COALESCE($2::timestamptz, now())
+  AND ($2::timestamptz IS NULL
+       OR (posted_at, id) < ($2::timestamptz, $3::uuid))
+  AND ($4::timestamptz IS NULL OR posted_at >= $4::timestamptz)
+  AND ($5::timestamptz   IS NULL OR posted_at <  $5::timestamptz)
+  AND ($6::text IS NULL OR direction::text = $6::text)
+  AND ($7::bigint IS NULL OR amount_minor >= $7::bigint)
+  AND ($8::bigint IS NULL OR amount_minor <= $8::bigint)
+  AND ($9::text IS NULL OR (
+        description        ILIKE '%' || $9::text || '%'
+     OR counterparty_iban  ILIKE '%' || $9::text || '%'
+     OR counterparty_owner ILIKE '%' || $9::text || '%'))
 ORDER BY posted_at DESC, id DESC
-LIMIT $3::int
+LIMIT $10::int
 `
 
 type GetAccountLedgerParams struct {
 	AccountID uuid.UUID  `json:"account_id"`
 	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	FromTs    *time.Time `json:"from_ts"`
+	ToTs      *time.Time `json:"to_ts"`
+	Direction *string    `json:"direction"`
+	MinMinor  *int64     `json:"min_minor"`
+	MaxMinor  *int64     `json:"max_minor"`
+	Q         *string    `json:"q"`
 	PageLimit int32      `json:"page_limit"`
 }
 
@@ -143,8 +160,24 @@ type GetAccountLedgerRow struct {
 	CounterpartyOwner *string        `json:"counterparty_owner"`
 }
 
+// Client account statement. Composite (posted_at, id) keyset cursor so ties (rows
+// sharing a posted_at) page correctly — the posted_at-only cursor silently skipped
+// them at a page boundary. Optional server-side filters (all narg -> omitted = no
+// filter): date range [from, to), direction, free text, and absolute-amount range.
+// Pass cursor + cursor_id together (both from the last row of the previous page).
 func (q *Queries) GetAccountLedger(ctx context.Context, arg GetAccountLedgerParams) ([]GetAccountLedgerRow, error) {
-	rows, err := q.db.Query(ctx, getAccountLedger, arg.AccountID, arg.Cursor, arg.PageLimit)
+	rows, err := q.db.Query(ctx, getAccountLedger,
+		arg.AccountID,
+		arg.Cursor,
+		arg.CursorID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.Direction,
+		arg.MinMinor,
+		arg.MaxMinor,
+		arg.Q,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +345,122 @@ func (q *Queries) HoldForTransfer(ctx context.Context, transferID uuid.UUID) ([]
 	return items, nil
 }
 
+const listMyTransfers = `-- name: ListMyTransfers :many
+
+SELECT t.id, t.debit_account_id, t.credit_account_id, t.amount_minor, t.currency,
+       t.status, t.kind, t.description, t.requested_at, t.posted_at,
+       CASE WHEN da.user_id = $1::uuid THEN 'out' ELSE 'in' END AS direction,
+       CASE WHEN da.user_id = $1::uuid
+            THEN COALESCE(ca.iban, ca.system_code, '')
+            ELSE COALESCE(da.iban, da.system_code, '') END AS counterparty_iban,
+       CASE WHEN da.user_id = $1::uuid
+            THEN mask_name(cu.full_name)
+            ELSE mask_name(du.full_name) END AS counterparty_owner
+FROM transfers t
+JOIN accounts da ON da.id = t.debit_account_id
+JOIN accounts ca ON ca.id = t.credit_account_id
+LEFT JOIN users du ON du.id = da.user_id
+LEFT JOIN users cu ON cu.id = ca.user_id
+WHERE (da.user_id = $1::uuid OR ca.user_id = $1::uuid)
+  AND ($2::timestamptz IS NULL
+       OR (t.requested_at, t.id) < ($2::timestamptz, $3::uuid))
+  AND ($4::transfer_status IS NULL OR t.status = $4::transfer_status)
+  AND ($5::transfer_kind     IS NULL OR t.kind   = $5::transfer_kind)
+  AND ($6::timestamptz    IS NULL OR t.requested_at >= $6::timestamptz)
+  AND ($7::timestamptz      IS NULL OR t.requested_at <  $7::timestamptz)
+  AND ($8::text IS NULL
+       OR ($8::text = 'out' AND da.user_id = $1::uuid)
+       OR ($8::text = 'in'  AND ca.user_id = $1::uuid))
+  AND ($9::text IS NULL
+       OR t.description ILIKE '%' || $9::text || '%'
+       OR COALESCE(da.iban::text, '') ILIKE '%' || $9::text || '%'
+       OR COALESCE(ca.iban::text, '') ILIKE '%' || $9::text || '%')
+ORDER BY t.requested_at DESC, t.id DESC
+LIMIT $10::int
+`
+
+type ListMyTransfersParams struct {
+	Subject   uuid.UUID          `json:"subject"`
+	Cursor    *time.Time         `json:"cursor"`
+	CursorID  *uuid.UUID         `json:"cursor_id"`
+	Status    NullTransferStatus `json:"status"`
+	Kind      NullTransferKind   `json:"kind"`
+	FromTs    *time.Time         `json:"from_ts"`
+	ToTs      *time.Time         `json:"to_ts"`
+	Dir       *string            `json:"dir"`
+	Q         *string            `json:"q"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListMyTransfersRow struct {
+	ID                uuid.UUID      `json:"id"`
+	DebitAccountID    uuid.UUID      `json:"debit_account_id"`
+	CreditAccountID   uuid.UUID      `json:"credit_account_id"`
+	AmountMinor       int64          `json:"amount_minor"`
+	Currency          string         `json:"currency"`
+	Status            TransferStatus `json:"status"`
+	Kind              TransferKind   `json:"kind"`
+	Description       string         `json:"description"`
+	RequestedAt       time.Time      `json:"requested_at"`
+	PostedAt          *time.Time     `json:"posted_at"`
+	Direction         string         `json:"direction"`
+	CounterpartyIban  interface{}    `json:"counterparty_iban"`
+	CounterpartyOwner interface{}    `json:"counterparty_owner"`
+}
+
+// NOTE: transfer() and request_transfer() return a TABLE; sqlc cannot expand
+// set-returning function columns, so those calls live in internal/db/bank.go
+// (hand-written pgx). Everything below is plain sqlc.
+// Cross-account transfer history for one customer (the JWT subject): a row shows iff
+// the caller owns the debit OR credit account. direction is caller-relative ('out' =
+// caller debits, 'in' = caller credits; a self-transfer between the caller's own two
+// accounts ties to 'out'). Composite (requested_at, id) keyset cursor (bare array, no
+// envelope); all filters narg -> omitted = no filter. counterparty_owner is masked.
+func (q *Queries) ListMyTransfers(ctx context.Context, arg ListMyTransfersParams) ([]ListMyTransfersRow, error) {
+	rows, err := q.db.Query(ctx, listMyTransfers,
+		arg.Subject,
+		arg.Cursor,
+		arg.CursorID,
+		arg.Status,
+		arg.Kind,
+		arg.FromTs,
+		arg.ToTs,
+		arg.Dir,
+		arg.Q,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMyTransfersRow
+	for rows.Next() {
+		var i ListMyTransfersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DebitAccountID,
+			&i.CreditAccountID,
+			&i.AmountMinor,
+			&i.Currency,
+			&i.Status,
+			&i.Kind,
+			&i.Description,
+			&i.RequestedAt,
+			&i.PostedAt,
+			&i.Direction,
+			&i.CounterpartyIban,
+			&i.CounterpartyOwner,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingTransfers = `-- name: ListPendingTransfers :many
 SELECT id, debit_account_id, credit_account_id, amount_minor, currency, kind, description, requested_at
 FROM transfers
@@ -367,13 +516,9 @@ func (q *Queries) ListPendingTransfers(ctx context.Context, arg ListPendingTrans
 }
 
 const postTransfer = `-- name: PostTransfer :one
-
 SELECT post_transfer($1::uuid) AS status
 `
 
-// NOTE: transfer() and request_transfer() return a TABLE; sqlc cannot expand
-// set-returning function columns, so those calls live in internal/db/bank.go
-// (hand-written pgx). Everything below is plain sqlc.
 func (q *Queries) PostTransfer(ctx context.Context, id uuid.UUID) (TransferStatus, error) {
 	row := q.db.QueryRow(ctx, postTransfer, id)
 	var status TransferStatus

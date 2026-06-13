@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,4 +82,42 @@ func originAllowed(allowed []string, origin string) bool {
 		}
 	}
 	return false
+}
+
+// csrfGuard is a same-origin check for the cookie-authenticated portal surface
+// (operator console + admin JSON). On an unsafe method it rejects a request whose
+// Origin (or Referer fallback) host differs from the request host. A request with
+// NEITHER header is allowed: a non-browser client (curl, a server-side script, the
+// test harness) carries no ambient session cookie, so it is not a CSRF vector —
+// CSRF attacks come from browsers, which always attach Origin on a cross-site POST.
+// Defense in depth on top of the session cookie's SameSite=Strict. The JWT client
+// surface uses bearer tokens (not auto-sent cross-site) and is intentionally not
+// guarded here so CORS dev flows keep working.
+func (s *Server) csrfGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+		default:
+			if !sameOrigin(r) {
+				writeError(w, http.StatusForbidden, "forbidden", "cross-origin request rejected")
+				return
+			}
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+// sameOrigin reports whether a state-changing request comes from this host. A
+// missing Origin and Referer counts as same-origin (non-browser caller).
+func sameOrigin(r *http.Request) bool {
+	src := r.Header.Get("Origin")
+	if src == "" {
+		src = r.Header.Get("Referer")
+	}
+	if src == "" {
+		return true
+	}
+	u, err := url.Parse(src)
+	return err == nil && u.Host == r.Host
 }

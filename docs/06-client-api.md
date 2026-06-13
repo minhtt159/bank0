@@ -28,14 +28,17 @@ JWT subject.
 | Profile | GET | `/me` | bearer | the caller's own `User` (no password hash) |
 | Profile | PATCH | `/me` | bearer | self-service edit of name/email/phone (password/status/role can't be set here) |
 | Profile | POST | `/me/password` | bearer | change password (verify current); revokes other refresh families, spares the current session |
+| Sessions | GET | `/me/sessions` | bearer | active devices (refresh-token families); `X-Refresh-Token` header flags the current one |
+| Sessions | DELETE | `/me/sessions/{family_id}` | bearer | selective sign-out of one device (idempotent; 404 if not the caller's) |
 | Accounts | GET | `/users/{id}/accounts` | bearer | own accounts only (404 otherwise) |
 | Accounts | GET | `/accounts/{id}` | bearer | account + available balance |
-| Statement | GET | `/accounts/{id}/ledger?cursor&limit` | bearer | cursor-paginated, running balance, counterparty |
+| Statement | GET | `/accounts/{id}/ledger?cursor&cursor_id&limit&from&to&direction&q&min_minor&max_minor` | bearer | composite-keyset cursor (`cursor`+`cursor_id`, fixes same-timestamp tie-skip), running balance, counterparty; server-side filters (date range, direction, free text, amount range) |
 | Beneficiaries | GET | `/beneficiaries` | bearer | saved payees (fuzzy search is client-side) |
 | Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer demo: suggests a destination (scenario mule, else own account); `204` if none. Read-only |
+| Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
 | Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |

@@ -49,10 +49,13 @@ wherever they conflict.
      `admin_actions` `dispute_raised` row only (no auto-freeze). Operator **console
      screen** (`/console/disputes`) renders the queue + resolve actions (gated to
      operators/admins; auditors read-only) — see [`05-admin-ui.md`](05-admin-ui.md) §4.7.
+   - **Ledger composite-cursor tie-skip fix + server-side filters** ✅ **landed**
+     (2026-06-14): `GET /accounts/{id}/ledger` now takes `cursor`+`cursor_id`
+     (composite `(posted_at, id)` keyset) and `from`/`to`/`direction`/`q`/`min_minor`/
+     `max_minor`; still a bare array. No migration.
    - **Wave 3 (P1 suite, remaining):** customer account opening, transfer-limit
-     request (maker-checker), list-my-transfers, server-side ledger filters **+ the
-     composite-cursor tie-skip fix (rides with filters)**, the token-holding Worker
-     auth upgrade (§1.1), and the `/me/dashboard` aggregation (§3).
+     request (maker-checker), list-my-transfers, the token-holding Worker auth
+     upgrade (§1.1), and the `/me/dashboard` aggregation (§3).
    - **Deferred:** self-registration, step-up/TOTP MFA. **Out of scope:** cards.
      **P2/later:** notifications, scheduled transfers, statement export, session listing.
 
@@ -143,9 +146,10 @@ Found while building (and planning past) the fraudbank clients. *Where it belong
 > wave/shipped status lives in §0. ✅ **Shipped on `feat/bff`:** the `null`→`[]` fix,
 > opt-in CORS (§1.2), `POST /me/password`, `PATCH /me`, `GET /transfers/suggestion`
 > (guided), the disputes domain (client + admin), and the **admin-JSON RBAC** hardening
-> ([`10-security-review.md`](10-security-review.md)). **Open:** token-holding Worker BFF
-> (§1.1), pagination tie-skip + server-side ledger filters, list-my-transfers, customer
-> account opening, transfer-limit requests. **Deferred:** self-registration, step-up MFA.
+> ([`10-security-review.md`](10-security-review.md)), and the **ledger composite-cursor
+> tie-skip fix + server-side filters**. **Open:** token-holding Worker BFF (§1.1),
+> customer account opening, transfer-limit requests
+> list. **Deferred:** self-registration, step-up MFA.
 
 ### P0 — blocks or distorts the v1 clients
 

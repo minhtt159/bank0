@@ -142,6 +142,33 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /me/sessions:
+    get:
+      operationId: listSessions
+      tags: [client]
+      summary: List the caller's active sessions (refresh-token families = devices)
+      parameters: [ { $ref: "#/components/parameters/SessionToken" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/sessions/{family_id}:
+    delete:
+      operationId: revokeSession
+      tags: [client]
+      summary: Revoke one session/device (selective sign-out). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/FamilyId" } ]
+      responses:
+        "204": { description: revoked (idempotent — also 204 if already gone) }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }   # family not owned by caller
+
   /beneficiaries:
     get:
       operationId: listBeneficiaries
@@ -284,11 +311,50 @@ paths:
     get:
       operationId: getAccountLedger
       tags: [client]
-      summary: Account statement (cursor-paginated, running balance)
+      summary: Account statement (composite-keyset cursor, running balance, filterable)
+      description: >-
+        Newest-first, bare array (always [], never null; end of data = a short page).
+        Paginate by passing the last row's posted_at as `cursor` AND its id as
+        `cursor_id` — the composite (posted_at, id) keyset pages correctly even when
+        rows share a timestamp (the posted_at-only cursor used to silently skip them).
       parameters:
         - { $ref: "#/components/parameters/Id" }
         - { $ref: "#/components/parameters/Cursor" }
+        - name: cursor_id
+          in: query
+          required: false
+          description: id of the last row seen; with `cursor` forms the composite keyset tie-break.
+          schema: { type: string, format: uuid }
         - { $ref: "#/components/parameters/Limit" }
+        - name: from
+          in: query
+          required: false
+          description: only entries posted at or after this instant (inclusive).
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: only entries posted strictly before this instant (exclusive).
+          schema: { type: string, format: date-time }
+        - name: direction
+          in: query
+          required: false
+          schema: { type: string, enum: [debit, credit] }
+        - name: q
+          in: query
+          required: false
+          description: free-text match over description, counterparty IBAN, and counterparty owner.
+          schema: { type: string }
+        - name: min_minor
+          in: query
+          required: false
+          description: minimum absolute amount in minor units (inclusive).
+          schema: { type: integer, format: int64 }
+        - name: max_minor
+          in: query
+          required: false
+          description: maximum absolute amount in minor units (inclusive).
+          schema: { type: integer, format: int64 }
       responses:
         "200":
           description: ok
@@ -359,6 +425,60 @@ paths:
               schema: { $ref: "#/components/schemas/StatusResponse" }
 
   /transfers:
+    get:
+      operationId: listMyTransfers
+      tags: [client]
+      summary: List the caller's transfers across all their accounts (keyset-paginated)
+      description: >-
+        Every transfer where the caller owns the debit OR credit account, newest
+        first. Bare array (always [], never null; end of data = a short page).
+        Paginate with `cursor` (last row's requested_at) + `cursor_id` (last row's
+        id). `direction` is caller-relative: out = caller debits, in = caller credits.
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: cursor_id
+          in: query
+          required: false
+          description: id of the last row seen; with `cursor` forms the composite keyset tie-break.
+          schema: { type: string, format: uuid }
+        - { $ref: "#/components/parameters/Limit" }
+        - name: from
+          in: query
+          required: false
+          description: only transfers requested at or after this instant (inclusive).
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: only transfers requested strictly before this instant (exclusive).
+          schema: { type: string, format: date-time }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, posted, failed, canceled, reversed] }
+        - name: kind
+          in: query
+          required: false
+          schema: { type: string, enum: [transfer, deposit, withdrawal, reversal, fee, adjustment] }
+        - name: direction
+          in: query
+          required: false
+          description: "Relative to the caller: out = caller's account is the debit side; in = the credit side."
+          schema: { type: string, enum: [out, in] }
+        - name: q
+          in: query
+          required: false
+          description: free-text match over description and either side's IBAN.
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TransferListItem" }
+        "400": { $ref: "#/components/responses/Error" }
     post:
       operationId: createTransfer
       tags: [client]
@@ -640,6 +760,19 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, maximum: 200 }
+    FamilyId:
+      name: family_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SessionToken:
+      name: X-Refresh-Token
+      in: header
+      required: false
+      description: >-
+        The caller's current refresh token. Optional; when present, the matching
+        family is flagged current:true in GET /me/sessions. Never logged.
+      schema: { type: string }
 
   responses:
     Error:
@@ -771,6 +904,34 @@ components:
       properties:
         status:          { type: string, enum: [under_review, resolved, rejected] }
         resolution_note: { type: string }
+    TransferListItem:
+      type: object
+      description: A transfer in the caller's cross-account history (direction is caller-relative).
+      properties:
+        id: { type: string, format: uuid }
+        debit_account_id: { type: string, format: uuid }
+        credit_account_id: { type: string, format: uuid }
+        amount_minor: { type: integer, format: int64 }
+        currency: { type: string }
+        status: { type: string }
+        kind: { type: string }
+        description: { type: string }
+        direction: { type: string, enum: [out, in], description: "Relative to the caller." }
+        counterparty_iban: { type: string }
+        counterparty_owner: { type: string, description: "Masked owner name of the other party." }
+        requested_at: { type: string, format: date-time }
+        posted_at: { type: string, format: date-time }
+    Session:
+      type: object
+      description: One active refresh-token family (a device/login). No token material.
+      properties:
+        family_id: { type: string, format: uuid }
+        device_label: { type: string }
+        user_agent: { type: string }
+        ip: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        current: { type: boolean, description: "true when this is the family of the presented X-Refresh-Token" }
     CreateAccountRequest:
       type: object
       required: [user_id, iban, pin]

@@ -100,7 +100,11 @@ func dbErrorMessage(err error) string {
 	return "internal error"
 }
 
+// maxJSONBody caps request bodies so a giant payload can't exhaust memory.
+const maxJSONBody = 1 << 20 // 1 MiB
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return false

@@ -17,13 +17,15 @@ tasks:
       - task --list
 
   install:
-    desc: Install dev CLI tools (sqlc, goose, air, oapi-codegen, templ)
+    desc: Install dev CLI tools. Generators are PINNED to the same versions as CI
+      (.github/workflows/ci.yml) and CLAUDE.md — @latest here was the source of
+      generated-file drift between local and CI. Bump all three in lockstep.
     cmds:
-      - go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-      - go install github.com/pressly/goose/v3/cmd/goose@latest
+      - go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
       - go install github.com/air-verse/air@latest
-      - go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
-      - go install github.com/a-h/templ/cmd/templ@latest
+      - go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.1
+      - go install github.com/a-h/templ/cmd/templ@v0.3.1020
 
   deps:
     desc: Download and tidy Go modules
@@ -120,9 +122,16 @@ tasks:
       - go test -race ./...
 
   test:db:
-    desc: Run DB integration tests against a throwaway bank0_test database
+    desc: >-
+      Run DB integration tests against a throwaway bank0_test database. Postgres 18
+      by default; pass PG=17 for Supabase parity (task test:db PG=17). The db service
+      has no volume, so switching versions just recreates a fresh container.
+    env:
+      PG_VERSION: '{{.PG | default "18"}}'
     cmds:
-      - docker compose -f deploy/docker-compose.dev.yml up -d db
+      # --wait blocks on the healthcheck so a freshly (re)created container — e.g. when
+      # switching PG version — is ready before the psql calls below.
+      - docker compose -f deploy/docker-compose.dev.yml up -d --wait db
       - docker compose -f deploy/docker-compose.dev.yml exec -T db psql -U admin -d bank0 -c "DROP DATABASE IF EXISTS bank0_test;"
       - docker compose -f deploy/docker-compose.dev.yml exec -T db psql -U admin -d bank0 -c "CREATE DATABASE bank0_test;"
       - TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable' go test -race ./internal/db/ -v
@@ -132,7 +141,9 @@ tasks:
       - go vet ./...
 
   dev:docker:
-    desc: Start Postgres 18 + app with hot-reload
+    desc: Start Postgres (18 by default; PG=17 for Supabase parity) + app with hot-reload
+    env:
+      PG_VERSION: '{{.PG | default "18"}}'
     cmds:
       - docker compose -f deploy/docker-compose.dev.yml up --build
 

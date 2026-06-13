@@ -24,6 +24,28 @@ func (q *Queries) AccountOwner(ctx context.Context, id uuid.UUID) (*uuid.UUID, e
 	return user_id, err
 }
 
+const familyOwnedBy = `-- name: FamilyOwnedBy :one
+SELECT EXISTS (
+    SELECT 1 FROM refresh_tokens
+     WHERE family_id = $1::uuid AND user_id = $2::uuid
+) AS owned
+`
+
+type FamilyOwnedByParams struct {
+	Family uuid.UUID `json:"family"`
+	Owner  uuid.UUID `json:"owner"`
+}
+
+// True iff the refresh-token family belongs to the caller. Lets DELETE
+// /me/sessions/{family_id} return 404 for a non-owned family while staying
+// idempotent (204) for the owner's already-revoked family.
+func (q *Queries) FamilyOwnedBy(ctx context.Context, arg FamilyOwnedByParams) (bool, error) {
+	row := q.db.QueryRow(ctx, familyOwnedBy, arg.Family, arg.Owner)
+	var owned bool
+	err := row.Scan(&owned)
+	return owned, err
+}
+
 const transferOwners = `-- name: TransferOwners :one
 SELECT da.user_id AS debit_owner,
        ca.user_id AS credit_owner
