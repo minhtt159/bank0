@@ -36,6 +36,7 @@ JWT subject.
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer demo: suggests a destination (scenario mule, else own account); `204` if none. Read-only |
+| Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
 | Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |

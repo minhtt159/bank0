@@ -398,6 +398,60 @@ paths:
               schema: { $ref: "#/components/schemas/StatusResponse" }
 
   /transfers:
+    get:
+      operationId: listMyTransfers
+      tags: [client]
+      summary: List the caller's transfers across all their accounts (keyset-paginated)
+      description: >-
+        Every transfer where the caller owns the debit OR credit account, newest
+        first. Bare array (always [], never null; end of data = a short page).
+        Paginate with `cursor` (last row's requested_at) + `cursor_id` (last row's
+        id). `direction` is caller-relative: out = caller debits, in = caller credits.
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: cursor_id
+          in: query
+          required: false
+          description: id of the last row seen; with `cursor` forms the composite keyset tie-break.
+          schema: { type: string, format: uuid }
+        - { $ref: "#/components/parameters/Limit" }
+        - name: from
+          in: query
+          required: false
+          description: only transfers requested at or after this instant (inclusive).
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: only transfers requested strictly before this instant (exclusive).
+          schema: { type: string, format: date-time }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, posted, failed, canceled, reversed] }
+        - name: kind
+          in: query
+          required: false
+          schema: { type: string, enum: [transfer, deposit, withdrawal, reversal, fee, adjustment] }
+        - name: direction
+          in: query
+          required: false
+          description: "Relative to the caller: out = caller's account is the debit side; in = the credit side."
+          schema: { type: string, enum: [out, in] }
+        - name: q
+          in: query
+          required: false
+          description: free-text match over description and either side's IBAN.
+          schema: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TransferListItem" }
+        "400": { $ref: "#/components/responses/Error" }
     post:
       operationId: createTransfer
       tags: [client]
@@ -810,6 +864,23 @@ components:
       properties:
         status:          { type: string, enum: [under_review, resolved, rejected] }
         resolution_note: { type: string }
+    TransferListItem:
+      type: object
+      description: A transfer in the caller's cross-account history (direction is caller-relative).
+      properties:
+        id: { type: string, format: uuid }
+        debit_account_id: { type: string, format: uuid }
+        credit_account_id: { type: string, format: uuid }
+        amount_minor: { type: integer, format: int64 }
+        currency: { type: string }
+        status: { type: string }
+        kind: { type: string }
+        description: { type: string }
+        direction: { type: string, enum: [out, in], description: "Relative to the caller." }
+        counterparty_iban: { type: string }
+        counterparty_owner: { type: string, description: "Masked owner name of the other party." }
+        requested_at: { type: string, format: date-time }
+        posted_at: { type: string, format: date-time }
     CreateAccountRequest:
       type: object
       required: [user_id, iban, pin]
