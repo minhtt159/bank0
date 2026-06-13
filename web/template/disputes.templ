@@ -1,0 +1,73 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// DisputesPanel: the operator dispute-triage queue. Customers raise "I don't
+// recognise this" claims on settled transfers; an operator moves each through the
+// state machine (open → under_review → resolved | rejected). Resolving is gated to
+// operators/admins; auditors see the queue read-only.
+templ DisputesPanel(canResolve bool) {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Disputes</h1>
+			<span class="muted small">Customer "I don't recognise this" claims. Resolve or reject with an optional note.</span>
+		</div>
+		<div id="disputes-results" hx-get="/console/disputes/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
+templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, flash string) {
+	if flash != "" {
+		<div class="flash">{ flash }</div>
+	}
+	if len(rows) == 0 {
+		<p class="muted">No disputes 🎉</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Raised</th>
+					<th>Raiser</th>
+					<th>Category</th>
+					<th>Status</th>
+					<th>From</th>
+					<th>To</th>
+					<th class="num">Amount</th>
+					if canResolve {
+						<th>Resolve</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, d := range rows {
+					<tr>
+						<td class="muted">{ d.CreatedAt.Format("2006-01-02 15:04") }</td>
+						<td>{ txt(d.RaisedBy) }</td>
+						<td>{ string(d.Category) }</td>
+						<td><span class={ "pill " + string(d.Status) }>{ string(d.Status) }</span></td>
+						<td class="mono">{ d.DebitIban }</td>
+						<td class="mono">{ d.CreditIban }</td>
+						<td class="num"><strong>{ money.FormatMinor(d.AmountMinor) }</strong></td>
+						if canResolve {
+							<td class="actions">
+								if d.Status == sqlc.DisputeStatusResolved || d.Status == sqlc.DisputeStatusRejected {
+									<span class="muted small">{ string(d.Status) }</span>
+								} else {
+									<input type="text" name="resolution_note" placeholder="note (optional)"/>
+									if d.Status == sqlc.DisputeStatusOpen {
+										<button class="btn" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=under_review" } hx-include="closest td" hx-target="#disputes-results" hx-disabled-elt="this">Reviewing</button>
+									}
+									<button class="btn ok" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=resolved" } hx-include="closest td" hx-target="#disputes-results" hx-disabled-elt="this" hx-confirm="Resolve this dispute?">Resolve</button>
+									<button class="btn danger" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=rejected" } hx-include="closest td" hx-target="#disputes-results" hx-disabled-elt="this" hx-confirm="Reject this dispute?">Reject</button>
+								}
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}

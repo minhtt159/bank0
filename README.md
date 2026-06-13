@@ -25,6 +25,9 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/05-admin-ui.md`](docs/05-admin-ui.md) | Operator console (portal) UX, roles, dashboards, maker-checker |
 | [`docs/06-client-api.md`](docs/06-client-api.md) | Client API (api.\*): endpoints, JWT + refresh-token auth, ownership, MFA/step-up plan |
 | [`docs/07-client-web-app.md`](docs/07-client-web-app.md) | Customer PWA (bank0.\*, Cloudflare Workers): flows, beneficiaries, idempotency |
+| [`docs/08-deployment-cloud-run-supabase.md`](docs/08-deployment-cloud-run-supabase.md) | Supabase + Cloud Run + Cloudflare deploy path with CI/CD |
+| [`docs/09-fraudbank-bff-plan.md`](docs/09-fraudbank-bff-plan.md) | fraudbank clients: decisions + wave status (§0), BFF/CORS plan, client-API feature gaps (P0–P2), `/me/dashboard` aggregation |
+| [`docs/10-security-review.md`](docs/10-security-review.md) | API pentest pass 1: findings (admin RBAC fix), verified-safe areas, accepted gaps; protective tests in `security_test.go` |
 
 ## Tech stack (carried from tf-backend, refined)
 

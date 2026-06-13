@@ -60,6 +60,10 @@ type ServerConfig struct {
 	//   "all"    -> everything            (local docker-compose, single container)
 	Mode            string `mapstructure:"mode"`
 	OpenAPISpecPath string `mapstructure:"openapi_spec_path"`
+	// CORSOrigins is an opt-in exact-match allowlist for the client API surface
+	// (dev convenience). Empty = disabled, the production default — prod web ships
+	// same-origin via the Worker. See docs/09-fraudbank-bff-plan.md §1.2.
+	CORSOrigins []string `mapstructure:"cors_origins"`
 	// AutoMigrate runs embedded migrations on startup. Handy for local
 	// docker-compose (1 replica); leave false in K8s and use the migrate Job.
 	AutoMigrate bool `mapstructure:"auto_migrate"`
@@ -100,6 +104,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("server.mode", "all")
 	v.SetDefault("server.openapi_spec_path", "api/openapi.yaml")
 	v.SetDefault("server.auto_migrate", false)
+	v.SetDefault("server.cors_origins", []string{}) // opt-in; empty = no CORS headers
 
 	v.SetDefault("admin.maker_checker_threshold_minor", 1000000) // €10,000.00
 	v.SetDefault("admin.session_idle_timeout", "30m")

@@ -110,6 +110,14 @@ func (s *Server) Router() http.Handler {
 		s.registerConsole(pr)
 	}
 	s.log.Info("router built", "mode", mode)
+
+	// Opt-in CORS for the client API surface (dev QoL; empty allowlist = disabled,
+	// the production default). Wrapped OUTSIDE the mux so a preflight OPTIONS is
+	// answered before routing (mux would 405 an OPTIONS with no matching method).
+	if apiOn && len(s.cfg.Server.CORSOrigins) > 0 {
+		s.log.Info("CORS enabled for client API", "origins", s.cfg.Server.CORSOrigins)
+		return s.cors(r)
+	}
 	return r
 }
 

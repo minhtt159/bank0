@@ -145,6 +145,34 @@ Runs `reconcile()` on demand, lists any failing invariant with the offending
 account/transfer and the drift amount. In a healthy system this is an empty,
 green page — and that emptiness is the product.
 
+### 4.7 Disputes
+
+A **Disputes** nav screen renders the triage queue (newest first) and drives the
+resolve state machine, backed by the same endpoints the JSON admin API exposes
+([`06-client-api.md`](06-client-api.md) §1; spec
+[`specs/spec-disputes.md`](specs/spec-disputes.md)):
+
+- **Queue** (`GET /console/disputes` → `/console/disputes/results`): each row shows
+  raised-at, raiser, category, status, from/to IBANs, and amount. Backed by
+  `ListDisputesAdmin` (cursor-paginated; the JSON `GET /admin/disputes?status=` adds
+  the status filter).
+- **Resolve** (`POST /console/disputes/{id}/resolve?status=` + optional note): inline
+  per-row actions — *Reviewing* (open → under_review), *Resolve*, *Reject* — with an
+  optional resolution note. Terminal rows show their final status, no actions. The
+  state machine (terminal transitions → 409) lives in `resolve_dispute`; the resolver
+  is the session operator, audited in `admin_actions`.
+
+Resolving is gated to **operators/admins** (`canActOnMoney`); auditors see the queue
+read-only (no action buttons, and a direct resolve POST → 403). Raising a dispute
+emits an `admin_actions` `dispute_raised` row — the flag-only fraud-engine seam (no
+auto-freeze).
+
+> **Admin-JSON RBAC (2026-06-13).** The JSON admin API now enforces roles **per
+> handler**, not just a valid session: money / account / dispute mutations require
+> `canActOnMoney`, user creation requires `canManageUsers`; reads stay open to any
+> staff. This closed a broken-access-control gap — see
+> [`10-security-review.md`](10-security-review.md) finding #1.
+
 ---
 
 ## 5. Safety patterns (the UX that protects money)

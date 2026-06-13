@@ -108,6 +108,39 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateMe
+      tags: [client]
+      summary: Update the caller's own profile (partial; name/email/phone only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateMeRequest" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /me/password:
+    post:
+      operationId: changePassword
+      tags: [client]
+      summary: Change the authenticated customer's password (revokes other sessions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangePasswordRequest" }
+      responses:
+        "204": { description: password changed; other sessions revoked }
+        "401": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
 
   /beneficiaries:
     get:
@@ -361,6 +394,34 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/PendingTransfer" }
 
+  /transfers/suggestion:
+    get:
+      operationId: suggestTransferDestination
+      tags: [client]
+      summary: >-
+        Guided-transfer demo: suggest a destination account for the caller.
+        Scenario-driven (simulated mule) when an active guided_scenario applies,
+        else the caller's own other active account. Read-only; never moves money.
+      parameters:
+        - name: from_account
+          in: query
+          required: false
+          description: Intended debit account (must be owned by the caller). Excluded from the suggestion.
+          schema: { type: string, format: uuid }
+        - name: amount_minor
+          in: query
+          required: false
+          description: Intended amount in minor units; lets a scenario gate on a threshold.
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: a suggested destination
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferSuggestion" }
+        "204": { description: no suggestion available (client falls back to manual) }
+        "403": { $ref: "#/components/responses/Error" }
+
   /transfers/{id}:
     get:
       operationId: getTransfer
@@ -425,6 +486,101 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReverseResponse" }
+
+  /transfers/{id}/dispute:
+    post:
+      operationId: raiseDispute
+      tags: [client]
+      summary: >-
+        Raise a dispute on a transfer the caller is a party to ("I don't
+        recognise this"). One open dispute per (transfer, caller).
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RaiseDisputeRequest" }
+      responses:
+        "201":
+          description: dispute opened
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "404": { $ref: "#/components/responses/Error" }   # not a party / unknown transfer
+        "409": { $ref: "#/components/responses/Error" }   # an open dispute already exists
+        "422": { $ref: "#/components/responses/Error" }   # invalid category / transfer not disputable
+
+  /disputes:
+    get:
+      operationId: listMyDisputes
+      tags: [client]
+      summary: List the caller's disputes (newest first, cursor-paginated)
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Dispute" }
+
+  /disputes/{id}:
+    get:
+      operationId: getDispute
+      tags: [client]
+      summary: Track one of the caller's disputes (scoped to raiser)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /admin/disputes:
+    get:
+      operationId: listDisputes
+      tags: [admin]
+      summary: Operator dispute triage queue (filter by status, cursor-paginated)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [open, under_review, resolved, rejected] }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DisputeQueueItem" }
+
+  /admin/disputes/{id}/resolve:
+    post:
+      operationId: resolveDispute
+      tags: [admin]
+      summary: Move a dispute to resolved/rejected (or under_review) with a note
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveDisputeRequest" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dispute" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # illegal state transition
 
   /admin/reconcile:
     get:
@@ -549,6 +705,72 @@ components:
         status: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    UpdateMeRequest:
+      type: object
+      # All optional; absent field => unchanged (COALESCE in update_user_info).
+      # role / status / password are deliberately NOT accepted here.
+      properties:
+        full_name:    { type: string }
+        email:        { type: string }
+        phone_number: { type: string }
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string }
+        new_password:     { type: string, minLength: 12, maxLength: 256 }
+        refresh_token:
+          type: string
+          description: >-
+            Opaque refresh token of the session performing the change; its family
+            is spared from revocation. Optional: if omitted, ALL families are
+            revoked and the caller must re-login elsewhere.
+    TransferSuggestion:
+      type: object
+      properties:
+        account_id:        { type: string, format: uuid }
+        iban:              { type: string }
+        owner_name_masked: { type: string, description: "Masked, exactly as /beneficiaries/resolve. Never the full name." }
+        reason:            { type: string, description: "Human-facing label shown in the guided banner." }
+        scenario:          { type: string, description: "Active scenario name; omitted for the safe-default own-account suggestion." }
+        source:            { type: string, enum: [scenario, own_account] }
+    RaiseDisputeRequest:
+      type: object
+      properties:
+        category: { type: string, enum: [unrecognised, fraud, wrong_amount, duplicate, other] }
+        reason:   { type: string, description: "Free-text customer explanation (optional)." }
+    Dispute:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        transfer_id:     { type: string, format: uuid }
+        status:          { type: string, enum: [open, under_review, resolved, rejected] }
+        category:        { type: string, enum: [unrecognised, fraud, wrong_amount, duplicate, other] }
+        reason:          { type: string }
+        resolution_note: { type: string }
+        created_at:      { type: string, format: date-time }
+        updated_at:      { type: string, format: date-time }
+    DisputeQueueItem:
+      type: object
+      description: Admin queue row — joins transfer + raiser context for triage.
+      properties:
+        id:             { type: string, format: uuid }
+        transfer_id:    { type: string, format: uuid }
+        status:         { type: string }
+        category:       { type: string }
+        reason:         { type: string }
+        amount_minor:   { type: integer, format: int64 }
+        currency:       { type: string }
+        raised_by:      { type: string, description: "Raiser username." }
+        debit_iban:     { type: string }
+        credit_iban:    { type: string }
+        created_at:     { type: string, format: date-time }
+    ResolveDisputeRequest:
+      type: object
+      required: [status]
+      properties:
+        status:          { type: string, enum: [under_review, resolved, rejected] }
+        resolution_note: { type: string }
     CreateAccountRequest:
       type: object
       required: [user_id, iban, pin]
