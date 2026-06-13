@@ -136,3 +136,31 @@ func TestSecurityClientCannotReachAdminJSON(t *testing.T) {
 		t.Errorf("client bearer admin queue = %d, want 401", r.StatusCode)
 	}
 }
+
+// The CSRF same-origin guard is actually wired on the portal (cookie) surface: a
+// cross-origin POST with a valid session is rejected; the same call with no Origin
+// (non-browser) passes through.
+func TestSecurityCSRFOnPortal(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
+	admin := login(t, ts, adminName, "pw")
+
+	post := func(origin string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/admin/expire-holds", nil)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := admin.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := post("https://evil.example"); c != 403 {
+		t.Errorf("cross-origin admin POST = %d, want 403 (CSRF)", c)
+	}
+	if c := post(""); c != 200 {
+		t.Errorf("no-origin admin POST = %d, want 200", c)
+	}
+}
