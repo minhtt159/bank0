@@ -114,14 +114,31 @@ SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signe
        counterparty_iban, counterparty_owner
 FROM enriched_ledger
 WHERE account_id = $1::uuid
-  AND posted_at < COALESCE($2::timestamptz, now())
+  AND ($2::timestamptz IS NULL
+       OR (posted_at, id) < ($2::timestamptz, $3::uuid))
+  AND ($4::timestamptz IS NULL OR posted_at >= $4::timestamptz)
+  AND ($5::timestamptz   IS NULL OR posted_at <  $5::timestamptz)
+  AND ($6::text IS NULL OR direction::text = $6::text)
+  AND ($7::bigint IS NULL OR amount_minor >= $7::bigint)
+  AND ($8::bigint IS NULL OR amount_minor <= $8::bigint)
+  AND ($9::text IS NULL OR (
+        description        ILIKE '%' || $9::text || '%'
+     OR counterparty_iban  ILIKE '%' || $9::text || '%'
+     OR counterparty_owner ILIKE '%' || $9::text || '%'))
 ORDER BY posted_at DESC, id DESC
-LIMIT $3::int
+LIMIT $10::int
 `
 
 type GetAccountLedgerParams struct {
 	AccountID uuid.UUID  `json:"account_id"`
 	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	FromTs    *time.Time `json:"from_ts"`
+	ToTs      *time.Time `json:"to_ts"`
+	Direction *string    `json:"direction"`
+	MinMinor  *int64     `json:"min_minor"`
+	MaxMinor  *int64     `json:"max_minor"`
+	Q         *string    `json:"q"`
 	PageLimit int32      `json:"page_limit"`
 }
 
@@ -143,8 +160,24 @@ type GetAccountLedgerRow struct {
 	CounterpartyOwner *string        `json:"counterparty_owner"`
 }
 
+// Client account statement. Composite (posted_at, id) keyset cursor so ties (rows
+// sharing a posted_at) page correctly — the posted_at-only cursor silently skipped
+// them at a page boundary. Optional server-side filters (all narg -> omitted = no
+// filter): date range [from, to), direction, free text, and absolute-amount range.
+// Pass cursor + cursor_id together (both from the last row of the previous page).
 func (q *Queries) GetAccountLedger(ctx context.Context, arg GetAccountLedgerParams) ([]GetAccountLedgerRow, error) {
-	rows, err := q.db.Query(ctx, getAccountLedger, arg.AccountID, arg.Cursor, arg.PageLimit)
+	rows, err := q.db.Query(ctx, getAccountLedger,
+		arg.AccountID,
+		arg.Cursor,
+		arg.CursorID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.Direction,
+		arg.MinMinor,
+		arg.MaxMinor,
+		arg.Q,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

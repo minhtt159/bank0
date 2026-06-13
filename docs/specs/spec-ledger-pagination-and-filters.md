@@ -1,11 +1,18 @@
 # Spec — Ledger pagination envelope, composite cursor, and server-side filters
 
-> **DECISION OVERRIDE (2026-06-13, see [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md) §0.2):**
-> the `{items, next_cursor, has_more}` **envelope is dropped** — list endpoints stay
-> **bare arrays** (always `[]`, never `null`; end-of-data = short page). The
-> **composite-keyset cursor `(posted_at, id)`** part of this spec **is** adopted to
-> fix the tie-skip bug, scheduled in Wave 3 alongside the server-side filters. Read
-> the envelope sections below as superseded; the cursor + filter sections stand.
+> ✅ **IMPLEMENTED (2026-06-14, branch `improve/add-features`)** — the **bare-array**
+> variant. The `{items, next_cursor, has_more}` envelope was **dropped** (decision
+> 2026-06-13, [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md) §0.2); list
+> endpoints stay bare arrays (always `[]`, never `null`; end-of-data = a short page).
+> What shipped on `GET /accounts/{id}/ledger`: the **composite-keyset cursor
+> `(posted_at, id)`** (pass `cursor` + `cursor_id` from the last row — fixes the
+> tie-skip bug) and the **server-side filters** `from`/`to`/`direction`/`q`/`min_minor`/
+> `max_minor`. No migration (reuses `enriched_ledger` + the `(account_id, posted_at
+> DESC, id DESC)` index). Query in `db/queries/transfers.sql` (`GetAccountLedger`),
+> handler in `internal/api/handlers_accounts.go`; tests
+> `internal/db/ledger_test.go` (`TestLedgerKeysetCoversTies`) +
+> `internal/api/ledger_test.go` (`TestHTTPLedgerFilters`). **Read the envelope
+> sections below as superseded** — the cursor + filter design stands.
 
 > Status: **spec, ready to implement.** Three related changes to
 > `GET /accounts/{id}/ledger`, specced together because they all touch the same

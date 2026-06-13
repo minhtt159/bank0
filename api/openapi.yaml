@@ -284,11 +284,50 @@ paths:
     get:
       operationId: getAccountLedger
       tags: [client]
-      summary: Account statement (cursor-paginated, running balance)
+      summary: Account statement (composite-keyset cursor, running balance, filterable)
+      description: >-
+        Newest-first, bare array (always [], never null; end of data = a short page).
+        Paginate by passing the last row's posted_at as `cursor` AND its id as
+        `cursor_id` — the composite (posted_at, id) keyset pages correctly even when
+        rows share a timestamp (the posted_at-only cursor used to silently skip them).
       parameters:
         - { $ref: "#/components/parameters/Id" }
         - { $ref: "#/components/parameters/Cursor" }
+        - name: cursor_id
+          in: query
+          required: false
+          description: id of the last row seen; with `cursor` forms the composite keyset tie-break.
+          schema: { type: string, format: uuid }
         - { $ref: "#/components/parameters/Limit" }
+        - name: from
+          in: query
+          required: false
+          description: only entries posted at or after this instant (inclusive).
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: only entries posted strictly before this instant (exclusive).
+          schema: { type: string, format: date-time }
+        - name: direction
+          in: query
+          required: false
+          schema: { type: string, enum: [debit, credit] }
+        - name: q
+          in: query
+          required: false
+          description: free-text match over description, counterparty IBAN, and counterparty owner.
+          schema: { type: string }
+        - name: min_minor
+          in: query
+          required: false
+          description: minimum absolute amount in minor units (inclusive).
+          schema: { type: integer, format: int64 }
+        - name: max_minor
+          in: query
+          required: false
+          description: maximum absolute amount in minor units (inclusive).
+          schema: { type: integer, format: int64 }
       responses:
         "200":
           description: ok

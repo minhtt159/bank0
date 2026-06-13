@@ -30,7 +30,7 @@ JWT subject.
 | Profile | POST | `/me/password` | bearer | change password (verify current); revokes other refresh families, spares the current session |
 | Accounts | GET | `/users/{id}/accounts` | bearer | own accounts only (404 otherwise) |
 | Accounts | GET | `/accounts/{id}` | bearer | account + available balance |
-| Statement | GET | `/accounts/{id}/ledger?cursor&limit` | bearer | cursor-paginated, running balance, counterparty |
+| Statement | GET | `/accounts/{id}/ledger?cursor&cursor_id&limit&from&to&direction&q&min_minor&max_minor` | bearer | composite-keyset cursor (`cursor`+`cursor_id`, fixes same-timestamp tie-skip), running balance, counterparty; server-side filters (date range, direction, free text, amount range) |
 | Beneficiaries | GET | `/beneficiaries` | bearer | saved payees (fuzzy search is client-side) |
 | Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
