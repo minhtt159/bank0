@@ -952,3 +952,66 @@ func (s *Server) consoleActionContext(w http.ResponseWriter, r *http.Request) (d
 	}
 	return u, id, true
 }
+
+// ---- disputes (triage queue) --------------------------------------------
+
+func (s *Server) consoleDisputes(w http.ResponseWriter, r *http.Request) {
+	canAct := false
+	if su, ok := userFromContext(r.Context()); ok {
+		canAct = canActOnMoney(su.Role)
+	}
+	s.html(w)
+	_ = template.DisputesPanel(canAct).Render(r.Context(), w)
+}
+
+func (s *Server) renderDisputes(w http.ResponseWriter, r *http.Request, flash string) {
+	ctx := r.Context()
+	rows, err := s.pg.Queries.ListDisputesAdmin(ctx, sqlc.ListDisputesAdminParams{
+		PageLimit: s.cfg.Server.DefaultPageLimit, // status NULL => all; cursor nil => first page
+	})
+	if err != nil {
+		s.log.Error("list disputes", "err", err)
+		http.Error(w, "disputes error", http.StatusInternalServerError)
+		return
+	}
+	canAct := false
+	if su, ok := userFromContext(ctx); ok {
+		canAct = canActOnMoney(su.Role)
+	}
+	s.html(w)
+	_ = template.DisputeRows(rows, canAct, flash).Render(ctx, w)
+}
+
+func (s *Server) consoleDisputesResults(w http.ResponseWriter, r *http.Request) {
+	s.renderDisputes(w, r, "")
+}
+
+// consoleResolveDispute drives resolve_dispute from the console. Gated to
+// operators/admins (canActOnMoney) — matching the JSON admin handler; the DB
+// function audits the transition in admin_actions. status comes from the query
+// (?status=), the optional note from the form body.
+func (s *Server) consoleResolveDispute(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canActOnMoney)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid dispute id")
+		return
+	}
+	status := strings.TrimSpace(r.FormValue("status"))
+	note := strings.TrimSpace(r.PostFormValue("resolution_note"))
+	if !validResolveStatus(status) {
+		s.renderDisputes(w, r, "Invalid status.")
+		return
+	}
+	if _, err := s.pg.Queries.ResolveDispute(r.Context(), sqlc.ResolveDisputeParams{
+		DisputeID: id, Resolver: actor.UserID, Status: sqlc.DisputeStatus(status), Note: note,
+	}); err != nil {
+		s.renderDisputes(w, r, "Could not resolve: "+dbErrorMessage(err))
+		return
+	}
+	refresh(w)
+	s.renderDisputes(w, r, "Dispute "+status+".")
+}

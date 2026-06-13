@@ -72,6 +72,34 @@ func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string) (Resol
 	return a, err
 }
 
+// TransferSuggestion mirrors suggest_transfer_destination()'s RETURNS TABLE. Demo
+// guided-transfer endpoint: read-only, never exposes a full name or balance
+// (mask_name, same masking as confirmation-of-payee). scenario is NULL for the
+// safe-default own-account suggestion.
+type TransferSuggestion struct {
+	AccountID       uuid.UUID `json:"account_id"`
+	Iban            string    `json:"iban"`
+	OwnerNameMasked string    `json:"owner_name_masked"`
+	Reason          string    `json:"reason"`
+	Scenario        *string   `json:"scenario,omitempty"`
+	Source          string    `json:"source"`
+}
+
+// SuggestTransferDestination resolves one suggested credit account for the caller.
+// The function returns ZERO rows when nothing is eligible, so a QueryRow scan
+// surfaces that as pgx.ErrNoRows (the handler maps it to 204). from may be nil
+// (the resolver substitutes the caller's default account as the exclusion).
+func (p *Postgres) SuggestTransferDestination(
+	ctx context.Context, caller uuid.UUID, from *uuid.UUID, amountMinor int64,
+) (TransferSuggestion, error) {
+	const q = `SELECT account_id, iban, owner_name_masked, reason, scenario, source
+	           FROM suggest_transfer_destination($1::uuid, $2::uuid, $3::bigint)`
+	var sg TransferSuggestion
+	err := p.Pool.QueryRow(ctx, q, caller, from, amountMinor).
+		Scan(&sg.AccountID, &sg.Iban, &sg.OwnerNameMasked, &sg.Reason, &sg.Scenario, &sg.Source)
+	return sg, err
+}
+
 // maintenanceLockKey is the advisory-lock key guarding periodic maintenance so
 // that with many replicas only one actually runs the sweep per tick.
 const maintenanceLockKey int64 = 912000001

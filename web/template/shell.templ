@@ -60,6 +60,10 @@ templ Shell(username string, role string, pendingApprovals int) {
 							<span class="badge-count">{ i64(int64(pendingApprovals)) }</span>
 						}
 					</a>
+					<a class="navitem" hx-get="/console/disputes" hx-target="#main-panel">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"></path><path d="M4 14V4h13l-2.5 4 2.5 4z"></path></svg>
+						Disputes
+					</a>
 					<a class="navitem" hx-get="/console/audit" hx-target="#main-panel">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6"></path><path d="M9 13h6"></path><path d="M9 17h6"></path></svg>
 						Audit log
