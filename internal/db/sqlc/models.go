@@ -97,6 +97,95 @@ func (ns NullAccountStatus) Value() (driver.Value, error) {
 	return string(ns.AccountStatus), nil
 }
 
+type DisputeCategory string
+
+const (
+	DisputeCategoryUnrecognised DisputeCategory = "unrecognised"
+	DisputeCategoryFraud        DisputeCategory = "fraud"
+	DisputeCategoryWrongAmount  DisputeCategory = "wrong_amount"
+	DisputeCategoryDuplicate    DisputeCategory = "duplicate"
+	DisputeCategoryOther        DisputeCategory = "other"
+)
+
+func (e *DisputeCategory) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DisputeCategory(s)
+	case string:
+		*e = DisputeCategory(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DisputeCategory: %T", src)
+	}
+	return nil
+}
+
+type NullDisputeCategory struct {
+	DisputeCategory DisputeCategory `json:"dispute_category"`
+	Valid           bool            `json:"valid"` // Valid is true if DisputeCategory is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDisputeCategory) Scan(value interface{}) error {
+	if value == nil {
+		ns.DisputeCategory, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DisputeCategory.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDisputeCategory) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DisputeCategory), nil
+}
+
+type DisputeStatus string
+
+const (
+	DisputeStatusOpen        DisputeStatus = "open"
+	DisputeStatusUnderReview DisputeStatus = "under_review"
+	DisputeStatusResolved    DisputeStatus = "resolved"
+	DisputeStatusRejected    DisputeStatus = "rejected"
+)
+
+func (e *DisputeStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DisputeStatus(s)
+	case string:
+		*e = DisputeStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DisputeStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDisputeStatus struct {
+	DisputeStatus DisputeStatus `json:"dispute_status"`
+	Valid         bool          `json:"valid"` // Valid is true if DisputeStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDisputeStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DisputeStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DisputeStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDisputeStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DisputeStatus), nil
+}
+
 type EntryDirection string
 
 const (
@@ -439,6 +528,19 @@ type Beneficiary struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type Dispute struct {
+	ID             uuid.UUID       `json:"id"`
+	TransferID     uuid.UUID       `json:"transfer_id"`
+	RaisedByUserID uuid.UUID       `json:"raised_by_user_id"`
+	Status         DisputeStatus   `json:"status"`
+	Category       DisputeCategory `json:"category"`
+	Reason         string          `json:"reason"`
+	ResolverUserID *uuid.UUID      `json:"resolver_user_id"`
+	ResolutionNote string          `json:"resolution_note"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
 type EnrichedLedger struct {
 	ID                     uuid.UUID      `json:"id"`
 	TransferID             uuid.UUID      `json:"transfer_id"`
@@ -460,6 +562,18 @@ type EnrichedLedger struct {
 	CounterpartyIban       *string        `json:"counterparty_iban"`
 	CounterpartySystemCode *string        `json:"counterparty_system_code"`
 	CounterpartyOwner      *string        `json:"counterparty_owner"`
+}
+
+type GuidedScenario struct {
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	TargetAccountID uuid.UUID  `json:"target_account_id"`
+	Reason          string     `json:"reason"`
+	Active          bool       `json:"active"`
+	TargetUserID    *uuid.UUID `json:"target_user_id"`
+	MinAmountMinor  int64      `json:"min_amount_minor"`
+	Priority        int32      `json:"priority"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 type Hold struct {

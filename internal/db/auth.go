@@ -135,3 +135,36 @@ func (p *Postgres) RevokeUserRefresh(ctx context.Context, userID uuid.UUID) (int
 		`SELECT revoke_user_refresh($1::uuid, 'forced')`, userID).Scan(&n)
 	return n, err
 }
+
+// ChangePassword verifies the current password and stores the new hash (one
+// statement; FOR UPDATE serializes concurrent changes). Wrong current password ->
+// 28P01 (mapped 401); policy failure (len / == current) -> 23514 (mapped 422).
+func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current, next string) error {
+	_, err := p.Pool.Exec(ctx, `SELECT change_password($1::uuid, $2::text, $3::text)`, userID, current, next)
+	return err
+}
+
+// RevokeUserRefreshExceptFamily revokes every live refresh family for the user
+// except keepFamily (pass uuid.Nil to revoke all). Returns the count revoked.
+func (p *Postgres) RevokeUserRefreshExceptFamily(ctx context.Context, userID, keepFamily uuid.UUID) (int, error) {
+	var keep any
+	if keepFamily != uuid.Nil {
+		keep = keepFamily
+	}
+	var n int
+	err := p.Pool.QueryRow(ctx,
+		`SELECT revoke_user_refresh_except_family($1::uuid, $2::uuid)`, userID, keep).Scan(&n)
+	return n, err
+}
+
+// RefreshFamilyByToken returns the family_id of a still-live refresh token (by its
+// hash). ok=false when the token is unknown or already revoked.
+func (p *Postgres) RefreshFamilyByToken(ctx context.Context, tokenHash string) (uuid.UUID, bool, error) {
+	var fam uuid.UUID
+	err := p.Pool.QueryRow(ctx,
+		`SELECT family_id FROM refresh_tokens WHERE id = $1 AND revoked_at IS NULL`, tokenHash).Scan(&fam)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	return fam, err == nil, err
+}

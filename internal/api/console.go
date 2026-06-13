@@ -19,6 +19,7 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/reconcile", s.consoleReconcile).Methods(http.MethodGet)
 	r.HandleFunc("/console/audit", s.consoleAudit).Methods(http.MethodGet)
 	r.HandleFunc("/console/approvals", s.consoleApprovals).Methods(http.MethodGet)
+	r.HandleFunc("/console/disputes", s.consoleDisputes).Methods(http.MethodGet)
 
 	// Live-search results fragments (registered before /{id} so "results" wins)
 	r.HandleFunc("/console/users/results", s.consoleUsersResults).Methods(http.MethodGet)
@@ -26,10 +27,14 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/transfers/results", s.consoleTransfersResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/audit/results", s.consoleAuditResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/approvals/results", s.consoleApprovalsResults).Methods(http.MethodGet)
+	r.HandleFunc("/console/disputes/results", s.consoleDisputesResults).Methods(http.MethodGet)
 
 	// Maker-checker approve/reject (admin only; approver must differ from maker)
 	r.HandleFunc("/console/approvals/{id}/approve", s.consoleApprove).Methods(http.MethodPost)
 	r.HandleFunc("/console/approvals/{id}/reject", s.consoleReject).Methods(http.MethodPost)
+
+	// Dispute resolve (operators/admins; state machine in resolve_dispute)
+	r.HandleFunc("/console/disputes/{id}/resolve", s.consoleResolveDispute).Methods(http.MethodPost)
 
 	// Users (admin-managed) + rail detail
 	r.HandleFunc("/console/users/new", s.consoleNewUserForm).Methods(http.MethodGet)

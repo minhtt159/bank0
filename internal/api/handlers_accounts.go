@@ -20,6 +20,9 @@ type createAccountReq struct {
 
 // CreateAccount implements genadmin.ServerInterface.
 func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+		return
+	}
 	var req createAccountReq
 	if !decodeJSON(w, r, &req) {
 		return
@@ -106,6 +109,9 @@ type amountReq struct {
 // Deposit implements genadmin.ServerInterface. Money above the maker-checker
 // threshold should route to the approvals queue (future work).
 func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.DepositParams) {
+	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+		return
+	}
 	var req amountReq
 	if !decodeJSON(w, r, &req) {
 		return
@@ -131,6 +137,9 @@ func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_type
 
 // Withdraw implements genadmin.ServerInterface.
 func (s *Server) Withdraw(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.WithdrawParams) {
+	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+		return
+	}
 	var req amountReq
 	if !decodeJSON(w, r, &req) {
 		return
@@ -160,6 +169,9 @@ type statusReq struct {
 
 // SetAccountStatus implements genadmin.ServerInterface.
 func (s *Server) SetAccountStatus(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+		return
+	}
 	var req statusReq
 	if !decodeJSON(w, r, &req) {
 		return

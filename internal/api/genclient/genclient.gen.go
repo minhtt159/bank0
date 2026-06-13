@@ -14,6 +14,102 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for DisputeCategory.
+const (
+	DisputeCategoryDuplicate    DisputeCategory = "duplicate"
+	DisputeCategoryFraud        DisputeCategory = "fraud"
+	DisputeCategoryOther        DisputeCategory = "other"
+	DisputeCategoryUnrecognised DisputeCategory = "unrecognised"
+	DisputeCategoryWrongAmount  DisputeCategory = "wrong_amount"
+)
+
+// Valid indicates whether the value is a known member of the DisputeCategory enum.
+func (e DisputeCategory) Valid() bool {
+	switch e {
+	case DisputeCategoryDuplicate:
+		return true
+	case DisputeCategoryFraud:
+		return true
+	case DisputeCategoryOther:
+		return true
+	case DisputeCategoryUnrecognised:
+		return true
+	case DisputeCategoryWrongAmount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeStatus.
+const (
+	Open        DisputeStatus = "open"
+	Rejected    DisputeStatus = "rejected"
+	Resolved    DisputeStatus = "resolved"
+	UnderReview DisputeStatus = "under_review"
+)
+
+// Valid indicates whether the value is a known member of the DisputeStatus enum.
+func (e DisputeStatus) Valid() bool {
+	switch e {
+	case Open:
+		return true
+	case Rejected:
+		return true
+	case Resolved:
+		return true
+	case UnderReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RaiseDisputeRequestCategory.
+const (
+	RaiseDisputeRequestCategoryDuplicate    RaiseDisputeRequestCategory = "duplicate"
+	RaiseDisputeRequestCategoryFraud        RaiseDisputeRequestCategory = "fraud"
+	RaiseDisputeRequestCategoryOther        RaiseDisputeRequestCategory = "other"
+	RaiseDisputeRequestCategoryUnrecognised RaiseDisputeRequestCategory = "unrecognised"
+	RaiseDisputeRequestCategoryWrongAmount  RaiseDisputeRequestCategory = "wrong_amount"
+)
+
+// Valid indicates whether the value is a known member of the RaiseDisputeRequestCategory enum.
+func (e RaiseDisputeRequestCategory) Valid() bool {
+	switch e {
+	case RaiseDisputeRequestCategoryDuplicate:
+		return true
+	case RaiseDisputeRequestCategoryFraud:
+		return true
+	case RaiseDisputeRequestCategoryOther:
+		return true
+	case RaiseDisputeRequestCategoryUnrecognised:
+		return true
+	case RaiseDisputeRequestCategoryWrongAmount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransferSuggestionSource.
+const (
+	OwnAccount TransferSuggestionSource = "own_account"
+	Scenario   TransferSuggestionSource = "scenario"
+)
+
+// Valid indicates whether the value is a known member of the TransferSuggestionSource enum.
+func (e TransferSuggestionSource) Valid() bool {
+	switch e {
+	case OwnAccount:
+		return true
+	case Scenario:
+		return true
+	default:
+		return false
+	}
+}
+
 // Account defines model for Account.
 type Account struct {
 	AvailableMinor     *int64              `json:"available_minor,omitempty"`
@@ -44,6 +140,15 @@ type Beneficiary struct {
 	OwnerNameMasked *string             `json:"owner_name_masked,omitempty"`
 }
 
+// ChangePasswordRequest defines model for ChangePasswordRequest.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+
+	// RefreshToken Opaque refresh token of the session performing the change; its family is spared from revocation. Optional: if omitted, ALL families are revoked and the caller must re-login elsewhere.
+	RefreshToken *string `json:"refresh_token,omitempty"`
+}
+
 // CreateTransferRequest defines model for CreateTransferRequest.
 type CreateTransferRequest struct {
 	AmountMinor   int64              `json:"amount_minor"`
@@ -51,6 +156,24 @@ type CreateTransferRequest struct {
 	DebitAccount  openapi_types.UUID `json:"debit_account"`
 	Description   *string            `json:"description,omitempty"`
 }
+
+// Dispute defines model for Dispute.
+type Dispute struct {
+	Category       *DisputeCategory    `json:"category,omitempty"`
+	CreatedAt      *time.Time          `json:"created_at,omitempty"`
+	Id             *openapi_types.UUID `json:"id,omitempty"`
+	Reason         *string             `json:"reason,omitempty"`
+	ResolutionNote *string             `json:"resolution_note,omitempty"`
+	Status         *DisputeStatus      `json:"status,omitempty"`
+	TransferId     *openapi_types.UUID `json:"transfer_id,omitempty"`
+	UpdatedAt      *time.Time          `json:"updated_at,omitempty"`
+}
+
+// DisputeCategory defines model for Dispute.Category.
+type DisputeCategory string
+
+// DisputeStatus defines model for Dispute.Status.
+type DisputeStatus string
 
 // Error defines model for Error.
 type Error struct {
@@ -102,6 +225,17 @@ type LoginResponse struct {
 	UserId    *openapi_types.UUID `json:"user_id,omitempty"`
 }
 
+// RaiseDisputeRequest defines model for RaiseDisputeRequest.
+type RaiseDisputeRequest struct {
+	Category *RaiseDisputeRequestCategory `json:"category,omitempty"`
+
+	// Reason Free-text customer explanation (optional).
+	Reason *string `json:"reason,omitempty"`
+}
+
+// RaiseDisputeRequestCategory defines model for RaiseDisputeRequest.Category.
+type RaiseDisputeRequestCategory string
+
 // ReasonRequest defines model for ReasonRequest.
 type ReasonRequest struct {
 	Reason *string `json:"reason,omitempty"`
@@ -148,6 +282,32 @@ type TransferResult struct {
 	WasReplay  *bool               `json:"was_replay,omitempty"`
 }
 
+// TransferSuggestion defines model for TransferSuggestion.
+type TransferSuggestion struct {
+	AccountId *openapi_types.UUID `json:"account_id,omitempty"`
+	Iban      *string             `json:"iban,omitempty"`
+
+	// OwnerNameMasked Masked, exactly as /beneficiaries/resolve. Never the full name.
+	OwnerNameMasked *string `json:"owner_name_masked,omitempty"`
+
+	// Reason Human-facing label shown in the guided banner.
+	Reason *string `json:"reason,omitempty"`
+
+	// Scenario Active scenario name; omitted for the safe-default own-account suggestion.
+	Scenario *string                   `json:"scenario,omitempty"`
+	Source   *TransferSuggestionSource `json:"source,omitempty"`
+}
+
+// TransferSuggestionSource defines model for TransferSuggestion.Source.
+type TransferSuggestionSource string
+
+// UpdateMeRequest defines model for UpdateMeRequest.
+type UpdateMeRequest struct {
+	Email       *string `json:"email,omitempty"`
+	FullName    *string `json:"full_name,omitempty"`
+	PhoneNumber *string `json:"phone_number,omitempty"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt   *time.Time          `json:"created_at,omitempty"`
@@ -190,9 +350,24 @@ type ResolveBeneficiaryParams struct {
 	Iban string `form:"iban" json:"iban"`
 }
 
+// ListMyDisputesParams defines parameters for ListMyDisputes.
+type ListMyDisputesParams struct {
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateTransferParams defines parameters for CreateTransfer.
 type CreateTransferParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
+// SuggestTransferDestinationParams defines parameters for SuggestTransferDestination.
+type SuggestTransferDestinationParams struct {
+	// FromAccount Intended debit account (must be owned by the caller). Excluded from the suggestion.
+	FromAccount *openapi_types.UUID `form:"from_account,omitempty" json:"from_account,omitempty"`
+
+	// AmountMinor Intended amount in minor units; lets a scenario gate on a threshold.
+	AmountMinor *int64 `form:"amount_minor,omitempty" json:"amount_minor,omitempty"`
 }
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
@@ -207,11 +382,20 @@ type RefreshJSONRequestBody = RefreshRequest
 // AddBeneficiaryJSONRequestBody defines body for AddBeneficiary for application/json ContentType.
 type AddBeneficiaryJSONRequestBody = AddBeneficiaryRequest
 
+// UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
+type UpdateMeJSONRequestBody = UpdateMeRequest
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody = ChangePasswordRequest
+
 // CreateTransferJSONRequestBody defines body for CreateTransfer for application/json ContentType.
 type CreateTransferJSONRequestBody = CreateTransferRequest
 
 // CancelTransferJSONRequestBody defines body for CancelTransfer for application/json ContentType.
 type CancelTransferJSONRequestBody = ReasonRequest
+
+// RaiseDisputeJSONRequestBody defines body for RaiseDispute for application/json ContentType.
+type RaiseDisputeJSONRequestBody = RaiseDisputeRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -245,21 +429,39 @@ type ServerInterface interface {
 	// Remove a saved beneficiary (scoped to the caller)
 	// (DELETE /beneficiaries/{id})
 	DeleteBeneficiary(w http.ResponseWriter, r *http.Request, id Id)
+	// List the caller's disputes (newest first, cursor-paginated)
+	// (GET /disputes)
+	ListMyDisputes(w http.ResponseWriter, r *http.Request, params ListMyDisputesParams)
+	// Track one of the caller's disputes (scoped to raiser)
+	// (GET /disputes/{id})
+	GetDispute(w http.ResponseWriter, r *http.Request, id Id)
 	// Liveness/version probe
 	// (GET /health)
 	Health(w http.ResponseWriter, r *http.Request)
 	// The authenticated customer's own profile (resolved from the JWT subject)
 	// (GET /me)
 	GetMe(w http.ResponseWriter, r *http.Request)
+	// Update the caller's own profile (partial; name/email/phone only)
+	// (PATCH /me)
+	UpdateMe(w http.ResponseWriter, r *http.Request)
+	// Change the authenticated customer's password (revokes other sessions)
+	// (POST /me/password)
+	ChangePassword(w http.ResponseWriter, r *http.Request)
 	// Create a transfer (auto-posts by default). Idempotent.
 	// (POST /transfers)
 	CreateTransfer(w http.ResponseWriter, r *http.Request, params CreateTransferParams)
+	// Guided-transfer demo: suggest a destination account for the caller. Scenario-driven (simulated mule) when an active guided_scenario applies, else the caller's own other active account. Read-only; never moves money.
+	// (GET /transfers/suggestion)
+	SuggestTransferDestination(w http.ResponseWriter, r *http.Request, params SuggestTransferDestinationParams)
 	// Get a transfer
 	// (GET /transfers/{id})
 	GetTransfer(w http.ResponseWriter, r *http.Request, id Id)
 	// Cancel a pending transfer (releases the hold). Idempotent.
 	// (POST /transfers/{id}/cancel)
 	CancelTransfer(w http.ResponseWriter, r *http.Request, id Id)
+	// Raise a dispute on a transfer the caller is a party to ("I don't recognise this"). One open dispute per (transfer, caller).
+	// (POST /transfers/{id}/dispute)
+	RaiseDispute(w http.ResponseWriter, r *http.Request, id Id)
 	// Post a pending transfer (deferred settlement). Idempotent.
 	// (POST /transfers/{id}/post)
 	PostTransfer(w http.ResponseWriter, r *http.Request, id Id)
@@ -501,6 +703,78 @@ func (siw *ServerInterfaceWrapper) DeleteBeneficiary(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyDisputes operation middleware
+func (siw *ServerInterfaceWrapper) ListMyDisputes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMyDisputesParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyDisputes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDispute operation middleware
+func (siw *ServerInterfaceWrapper) GetDispute(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDispute(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Health operation middleware
 func (siw *ServerInterfaceWrapper) Health(w http.ResponseWriter, r *http.Request) {
 
@@ -520,6 +794,34 @@ func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMe operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePassword(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -574,6 +876,52 @@ func (siw *ServerInterfaceWrapper) CreateTransfer(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// SuggestTransferDestination operation middleware
+func (siw *ServerInterfaceWrapper) SuggestTransferDestination(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SuggestTransferDestinationParams
+
+	// ------------- Optional query parameter "from_account" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from_account", r.URL.Query(), &params.FromAccount, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from_account"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from_account", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "amount_minor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "amount_minor", r.URL.Query(), &params.AmountMinor, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "amount_minor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "amount_minor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SuggestTransferDestination(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetTransfer operation middleware
 func (siw *ServerInterfaceWrapper) GetTransfer(w http.ResponseWriter, r *http.Request) {
 
@@ -617,6 +965,32 @@ func (siw *ServerInterfaceWrapper) CancelTransfer(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CancelTransfer(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RaiseDispute operation middleware
+func (siw *ServerInterfaceWrapper) RaiseDispute(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RaiseDispute(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -811,15 +1185,27 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 
 	r.HandleFunc(options.BaseURL+"/beneficiaries/{id}", wrapper.DeleteBeneficiary).Methods(http.MethodDelete)
 
+	r.HandleFunc(options.BaseURL+"/disputes", wrapper.ListMyDisputes).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/disputes/{id}", wrapper.GetDispute).Methods(http.MethodGet)
+
 	r.HandleFunc(options.BaseURL+"/health", wrapper.Health).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/me", wrapper.GetMe).Methods(http.MethodGet)
 
+	r.HandleFunc(options.BaseURL+"/me", wrapper.UpdateMe).Methods(http.MethodPatch)
+
+	r.HandleFunc(options.BaseURL+"/me/password", wrapper.ChangePassword).Methods(http.MethodPost)
+
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.CreateTransfer).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/transfers/suggestion", wrapper.SuggestTransferDestination).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}", wrapper.GetTransfer).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}/cancel", wrapper.CancelTransfer).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/transfers/{id}/dispute", wrapper.RaiseDispute).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}/post", wrapper.PostTransfer).Methods(http.MethodPost)
 

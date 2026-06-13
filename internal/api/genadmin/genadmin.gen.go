@@ -38,6 +38,78 @@ func (e CreateUserRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for DisputeCategory.
+const (
+	Duplicate    DisputeCategory = "duplicate"
+	Fraud        DisputeCategory = "fraud"
+	Other        DisputeCategory = "other"
+	Unrecognised DisputeCategory = "unrecognised"
+	WrongAmount  DisputeCategory = "wrong_amount"
+)
+
+// Valid indicates whether the value is a known member of the DisputeCategory enum.
+func (e DisputeCategory) Valid() bool {
+	switch e {
+	case Duplicate:
+		return true
+	case Fraud:
+		return true
+	case Other:
+		return true
+	case Unrecognised:
+		return true
+	case WrongAmount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeStatus.
+const (
+	DisputeStatusOpen        DisputeStatus = "open"
+	DisputeStatusRejected    DisputeStatus = "rejected"
+	DisputeStatusResolved    DisputeStatus = "resolved"
+	DisputeStatusUnderReview DisputeStatus = "under_review"
+)
+
+// Valid indicates whether the value is a known member of the DisputeStatus enum.
+func (e DisputeStatus) Valid() bool {
+	switch e {
+	case DisputeStatusOpen:
+		return true
+	case DisputeStatusRejected:
+		return true
+	case DisputeStatusResolved:
+		return true
+	case DisputeStatusUnderReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolveDisputeRequestStatus.
+const (
+	ResolveDisputeRequestStatusRejected    ResolveDisputeRequestStatus = "rejected"
+	ResolveDisputeRequestStatusResolved    ResolveDisputeRequestStatus = "resolved"
+	ResolveDisputeRequestStatusUnderReview ResolveDisputeRequestStatus = "under_review"
+)
+
+// Valid indicates whether the value is a known member of the ResolveDisputeRequestStatus enum.
+func (e ResolveDisputeRequestStatus) Valid() bool {
+	switch e {
+	case ResolveDisputeRequestStatusRejected:
+		return true
+	case ResolveDisputeRequestStatusResolved:
+		return true
+	case ResolveDisputeRequestStatusUnderReview:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatusRequestStatus.
 const (
 	Active StatusRequestStatus = "active"
@@ -53,6 +125,30 @@ func (e StatusRequestStatus) Valid() bool {
 	case Closed:
 		return true
 	case Frozen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListDisputesParamsStatus.
+const (
+	Open        ListDisputesParamsStatus = "open"
+	Rejected    ListDisputesParamsStatus = "rejected"
+	Resolved    ListDisputesParamsStatus = "resolved"
+	UnderReview ListDisputesParamsStatus = "under_review"
+)
+
+// Valid indicates whether the value is a known member of the ListDisputesParamsStatus enum.
+func (e ListDisputesParamsStatus) Valid() bool {
+	switch e {
+	case Open:
+		return true
+	case Rejected:
+		return true
+	case Resolved:
+		return true
+	case UnderReview:
 		return true
 	default:
 		return false
@@ -99,6 +195,41 @@ type CreateUserRequest struct {
 
 // CreateUserRequestRole defines model for CreateUserRequest.Role.
 type CreateUserRequestRole string
+
+// Dispute defines model for Dispute.
+type Dispute struct {
+	Category       *DisputeCategory    `json:"category,omitempty"`
+	CreatedAt      *time.Time          `json:"created_at,omitempty"`
+	Id             *openapi_types.UUID `json:"id,omitempty"`
+	Reason         *string             `json:"reason,omitempty"`
+	ResolutionNote *string             `json:"resolution_note,omitempty"`
+	Status         *DisputeStatus      `json:"status,omitempty"`
+	TransferId     *openapi_types.UUID `json:"transfer_id,omitempty"`
+	UpdatedAt      *time.Time          `json:"updated_at,omitempty"`
+}
+
+// DisputeCategory defines model for Dispute.Category.
+type DisputeCategory string
+
+// DisputeStatus defines model for Dispute.Status.
+type DisputeStatus string
+
+// DisputeQueueItem Admin queue row — joins transfer + raiser context for triage.
+type DisputeQueueItem struct {
+	AmountMinor *int64              `json:"amount_minor,omitempty"`
+	Category    *string             `json:"category,omitempty"`
+	CreatedAt   *time.Time          `json:"created_at,omitempty"`
+	CreditIban  *string             `json:"credit_iban,omitempty"`
+	Currency    *string             `json:"currency,omitempty"`
+	DebitIban   *string             `json:"debit_iban,omitempty"`
+	Id          *openapi_types.UUID `json:"id,omitempty"`
+
+	// RaisedBy Raiser username.
+	RaisedBy   *string             `json:"raised_by,omitempty"`
+	Reason     *string             `json:"reason,omitempty"`
+	Status     *string             `json:"status,omitempty"`
+	TransferId *openapi_types.UUID `json:"transfer_id,omitempty"`
+}
 
 // Error defines model for Error.
 type Error struct {
@@ -153,6 +284,15 @@ type ReconcileResponse struct {
 		Detail    *string `json:"detail,omitempty"`
 	} `json:"issues,omitempty"`
 }
+
+// ResolveDisputeRequest defines model for ResolveDisputeRequest.
+type ResolveDisputeRequest struct {
+	ResolutionNote *string                     `json:"resolution_note,omitempty"`
+	Status         ResolveDisputeRequestStatus `json:"status"`
+}
+
+// ResolveDisputeRequestStatus defines model for ResolveDisputeRequest.Status.
+type ResolveDisputeRequestStatus string
 
 // ReverseResponse defines model for ReverseResponse.
 type ReverseResponse struct {
@@ -230,6 +370,16 @@ type WithdrawParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
 
+// ListDisputesParams defines parameters for ListDisputes.
+type ListDisputesParams struct {
+	Status *ListDisputesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Cursor *Cursor                   `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit                    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListDisputesParamsStatus defines parameters for ListDisputes.
+type ListDisputesParamsStatus string
+
 // ListPendingTransfersParams defines parameters for ListPendingTransfers.
 type ListPendingTransfersParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -252,6 +402,9 @@ type SetAccountStatusJSONRequestBody = StatusRequest
 
 // WithdrawJSONRequestBody defines body for Withdraw for application/json ContentType.
 type WithdrawJSONRequestBody = AmountRequest
+
+// ResolveDisputeJSONRequestBody defines body for ResolveDispute for application/json ContentType.
+type ResolveDisputeJSONRequestBody = ResolveDisputeRequest
 
 // ReverseTransferJSONRequestBody defines body for ReverseTransfer for application/json ContentType.
 type ReverseTransferJSONRequestBody = ReasonRequest
@@ -276,6 +429,12 @@ type ServerInterface interface {
 	// Debit an account (posts to external_clearing). Idempotent.
 	// (POST /accounts/{id}/withdraw)
 	Withdraw(w http.ResponseWriter, r *http.Request, id Id, params WithdrawParams)
+	// Operator dispute triage queue (filter by status, cursor-paginated)
+	// (GET /admin/disputes)
+	ListDisputes(w http.ResponseWriter, r *http.Request, params ListDisputesParams)
+	// Move a dispute to resolved/rejected (or under_review) with a note
+	// (POST /admin/disputes/{id}/resolve)
+	ResolveDispute(w http.ResponseWriter, r *http.Request, id Id)
 	// Manually run the hold-expiry sweep
 	// (POST /admin/expire-holds)
 	ExpireHolds(w http.ResponseWriter, r *http.Request)
@@ -479,6 +638,91 @@ func (siw *ServerInterfaceWrapper) Withdraw(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Withdraw(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDisputes operation middleware
+func (siw *ServerInterfaceWrapper) ListDisputes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDisputesParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDisputes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResolveDispute operation middleware
+func (siw *ServerInterfaceWrapper) ResolveDispute(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolveDispute(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -844,6 +1088,10 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/accounts/{id}/status", wrapper.SetAccountStatus).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/accounts/{id}/withdraw", wrapper.Withdraw).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/admin/disputes", wrapper.ListDisputes).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/admin/disputes/{id}/resolve", wrapper.ResolveDispute).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/admin/expire-holds", wrapper.ExpireHolds).Methods(http.MethodPost)
 

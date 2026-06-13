@@ -25,6 +25,9 @@ func (s *Server) Reconcile(w http.ResponseWriter, r *http.Request) {
 
 // ExpireHolds implements genadmin.ServerInterface.
 func (s *Server) ExpireHolds(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+		return
+	}
 	n, err := s.pg.Queries.ExpireHolds(r.Context())
 	if err != nil {
 		mapDBError(w, err)
