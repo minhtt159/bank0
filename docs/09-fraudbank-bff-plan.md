@@ -1,6 +1,6 @@
 # bank0 — fraudbank clients: BFF plan & feature gaps
 
-> **Status: plan.** The [fraudbank](fraudbank) suite (web, Android,
+> **Status: plan.** The fraudbank suite (web, Android,
 > iOS) was built against the client API as-is — auth (login/refresh/rotation),
 > accounts, ledger, beneficiaries, and transfers all work with **zero backend
 > changes**. The API is sufficient for v1 clients. A *full* client suite needs more;
