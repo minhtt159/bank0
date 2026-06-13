@@ -64,6 +64,10 @@ type ServerConfig struct {
 	// (dev convenience). Empty = disabled, the production default — prod web ships
 	// same-origin via the Worker. See docs/09-fraudbank-bff-plan.md §1.2.
 	CORSOrigins []string `mapstructure:"cors_origins"`
+	// RateLimitPerMin caps unauthenticated auth attempts (/auth/login, /auth/refresh)
+	// per client IP per minute — an in-app backstop behind the Cloudflare edge.
+	// 0 disables it (the zero value, so tests are unaffected). See docs/10.
+	RateLimitPerMin int `mapstructure:"rate_limit_per_min"`
 	// AutoMigrate runs embedded migrations on startup. Handy for local
 	// docker-compose (1 replica); leave false in K8s and use the migrate Job.
 	AutoMigrate bool `mapstructure:"auto_migrate"`
@@ -105,6 +109,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("server.openapi_spec_path", "api/openapi.yaml")
 	v.SetDefault("server.auto_migrate", false)
 	v.SetDefault("server.cors_origins", []string{}) // opt-in; empty = no CORS headers
+	v.SetDefault("server.rate_limit_per_min", 60)   // /auth/* per IP; 0 disables
 
 	v.SetDefault("admin.maker_checker_threshold_minor", 1000000) // €10,000.00
 	v.SetDefault("admin.session_idle_timeout", "30m")

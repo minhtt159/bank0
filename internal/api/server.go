@@ -33,6 +33,9 @@ type Server struct {
 	jwtTTL     time.Duration // access-token lifetime
 	refreshTTL time.Duration // refresh-token idle window (slid on rotate)
 	refreshAbs time.Duration // refresh-token absolute cap per family
+
+	loginLimiter   *rateLimiter // /auth/login per-IP backstop (nil = disabled)
+	refreshLimiter *rateLimiter // /auth/refresh per-IP backstop (nil = disabled)
 }
 
 func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
@@ -46,6 +49,10 @@ func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
 	}
 	if s.refreshAbs <= 0 {
 		s.refreshAbs = 2160 * time.Hour
+	}
+	if n := cfg.Server.RateLimitPerMin; n > 0 {
+		s.loginLimiter = newRateLimiter(n, time.Minute)
+		s.refreshLimiter = newRateLimiter(n*3, time.Minute) // refresh runs more often than login
 	}
 	if cfg.Auth.JWTSecret == "" {
 		log.Warn("auth.jwt_secret is empty — using an insecure dev secret; set APP_AUTH_JWT_SECRET in production")
@@ -81,8 +88,8 @@ func (s *Server) Router() http.Handler {
 	if portalOn {
 		// Public portal auth endpoints.
 		r.HandleFunc("/login", s.consoleLoginForm).Methods(http.MethodGet)
-		r.HandleFunc("/login", s.consoleLoginSubmit).Methods(http.MethodPost)
-		r.HandleFunc("/logout", s.consoleLogout).Methods(http.MethodPost)
+		r.Handle("/login", s.csrfGuard(http.HandlerFunc(s.consoleLoginSubmit))).Methods(http.MethodPost)
+		r.Handle("/logout", s.csrfGuard(http.HandlerFunc(s.consoleLogout))).Methods(http.MethodPost)
 		// Embedded console assets (CSS/JS). Public: the login page is styled too.
 		r.PathPrefix("/static/").Handler(http.StripPrefix("/static/",
 			staticCache(http.FileServerFS(webstatic.FS)))).Methods(http.MethodGet)
@@ -95,8 +102,8 @@ func (s *Server) Router() http.Handler {
 		// refresh token itself (the access token may be expired). Registered on the
 		// parent ahead of the JWT-guarded subrouter so they aren't shadowed.
 		// (logout-all needs the subject, so it stays on the guarded subrouter.)
-		r.HandleFunc("/auth/login", s.Login).Methods(http.MethodPost)
-		r.HandleFunc("/auth/refresh", s.Refresh).Methods(http.MethodPost)
+		r.Handle("/auth/login", s.rateLimit(s.loginLimiter, clientIP, http.HandlerFunc(s.Login))).Methods(http.MethodPost)
+		r.Handle("/auth/refresh", s.rateLimit(s.refreshLimiter, clientIP, http.HandlerFunc(s.Refresh))).Methods(http.MethodPost)
 		r.HandleFunc("/auth/logout", s.Logout).Methods(http.MethodPost)
 		cr := r.PathPrefix("/").Subrouter()
 		cr.Use(s.requireJWT)
@@ -106,6 +113,7 @@ func (s *Server) Router() http.Handler {
 		// Everything else on the portal (admin JSON API + console) needs a session.
 		pr := r.PathPrefix("/").Subrouter()
 		pr.Use(s.requireSession)
+		pr.Use(s.csrfGuard) // same-origin guard on cookie-authed mutations (CSRF)
 		genadmin.HandlerFromMux(s, pr)
 		s.registerConsole(pr)
 	}
