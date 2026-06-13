@@ -4,13 +4,25 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// writeJSON encodes v as the response body. A nil top-level slice is coerced to an
+// empty slice so list endpoints always emit `[]`, never `null`: a JSON array
+// endpoint must stay an array (typed clients like [LedgerEntry] / List<Transfer>
+// decode-fail on null). This is the single, audit-proof guarantee for every list
+// handler — present and future (disputes, list-my-transfers, ...). See
+// docs/09-fraudbank-bff-plan.md §0.2.
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	if v != nil {
+		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.IsNil() {
+			v = reflect.MakeSlice(rv.Type(), 0, 0).Interface()
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
