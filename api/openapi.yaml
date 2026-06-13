@@ -142,6 +142,33 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
+  /me/sessions:
+    get:
+      operationId: listSessions
+      tags: [client]
+      summary: List the caller's active sessions (refresh-token families = devices)
+      parameters: [ { $ref: "#/components/parameters/SessionToken" } ]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/sessions/{family_id}:
+    delete:
+      operationId: revokeSession
+      tags: [client]
+      summary: Revoke one session/device (selective sign-out). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/FamilyId" } ]
+      responses:
+        "204": { description: revoked (idempotent — also 204 if already gone) }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }   # family not owned by caller
+
   /beneficiaries:
     get:
       operationId: listBeneficiaries
@@ -733,6 +760,19 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, maximum: 200 }
+    FamilyId:
+      name: family_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SessionToken:
+      name: X-Refresh-Token
+      in: header
+      required: false
+      description: >-
+        The caller's current refresh token. Optional; when present, the matching
+        family is flagged current:true in GET /me/sessions. Never logged.
+      schema: { type: string }
 
   responses:
     Error:
@@ -881,6 +921,17 @@ components:
         counterparty_owner: { type: string, description: "Masked owner name of the other party." }
         requested_at: { type: string, format: date-time }
         posted_at: { type: string, format: date-time }
+    Session:
+      type: object
+      description: One active refresh-token family (a device/login). No token material.
+      properties:
+        family_id: { type: string, format: uuid }
+        device_label: { type: string }
+        user_agent: { type: string }
+        ip: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        current: { type: boolean, description: "true when this is the family of the presented X-Refresh-Token" }
     CreateAccountRequest:
       type: object
       required: [user_id, iban, pin]

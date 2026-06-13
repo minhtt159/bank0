@@ -1,5 +1,13 @@
 # spec — `GET /me/sessions` + `DELETE /me/sessions/{family_id}` (device list & selective revoke)
 
+> ✅ **IMPLEMENTED (2026-06-14, `improve/add-features`).** Migration
+> `00021_session_device_label.sql` (device_label column, 6-arg `issue_refresh_token`,
+> `list_user_sessions`, `revoke_refresh_family_scoped`); DB methods in
+> `internal/db/auth.go` (`ListUserSessions`, `RevokeUserFamily`; the `current` flag
+> reuses `RefreshFamilyByToken`); `FamilyOwnedBy` query for the precise-404 variant;
+> handler `internal/api/handlers_sessions.go`; tests `internal/api/sessions_test.go`.
+> The precise (404) variant was chosen.
+>
 > Implementation-ready. Implement as written; no further design decisions.
 > Closes the **P2** gap in [`09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md)
 > ("Session/device listing + selective revoke — the refresh-token families (`00017`)
