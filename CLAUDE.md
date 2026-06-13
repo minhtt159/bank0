@@ -79,21 +79,26 @@ After regenerating, **commit the generated files** (`internal/db/sqlc/*`,
 `internal/api/gen*/*.gen.go`, `web/template/*_templ.go`) — the repo builds without
 the tools installed.
 
-## Testing against PostgreSQL 18 (do this for any DB change)
+## Testing against PostgreSQL (default 18; 17 for Supabase parity)
 
 The integration tests (DB + HTTP) are **DSN-gated**: they skip unless
-`TEST_DATABASE_DSN` is set, and `TestMain` migrates the target DB fresh. Migrations
-use **native `uuidv7()` (Postgres 18 only)** — do not test schema changes on PG16.
-CI runs on `postgres:18`.
+`TEST_DATABASE_DSN` is set, and `TestMain` migrates the target DB fresh. **Postgres
+18 is the default** everywhere (local dev + CI). Postgres 17 (the Supabase deploy
+target) is supported as an **opt-in** via the `uuidv7()` polyfill in migration
+`00001` (a no-op on PG18+, where the built-in wins). Don't go below 17.
 
 ```bash
-# preferred: Taskfile (uses deploy/docker-compose.dev.yml -> postgres:18)
-task test:db
+# preferred: Taskfile (deploy/docker-compose.dev.yml, postgres:18)
+task test:db            # Postgres 18 (default)
+task test:db PG=17      # Postgres 17 — Supabase parity (recreates a fresh db container)
 
 # manual, full suite:
 export TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable'
 go test -count=1 ./internal/db/ ./internal/api/
 ```
+
+CI defaults to `postgres:18`; trigger the workflow manually (Actions →
+**workflow_dispatch** → `pg_version: 17`) to run the suite against PG17.
 
 If Docker Hub is rate-limited in your environment, pull PG18 from the GCR mirror:
 `docker run -d --name pg18 -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=bank0_test -p 5544:5432 mirror.gcr.io/library/postgres:18-alpine`,

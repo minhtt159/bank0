@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      pg_version:
+        description: Postgres major version for the integration tests (Supabase parity = 17)
+        type: choice
+        default: "18"
+        options: ["18", "17"]
 
 # Pinned generator versions — keep in lockstep with CLAUDE.md. If these drift,
 # the generate-drift gate below will fail with a churned generated file.
@@ -19,12 +26,12 @@ jobs:
 
     # Real Postgres for the DB + HTTP integration tests. The tests apply the
     # embedded migrations themselves; they skip unless TEST_DATABASE_DSN is set.
-    # NOTE: postgres:18 -> postgres:17 to match the Supabase deploy target
-    # (docs/08). uuidv7() is supplied by the polyfill in migration 00001, so this
-    # exercises the exact code path production runs.
+    # Postgres 18 by default. Manually dispatch with pg_version=17 to test against
+    # the Supabase deploy target (docs/08); the uuidv7() polyfill in migration 00001
+    # makes the schema run on <18, so both versions exercise real production paths.
     services:
       postgres:
-        image: postgres:17
+        image: postgres:${{ github.event.inputs.pg_version || '18' }}
         env:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: admin
