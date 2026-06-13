@@ -169,6 +169,19 @@ tasks:
     cmds:
       - goose -dir db/migrations create {{.CLI_ARGS}} sql
 
+  seed:demo:
+    desc: Load the large IBAN-backed demo seed (db/seed_demo.sql) into the dev `bank0` db (run after migrations)
+    cmds:
+      - docker compose -f deploy/docker-compose.dev.yml up -d --wait db
+      - docker compose -f deploy/docker-compose.dev.yml exec -T db psql -U admin -d bank0 -v ON_ERROR_STOP=1 < db/seed_demo.sql
+
+  seed:demo:gen:
+    desc: "Regenerate db/seed_demo.sql from an IBAN assets dir (override ASSETS=/path/to/ibans)"
+    vars:
+      ASSETS: '{{.ASSETS | default "db/seedgen/ibans"}}'
+    cmds:
+      - go run ./db/seedgen -assets {{.ASSETS}} -out db/seed_demo.sql
+
   smoke:
     desc: Run the SQL smoke test against the dev database
     cmds:
