@@ -73,9 +73,12 @@ open http://localhost:8090/docs    # client API reference (Scalar)
 - **client API**  → http://localhost:8090  (mode=api, JWT bearer)
 
 Seeded logins (dev passwords): `admin`/`admin`, `operator1`/`operator`,
-`auditor1`/`auditor` (staff); customers `alice`/`password` … `frank` (no console
-access). The seed (`db/seed.sql`, idempotent) loads 6 customers, 7 accounts, and
-16 transfers (3 pending). **Change the admin password immediately.**
+`auditor1`/`auditor` (staff); 30 customers (`alice`, `bob`, … `dario`; password
+`password`, no console access). The seed (`db/seed.sql`, idempotent) loads 30
+customers, 72 accounts (valid **NL** IBANs), and ~240 transfers (4 pending, plus a
+canceled and a reversed one for the full lifecycle). For a much larger randomized
+data set, use `db/seed_demo.sql` (`task seed:demo`). **Change the admin password
+immediately.**
 
 Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
 

@@ -36,13 +36,14 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	if req.TransferLimitMinor == 0 {
 		req.TransferLimitMinor = 50000
 	}
-	if !iban.IsValid(req.Iban) {
+	normIban := iban.Normalize(req.Iban)
+	if !iban.IsValid(normIban) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_iban", "iban failed checksum/format validation")
 		return
 	}
 	id, err := s.pg.Queries.CreateAccount(r.Context(), sqlc.CreateAccountParams{
 		UserID:             userID,
-		Iban:               req.Iban,
+		Iban:               normIban,
 		Pin:                req.Pin,
 		TransferLimitMinor: req.TransferLimitMinor,
 	})

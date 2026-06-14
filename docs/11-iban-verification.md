@@ -229,6 +229,8 @@ Validate at every layer with a clear **authority split**: the client is convenie
 
 A three-layer, two-authority rollout. Each step names the file and follows the CLAUDE.md conventions (DB logic in migrations, generated code committed, DSN-gated tests on PG18).
 
+> **Status (shipped).** Implemented across two migrations: `00022_iban_validation.sql` (the checksum `iban_is_valid`/`iban_generate` + the `accounts.iban` CHECK) and `00023_iban_country_length.sql` (the per-country length table as a shared `iban_country_length()` helper, an unregistered-country reject, a BBAN-length guard in `iban_generate`, and the matching `beneficiaries.iban` CHECK). All three layers — `internal/iban`, the two migrations, and `web/app/src/lib/iban.ts` — carry the **same 89-country table** and agree byte-for-byte. Two column CHECKs were used rather than a shared `DOMAIN` (the `iban` columns predate this work). DB-layer coverage lives in `internal/db/iban_test.go`.
+
 ### 6.1 Postgres — the backstop (do this first; it's the source of truth)
 
 Add a migration `db/migrations/NNNN_iban_checksum.sql` with a working `-- +goose Down`:

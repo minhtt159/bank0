@@ -2,25 +2,44 @@
 -- Uses the DB functions so all invariants/holds/idempotency apply.
 -- Run:  psql "$DSN" -f db/seed.sql      (or via the compose `seed` service)
 --
--- Shape: 5 customers, 2-3 accounts each (12 accounts total). Every account gets
--- 3 transactions: an opening deposit + one outgoing ring transfer + one incoming
--- ring transfer. Plus a few pending transfers for the operator queue.
+-- Shape: 30 customers, 1-3 accounts each (72 accounts total) — ~5-10% of the
+-- generated demo seed (db/seed_demo.sql). Account IBANs are valid NL IBANs
+-- (iban_generate -> MOD-97 checksum, satisfies the accounts_iban_checksum CHECK).
+-- Every account gets an opening deposit + a ring transfer (out and in). Plus a
+-- handful of pending transfers for the operator queue and one canceled + one
+-- reversed transfer so the lifecycle states are all represented. The richer,
+-- randomized data set lives in db/seed_demo.sql (`task seed:demo`).
 --
 -- Staff logins (dev passwords):
 --   admin     / admin       (role admin, from migration 00011)
 --   operator1 / operator    (role operator)
 --   auditor1  / auditor      (role auditor)
--- Customers (alice/bob/carol/dave/erin) have no console access; password "password".
+-- The 30 customers (alice/bob/carol/dave/erin/frank + 24 more) have no console
+-- access; password "password".
 
 DO $$
 DECLARE
-    usernames  TEXT[] := ARRAY['alice', 'bob', 'carol', 'dave', 'erin'];
-    fullnames  TEXT[] := ARRAY['Alice Andersson', 'Bob Bergström', 'Carol Carlsson', 'Dave Dahl', 'Erin Ek'];
-    acctcounts INT[]  := ARRAY[3, 2, 3, 2, 2];   -- 12 accounts total
+    usernames  TEXT[] := ARRAY[
+        'alice', 'bob', 'carol', 'dave', 'erin', 'frank', 'grace', 'henrik', 'ines', 'jonas',
+        'klara', 'lars', 'maja', 'niklas', 'olga', 'pavel', 'quinn', 'rosa', 'sven', 'tara',
+        'ulrik', 'vera', 'wouter', 'xenia', 'yusuf', 'zara', 'anton', 'bea', 'cleo', 'dario'];
+    fullnames  TEXT[] := ARRAY[
+        'Alice Andersson', 'Bob Bergström', 'Carol Carlsson', 'Dave Dahl', 'Erin Ek',
+        'Frank Fischer', 'Grace Visser', 'Henrik Jansen', 'Ines de Boer', 'Jonas Bakker',
+        'Klara Mulder', 'Lars de Vries', 'Maja Smit', 'Niklas Meijer', 'Olga Bos',
+        'Pavel Novak', 'Quinn de Jong', 'Rosa Vermeulen', 'Sven Hendriks', 'Tara van Dijk',
+        'Ulrik Dekker', 'Vera van den Berg', 'Wouter Peters', 'Xenia Kuipers', 'Yusuf Demir',
+        'Zara van Leeuwen', 'Anton Schouten', 'Bea Willems', 'Cleo Maas', 'Dario Romano'];
+    -- 1-3 accounts per customer; sums to 72.
+    acctcounts INT[]  := ARRAY[
+        3, 2, 3, 2, 2, 3, 2, 3, 2, 2,
+        3, 2, 3, 2, 2, 3, 2, 3, 2, 2,
+        3, 2, 3, 2, 2, 3, 2, 3, 2, 2];
     aids       UUID[] := '{}';
     v_user     UUID;
     v_acct     UUID;
     v_iban     TEXT;
+    v_tid      UUID;
     seq        INT := 1;
     i          INT;
     j          INT;
@@ -43,14 +62,14 @@ BEGIN
         END IF;
 
         FOR j IN 1 .. acctcounts[i] LOOP
-            v_iban := iban_generate('SE', lpad(seq::text, 20, '0'));      -- valid SE IBAN (checksum)
+            v_iban := iban_generate('NL', lpad(seq::text, 14, '0'));      -- valid NL IBAN (checksum)
             SELECT id INTO v_acct FROM accounts WHERE iban = v_iban::varchar;
             IF v_acct IS NULL THEN
                 v_acct := create_account(v_user, v_iban::varchar, lpad((1000 + seq)::text, 4, '0')::text, 50000::bigint);
             END IF;
             aids := array_append(aids, v_acct);
 
-            -- transaction #1: opening deposit (€500)
+            -- opening deposit (€500)
             PERFORM deposit('seed-dep-' || v_iban, v_acct, 50000, 'Opening deposit');
             seq := seq + 1;
         END LOOP;
@@ -68,15 +87,25 @@ BEGIN
     PERFORM request_transfer('seed-pend-1', aids[1],  aids[4],  2500, 'Deferred: pending demo 1', 'transfer');
     PERFORM request_transfer('seed-pend-2', aids[5],  aids[2],  1500, 'Deferred: pending demo 2', 'transfer');
     PERFORM request_transfer('seed-pend-3', aids[7],  aids[10], 3000, 'Deferred: pending demo 3', 'transfer');
+    PERFORM request_transfer('seed-pend-4', aids[20], aids[33], 1800, 'Deferred: pending demo 4', 'transfer');
+
+    --- one canceled + one reversed, so every lifecycle state is present ----
+    SELECT transfer_id INTO v_tid
+      FROM request_transfer('seed-cancel-1', aids[3], aids[15], 2000, 'Canceled demo', 'transfer');
+    PERFORM cancel_transfer(v_tid, 'seed: canceled demo');
+
+    SELECT transfer_id INTO v_tid
+      FROM transfer('seed-rev-src', aids[8], aids[22], 1200, 'Reversed demo', 'transfer');
+    PERFORM reverse_transfer(v_tid, 'seed-rev-1', 'seed: reversed demo');
 
     --- bulk volume so lists + the first account's statement span pages.
     --- aids[1] is in every bulk transfer (alternating side) -> a long statement.
-    FOR i IN 1 .. 70 LOOP
+    FOR i IN 1 .. 90 LOOP
         IF i % 2 = 0 THEN
-            PERFORM transfer('seed-bulk-' || i, aids[1], aids[(i % 11) + 2],
+            PERFORM transfer('seed-bulk-' || i, aids[1], aids[(i % (n - 1)) + 2],
                              100 * (1 + i % 3), 'Bulk #' || i || ' out', 'transfer');
         ELSE
-            PERFORM transfer('seed-bulk-' || i, aids[(i % 11) + 2], aids[1],
+            PERFORM transfer('seed-bulk-' || i, aids[(i % (n - 1)) + 2], aids[1],
                              100 * (1 + i % 3), 'Bulk #' || i || ' in', 'transfer');
         END IF;
     END LOOP;
