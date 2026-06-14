@@ -74,6 +74,24 @@ func (p *Postgres) RequestTransfer(
 	return r, err
 }
 
+// ApprovalCheck is the maker-checker verdict for an amount (API-8): whether a
+// second approver is required, plus the active threshold so callers can render it.
+type ApprovalCheck struct {
+	Required       bool
+	ThresholdMinor int64
+}
+
+// RequiresApproval asks the DB whether an amount exceeds the configured maker-checker
+// threshold. The decision + value live in bank_settings (tweakable from the console),
+// honoring rule 1. requires_approval() RETURNS TABLE, so it's hand-written like
+// transfer()/reconcile().
+func (p *Postgres) RequiresApproval(ctx context.Context, amountMinor int64) (ApprovalCheck, error) {
+	const q = `SELECT required, threshold_minor FROM requires_approval($1::bigint)`
+	var a ApprovalCheck
+	err := p.Pool.QueryRow(ctx, q, amountMinor).Scan(&a.Required, &a.ThresholdMinor)
+	return a, err
+}
+
 // ResolvedAccount mirrors resolve_account_by_iban()'s RETURNS TABLE. Used by the
 // customer app's confirmation-of-payee: a masked owner name, never the balance.
 type ResolvedAccount struct {

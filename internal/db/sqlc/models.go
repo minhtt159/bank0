@@ -518,6 +518,14 @@ type AdminAction struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
+type BankSetting struct {
+	ID                         bool       `json:"id"`
+	MakerCheckerThresholdMinor int64      `json:"maker_checker_threshold_minor"`
+	DefaultTransferLimitMinor  int64      `json:"default_transfer_limit_minor"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
+	UpdatedBy                  *uuid.UUID `json:"updated_by"`
+}
+
 type Beneficiary struct {
 	ID              uuid.UUID `json:"id"`
 	OwnerUserID     uuid.UUID `json:"owner_user_id"`

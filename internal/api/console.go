@@ -20,6 +20,8 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/audit", s.consoleAudit).Methods(http.MethodGet)
 	r.HandleFunc("/console/approvals", s.consoleApprovals).Methods(http.MethodGet)
 	r.HandleFunc("/console/disputes", s.consoleDisputes).Methods(http.MethodGet)
+	r.HandleFunc("/console/settings", s.consoleSettings).Methods(http.MethodGet)
+	r.HandleFunc("/console/settings", s.consoleUpdateSettings).Methods(http.MethodPost)
 
 	// Live-search results fragments (registered before /{id} so "results" wins)
 	r.HandleFunc("/console/users/results", s.consoleUsersResults).Methods(http.MethodGet)

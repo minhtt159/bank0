@@ -23,9 +23,8 @@ server:
   auto_migrate: false       # true for local compose; false in K8s (use migrate Job)
 
 admin:
-  # 4-eyes / maker-checker threshold (minor units). Money moves above this
-  # should route to the approvals queue. 1000000 = €10,000.00.
-  maker_checker_threshold_minor: 1000000
+  # The maker-checker threshold + default transfer limit now live in the
+  # bank_settings table (tweakable from the console Settings panel) — not here.
   session_idle_timeout: 30m   # portal cookie-session idle timeout (DB-enforced)
   maintenance_interval: 60s   # expire_holds + cleanup cadence
   run_maintenance: true       # advisory-locked; in K8s enable on portal only

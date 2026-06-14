@@ -27,6 +27,10 @@ func canActOnMoney(role string) bool {
 
 func canManageUsers(role string) bool { return role == string(sqlc.UserRoleAdmin) }
 
+// canManageSettings gates editing bank policy (the Settings panel): admins only.
+// All staff may view it read-only.
+func canManageSettings(role string) bool { return role == string(sqlc.UserRoleAdmin) }
+
 // canApprove gates the maker-checker queue: only admins approve/reject.
 func canApprove(role string) bool { return role == string(sqlc.UserRoleAdmin) }
 
@@ -401,7 +405,7 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
-	limit := int64(50000)
+	var limit int64 // 0 -> create_account uses the configured default (bank_settings)
 	if v := strings.TrimSpace(r.PostFormValue("limit")); v != "" {
 		if m, perr := money.ParseEuros(v); perr == nil {
 			limit = m
@@ -492,7 +496,12 @@ func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir co
 		key = uuid.NewString()
 	}
 	ctx := r.Context()
-	if amount > s.cfg.Admin.MakerCheckerThresholdMinor {
+	ra, err := s.pg.RequiresApproval(ctx, amount)
+	if err != nil {
+		s.renderUserDetail(w, r, owner, "Could not read policy: "+dbErrorMessage(err))
+		return
+	}
+	if ra.Required {
 		tid, err := dir.request(key, acctID, amount)
 		if err != nil {
 			s.renderUserDetail(w, r, owner, "Could not submit: "+dbErrorMessage(err))
@@ -508,7 +517,7 @@ func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir co
 		refresh(w)
 		s.audit(ctx, actor, dir.auditRequested, &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
 		s.renderUserDetail(w, r, owner, dir.noun+" of "+money.FormatMinor(amount)+" exceeds the "+
-			money.FormatMinor(s.cfg.Admin.MakerCheckerThresholdMinor)+" threshold — sent to Approvals for a second admin.")
+			money.FormatMinor(ra.ThresholdMinor)+" threshold — sent to Approvals for a second admin.")
 		return
 	}
 	tid, err := dir.post(key, acctID, amount)

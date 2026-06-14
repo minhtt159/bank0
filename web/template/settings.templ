@@ -1,0 +1,44 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// SettingsPanel renders bank policy (API-8) from bank_settings. Admins get an edit
+// form; other staff see the current values read-only. Changes apply immediately and
+// are audited. flash is shown after a save ("" = none).
+templ SettingsPanel(s sqlc.GetBankSettingsRow, canEdit bool, flash string) {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Settings</h1>
+			<span class="muted small">Bank policy — applies immediately, audited.</span>
+		</div>
+		if flash != "" {
+			<div class="flash">{ flash }</div>
+		}
+		if canEdit {
+			<form class="settings-form" hx-post="/console/settings" hx-target="#main-panel" hx-swap="innerHTML">
+				<label>
+					Maker-checker threshold (€)
+					<input name="maker_checker_threshold" type="text" inputmode="decimal" value={ money.PlainMinor(s.MakerCheckerThresholdMinor) }/>
+				</label>
+				<p class="muted small">Money moves strictly above this need a second admin to approve.</p>
+				<label>
+					Default transfer limit (€)
+					<input name="default_transfer_limit" type="text" inputmode="decimal" value={ money.PlainMinor(s.DefaultTransferLimitMinor) }/>
+				</label>
+				<p class="muted small">Applied to a new account when no per-account limit is set.</p>
+				<button class="primary" type="submit">Save settings</button>
+			</form>
+		} else {
+			<dl class="settings-view">
+				<dt>Maker-checker threshold</dt>
+				<dd>{ money.FormatMinor(s.MakerCheckerThresholdMinor) }</dd>
+				<dt>Default transfer limit</dt>
+				<dd>{ money.FormatMinor(s.DefaultTransferLimitMinor) }</dd>
+			</dl>
+			<p class="muted small">Only admins can change these.</p>
+		}
+	</div>
+}
