@@ -108,6 +108,41 @@ func (q *Queries) CancelTransfer(ctx context.Context, arg CancelTransferParams) 
 	return status, err
 }
 
+const clientCancelTransfer = `-- name: ClientCancelTransfer :one
+SELECT client_cancel_transfer($1::uuid, $2::uuid, $3::text) AS status
+`
+
+type ClientCancelTransferParams struct {
+	CallerSubject uuid.UUID `json:"caller_subject"`
+	ID            uuid.UUID `json:"id"`
+	Reason        string    `json:"reason"`
+}
+
+// Caller-scoped cancel: enforces debit-account ownership in the DB (TRANSFER-1).
+func (q *Queries) ClientCancelTransfer(ctx context.Context, arg ClientCancelTransferParams) (TransferStatus, error) {
+	row := q.db.QueryRow(ctx, clientCancelTransfer, arg.CallerSubject, arg.ID, arg.Reason)
+	var status TransferStatus
+	err := row.Scan(&status)
+	return status, err
+}
+
+const clientPostTransfer = `-- name: ClientPostTransfer :one
+SELECT client_post_transfer($1::uuid, $2::uuid) AS status
+`
+
+type ClientPostTransferParams struct {
+	CallerSubject uuid.UUID `json:"caller_subject"`
+	ID            uuid.UUID `json:"id"`
+}
+
+// Caller-scoped post: enforces debit-account ownership in the DB (TRANSFER-1).
+func (q *Queries) ClientPostTransfer(ctx context.Context, arg ClientPostTransferParams) (TransferStatus, error) {
+	row := q.db.QueryRow(ctx, clientPostTransfer, arg.CallerSubject, arg.ID)
+	var status TransferStatus
+	err := row.Scan(&status)
+	return status, err
+}
+
 const getAccountLedger = `-- name: GetAccountLedger :many
 SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signed_amount,
        balance_after, currency, posted_at, transfer_kind, transfer_status, description,

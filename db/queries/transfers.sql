@@ -45,6 +45,14 @@ SELECT post_transfer(sqlc.arg(id)::uuid) AS status;
 -- name: CancelTransfer :one
 SELECT cancel_transfer(sqlc.arg(id)::uuid, sqlc.arg(reason)::text) AS status;
 
+-- name: ClientPostTransfer :one
+-- Caller-scoped post: enforces debit-account ownership in the DB (TRANSFER-1).
+SELECT client_post_transfer(sqlc.arg(caller_subject)::uuid, sqlc.arg(id)::uuid) AS status;
+
+-- name: ClientCancelTransfer :one
+-- Caller-scoped cancel: enforces debit-account ownership in the DB (TRANSFER-1).
+SELECT client_cancel_transfer(sqlc.arg(caller_subject)::uuid, sqlc.arg(id)::uuid, sqlc.arg(reason)::text) AS status;
+
 -- name: ReverseTransfer :one
 SELECT reverse_transfer(
     sqlc.arg(id)::uuid,

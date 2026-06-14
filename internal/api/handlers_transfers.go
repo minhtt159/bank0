@@ -97,6 +97,11 @@ type createTransferReq struct {
 // CreateTransfer implements genclient.ServerInterface. Auto-posts by default;
 // idempotent on the Idempotency-Key header (bound by the generated wrapper).
 func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params genclient.CreateTransferParams) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
 	var req createTransferReq
 	if !decodeJSON(w, r, &req) {
 		return
@@ -111,20 +116,10 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
 		return
 	}
-	// Client surface: you can only debit your own account.
-	if subj, ok := clientSubject(r.Context()); ok {
-		owner, err := s.pg.Queries.AccountOwner(r.Context(), debit)
-		if err != nil {
-			mapDBError(w, err)
-			return
-		}
-		if !ownsAccount(subj, owner) {
-			writeError(w, http.StatusForbidden, "forbidden", "debit account not owned by caller")
-			return
-		}
-	}
-	res, err := s.pg.Transfer(r.Context(), params.IdempotencyKey, debit, credit,
-		req.AmountMinor, req.Description, sqlc.TransferKindTransfer)
+	// Debit-account ownership is enforced inside client_transfer (one round trip, in
+	// the DB) — non-ownership raises 42501 -> 403. No separate probe.
+	res, err := s.pg.ClientTransfer(r.Context(), subj, params.IdempotencyKey, debit, credit,
+		req.AmountMinor, req.Description)
 	if err != nil {
 		mapDBError(w, err)
 		return
@@ -151,25 +146,6 @@ func (s *Server) GetTransfer(w http.ResponseWriter, r *http.Request, id openapi_
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
-}
-
-// requireTransferDebitOwner enforces (client surface only) that the caller owns
-// the transfer's debit account. Returns false and writes the response on denial.
-func (s *Server) requireTransferDebitOwner(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
-	subj, ok := clientSubject(r.Context())
-	if !ok {
-		return true // portal surface: operators act on the bank's behalf
-	}
-	o, err := s.pg.Queries.TransferOwners(r.Context(), id)
-	if err != nil {
-		mapDBError(w, err)
-		return false
-	}
-	if !ownsAccount(subj, o.DebitOwner) {
-		writeError(w, http.StatusNotFound, "not_found", "transfer not found")
-		return false
-	}
-	return true
 }
 
 // ListPendingTransfers implements genadmin.ServerInterface.
@@ -208,12 +184,18 @@ func (s *Server) respondPending(w http.ResponseWriter, r *http.Request, cursor *
 	writeJSON(w, http.StatusOK, rows)
 }
 
-// PostTransfer implements genclient.ServerInterface.
+// PostTransfer implements genclient.ServerInterface. Debit-account ownership is
+// enforced inside client_post_transfer (one round trip); a transfer the caller
+// doesn't own raises 'not found' -> 404, hiding existence.
 func (s *Server) PostTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if !s.requireTransferDebitOwner(w, r, uuid.UUID(id)) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
-	status, err := s.pg.Queries.PostTransfer(r.Context(), uuid.UUID(id))
+	status, err := s.pg.Queries.ClientPostTransfer(r.Context(), sqlc.ClientPostTransferParams{
+		CallerSubject: subj, ID: uuid.UUID(id),
+	})
 	if err != nil {
 		mapDBError(w, err)
 		return
@@ -225,15 +207,18 @@ type reasonReq struct {
 	Reason string `json:"reason"`
 }
 
-// CancelTransfer implements genclient.ServerInterface.
+// CancelTransfer implements genclient.ServerInterface. Ownership enforced in the DB
+// (client_cancel_transfer); a transfer the caller doesn't own -> 404.
 func (s *Server) CancelTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if !s.requireTransferDebitOwner(w, r, uuid.UUID(id)) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req reasonReq
 	decodeOptionalJSON(r, &req)
-	status, err := s.pg.Queries.CancelTransfer(r.Context(), sqlc.CancelTransferParams{
-		ID: uuid.UUID(id), Reason: req.Reason,
+	status, err := s.pg.Queries.ClientCancelTransfer(r.Context(), sqlc.ClientCancelTransferParams{
+		CallerSubject: subj, ID: uuid.UUID(id), Reason: req.Reason,
 	})
 	if err != nil {
 		mapDBError(w, err)

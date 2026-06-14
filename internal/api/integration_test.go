@@ -53,7 +53,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *db.Postgres) {
 	cfg := config.Config{
 		App:    config.AppConfig{Name: "bank0", Version: "test", Env: "development"}, // dev => cookie not Secure-only
 		Server: config.ServerConfig{Mode: "all", DefaultPageLimit: 25},
-		Admin:  config.AdminConfig{MakerCheckerThresholdMinor: 1_000_000, SessionIdleTimeout: 30 * time.Minute},
+		Admin:  config.AdminConfig{SessionIdleTimeout: 30 * time.Minute}, // threshold now in bank_settings (seeded €10k)
 		Auth:   config.AuthConfig{JWTSecret: "test-secret", JWTTTL: time.Hour, JWTIssuer: "bank0", JWTAudience: "bank0-client"},
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

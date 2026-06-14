@@ -33,9 +33,7 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid user_id")
 		return
 	}
-	if req.TransferLimitMinor == 0 {
-		req.TransferLimitMinor = 50000
-	}
+	// 0 -> create_account sources the configured default (bank_settings) in the DB.
 	normIban := iban.Normalize(req.Iban)
 	if !iban.IsValid(normIban) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_iban", "iban failed checksum/format validation")
@@ -144,9 +142,10 @@ func (s *Server) adminMoneyMove(w http.ResponseWriter, r *http.Request, defaultD
 		mapDBError(w, err)
 		return
 	}
+	ra, _ := s.pg.RequiresApproval(r.Context(), req.AmountMinor) // hint only; DB is the authority
 	writeJSON(w, http.StatusOK, map[string]any{
 		"transfer_id":       tid,
-		"requires_approval": req.AmountMinor > s.cfg.Admin.MakerCheckerThresholdMinor,
+		"requires_approval": ra.Required,
 	})
 }
 

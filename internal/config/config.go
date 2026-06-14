@@ -73,13 +73,12 @@ type ServerConfig struct {
 	AutoMigrate bool `mapstructure:"auto_migrate"`
 }
 
-// AdminConfig holds operator-console policy knobs. MakerCheckerThresholdMinor is
-// the configurable 4-eyes limit: money moves above it require a second approver
-// (enforced in the API/console layer, not the DB).
+// AdminConfig holds operator-console infra knobs. Business policy that operators
+// tweak at runtime (the maker-checker threshold, default transfer limit) lives in
+// the bank_settings table instead — see the console Settings panel / API-8.
 type AdminConfig struct {
-	MakerCheckerThresholdMinor int64         `mapstructure:"maker_checker_threshold_minor"`
-	SessionIdleTimeout         time.Duration `mapstructure:"session_idle_timeout"`
-	MaintenanceInterval        time.Duration `mapstructure:"maintenance_interval"` // expire_holds / cleanup cadence
+	SessionIdleTimeout  time.Duration `mapstructure:"session_idle_timeout"`
+	MaintenanceInterval time.Duration `mapstructure:"maintenance_interval"` // expire_holds / cleanup cadence
 	// RunMaintenance enables the in-process maintenance loop on this instance.
 	// Advisory-locked, so it's safe everywhere; in K8s we enable it only on the
 	// portal deployment to avoid needless ticking across many api replicas.
@@ -111,7 +110,6 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("server.cors_origins", []string{}) // opt-in; empty = no CORS headers
 	v.SetDefault("server.rate_limit_per_min", 60)   // /auth/* per IP; 0 disables
 
-	v.SetDefault("admin.maker_checker_threshold_minor", 1000000) // €10,000.00
 	v.SetDefault("admin.session_idle_timeout", "30m")
 	v.SetDefault("admin.maintenance_interval", "60s")
 	v.SetDefault("admin.run_maintenance", true)
