@@ -1,8 +1,9 @@
 package template
 
-// htmxSrc is the single pinned htmx CDN URL for the operator console. Both the SPA
-// shell and the standalone layout load it from here, so the version is set once.
-const htmxSrc = "https://unpkg.com/htmx.org@2.0.3"
+// htmxSrc points at the vendored, same-origin htmx (web/static/htmx.min.js) rather
+// than a CDN — the console moves money and must not load third-party script with no
+// integrity guarantee. Both the SPA shell and the standalone layout load it here.
+const htmxSrc = "/static/htmx.min.js"
 
 // consoleHead is the shared <head> for the operator console (Shell + layout): meta,
 // the pinned htmx script, the pre-paint theme bootstrap, and the stylesheet.
