@@ -136,6 +136,18 @@ tasks:
       - docker compose -f deploy/docker-compose.dev.yml exec -T db psql -U admin -d bank0 -c "CREATE DATABASE bank0_test;"
       - TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable' go test -race ./internal/db/ -v
 
+  e2e:
+    desc: >-
+      Customer-PWA end-to-end tests (Playwright). globalSetup stands up a throwaway
+      Postgres + the api binary (migrated + seeded) on dedicated ports and serves the
+      PWA via vite; globalTeardown cleans up. Needs Docker + Go + Node; the first run
+      downloads a headless browser. Pass args after --, e.g. `task e2e -- --ui`.
+    dir: web/app
+    cmds:
+      - npm install
+      - npx playwright install chromium
+      - npx playwright test {{.CLI_ARGS}}
+
   vet:
     cmds:
       - go vet ./...
