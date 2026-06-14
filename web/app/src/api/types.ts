@@ -78,3 +78,56 @@ export interface Transfer {
   requested_at?: string;
   posted_at?: string;
 }
+
+// One transfer in the caller's cross-account history. `direction` is caller-relative:
+// "out" = caller's account is the debit side, "in" = the credit side.
+export interface TransferListItem {
+  id: string;
+  debit_account_id: string;
+  credit_account_id: string;
+  amount_minor: number;
+  currency: string;
+  status: string;
+  kind: string;
+  description?: string;
+  direction: "out" | "in";
+  counterparty_iban?: string;
+  counterparty_owner?: string;
+  requested_at?: string;
+  posted_at?: string;
+}
+
+export type DisputeStatus = "open" | "under_review" | "resolved" | "rejected";
+export type DisputeCategory = "unrecognised" | "fraud" | "wrong_amount" | "duplicate" | "other";
+
+export interface Dispute {
+  id: string;
+  transfer_id: string;
+  status: DisputeStatus;
+  category: DisputeCategory;
+  reason?: string;
+  resolution_note?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// One active refresh-token family (a device/login). Carries no token material.
+export interface Session {
+  family_id: string;
+  device_label?: string;
+  user_agent?: string;
+  ip?: string;
+  created_at?: string;
+  last_seen_at?: string;
+  current?: boolean;
+}
+
+// Guided-transfer demo suggestion. Read-only; never moves money.
+export interface TransferSuggestion {
+  account_id: string;
+  iban: string;
+  owner_name_masked: string;
+  reason?: string;
+  scenario?: string;
+  source: "scenario" | "own_account";
+}

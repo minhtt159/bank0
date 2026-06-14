@@ -2,11 +2,16 @@ import { token, refreshToken, setAuth, clearAuth, logout } from "../store/auth";
 import type {
   Account,
   Beneficiary,
+  Dispute,
+  DisputeCategory,
   LedgerEntry,
   LoginResponse,
   ResolvedAccount,
+  Session,
   Transfer,
+  TransferListItem,
   TransferResult,
+  TransferSuggestion,
   User,
 } from "./types";
 
@@ -27,10 +32,11 @@ export class ApiError extends Error {
 interface Opts {
   body?: unknown;
   idempotencyKey?: string;
+  headers?: Record<string, string>;
 }
 
 function buildInit(method: string, opts: Opts): RequestInit {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...opts.headers };
   if (token.value) headers["Authorization"] = `Bearer ${token.value}`;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   // The same Idempotency-Key rides every retry of one attempt, so a transparent
@@ -136,4 +142,61 @@ export const api = {
     idempotencyKey: string,
   ) => req<TransferResult>("POST", "/transfers", { body, idempotencyKey }),
   getTransfer: (id: string) => req<Transfer>("GET", `/transfers/${id}`),
+
+  // Cross-account transfer history, newest first. Keyset paging: pass the last row's
+  // requested_at as `cursor` AND its id as `cursor_id` (composite tie-break).
+  // `direction` is caller-relative (out = caller debits, in = caller credits).
+  listTransfers: (opts: {
+    cursor?: string;
+    cursorId?: string;
+    direction?: "out" | "in";
+    q?: string;
+    limit?: number;
+  } = {}) => {
+    const p = new URLSearchParams({ limit: String(opts.limit ?? 25) });
+    if (opts.cursor) p.set("cursor", opts.cursor);
+    if (opts.cursorId) p.set("cursor_id", opts.cursorId);
+    if (opts.direction) p.set("direction", opts.direction);
+    if (opts.q?.trim()) p.set("q", opts.q.trim());
+    return req<TransferListItem[]>("GET", `/transfers?${p}`);
+  },
+
+  // Guided-transfer suggestion. 204 (no suggestion) surfaces as null.
+  transferSuggestion: (fromAccount?: string, amountMinor?: number) => {
+    const p = new URLSearchParams();
+    if (fromAccount) p.set("from_account", fromAccount);
+    if (amountMinor != null) p.set("amount_minor", String(amountMinor));
+    const qs = p.toString();
+    return req<TransferSuggestion | undefined>(
+      "GET",
+      `/transfers/suggestion${qs ? `?${qs}` : ""}`,
+    ).then((r) => r ?? null);
+  },
+
+  // Disputes. Raising one is NOT a money move (no Idempotency-Key); body is optional.
+  raiseDispute: (transferId: string, body: { category: DisputeCategory; reason?: string }) =>
+    req<Dispute>("POST", `/transfers/${transferId}/dispute`, { body }),
+  disputes: () => req<Dispute[]>("GET", "/disputes"),
+  dispute: (id: string) => req<Dispute>("GET", `/disputes/${id}`),
+
+  // Profile self-service. updateMe is a partial PATCH (absent field = unchanged).
+  updateMe: (body: { full_name?: string; email?: string; phone_number?: string }) =>
+    req<User>("PATCH", "/me", { body }),
+  // changePassword passes the current refresh token so THIS session is spared from
+  // the revoke-other-families sweep the server runs on success. Returns 204.
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<void>("POST", "/me/password", {
+      body: {
+        current_password: currentPassword,
+        new_password: newPassword,
+        refresh_token: refreshToken.value || undefined,
+      },
+    }),
+
+  // Active sessions/devices. Presenting X-Refresh-Token flags the current family.
+  sessions: () =>
+    req<Session[]>("GET", "/me/sessions", {
+      headers: refreshToken.value ? { "X-Refresh-Token": refreshToken.value } : undefined,
+    }),
+  revokeSession: (familyId: string) => req<void>("DELETE", `/me/sessions/${familyId}`),
 };
