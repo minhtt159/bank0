@@ -1,3 +1,8 @@
+# Pin the Compose project name so this stack never collides with another repo whose
+# deploy/ dir would otherwise default to the same project ("deploy"). Keeps bank0's
+# containers/volumes/network namespaced under "bank0".
+name: bank0
+
 services:
   db:
     image: postgres:${PG_VERSION:-18}   # default 18; PG_VERSION=17 for Supabase parity
