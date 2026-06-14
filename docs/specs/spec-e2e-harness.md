@@ -1,7 +1,22 @@
 # Spec — end-to-end test harness (two tiers)
 
-> Status: **plan, not built.** This is the implementation plan for E2E coverage. It
-> layers *on top of* the existing in-process integration tests (`internal/db`,
+> Status: **largely built.** Both tiers exist and are gated/opt-in (the original
+> plan is preserved below for context). Shipped:
+> - **Tier A** (Go split-mode) — `internal/e2e/` behind `//go:build e2e`; 7 tests
+>   (split-mode integrity + cross-surface money flow). CI: `e2e-go` (workflow_dispatch).
+> - **Worker proxy unit test** — `worker/test/proxy.test.ts` (real worker in workerd via
+>   @cloudflare/vitest-pool-workers). CI: `worker` (per-PR).
+> - **Tier B** (Playwright) — `web/app/e2e/`; 8 PWA journeys (auth, transfer, disputes,
+>   activity, devices, password) against the real api binary + seeded Postgres via vite.
+>   `task e2e`. CI: `e2e-browser` (workflow_dispatch).
+>
+> **Not yet built** (the remaining Tier B journeys, see the list below): maker-checker
+> approval across surfaces, dispute lifecycle walked by an operator, and token
+> rotation/theft. Tier B today serves the PWA via **vite** (proxying /api), not yet
+> through the **Worker** — so the browser path doesn't exercise the real proxy hop; the
+> worker proxy unit test covers that contract in isolation instead.
+>
+> It layers *on top of* the existing in-process integration tests (`internal/db`,
 > `internal/api`) and the load harness (`load/`) — it does not replace them. Both
 > tiers are **opt-in / gated** (like the DSN-gated integration tests and the `e2e`
 > build tag) so a plain `go test ./...` and the per-PR CI stay fast.
