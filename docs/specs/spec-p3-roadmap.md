@@ -7,25 +7,32 @@
 > error mapping), the main endpoints, the hardest problem, an S/M/L/XL effort
 > estimate, and recommended sequencing.
 >
-> **This doc is the index for `docs/specs/`.** The shippable, line-level specs already
-> written in this directory are the near-term work; this roadmap is the longer horizon
-> behind them. The line-level specs (✅ = shipped on `feat/bff`, 2026-06-13:
-> self-service-profile, change-password, guided-transfer-suggestion, disputes — each
-> carries an IMPLEMENTED banner):
+> **This doc is the index for `docs/specs/`.** The line-level specs split into two
+> sets: the **open backlog** still in this directory, and the **shipped** specs moved
+> to [`../archive/`](../archive/) once implemented (each carries an IMPLEMENTED banner;
+> as-built behavior lives in [`../06-client-api.md`](../06-client-api.md) /
+> [`../05-admin-ui.md`](../05-admin-ui.md), so the archived files are design rationale only).
+>
+> **Open backlog** (`docs/specs/`):
 >
 > | Spec | Covers | Relates to P3 § |
 > |------|--------|-----------------|
 > | [`spec-self-registration.md`](spec-self-registration.md) | public signup + email/phone verification + onboarding state | §1 (this is its v1) |
-> | [`spec-self-service-profile.md`](spec-self-service-profile.md) | `PATCH /me` profile edit | §1 (users lifecycle) |
-> | [`spec-change-password.md`](spec-change-password.md) | `POST /me/password` | §1 |
-> | [`spec-sessions-devices.md`](spec-sessions-devices.md) | `GET`/`DELETE /me/sessions` | §1 |
-> | [`spec-step-up-mfa.md`](spec-step-up-mfa.md) | TOTP MFA + step-up | §3 (card controls), §6 (FX confirm) |
 > | [`spec-customer-account-opening.md`](spec-customer-account-opening.md) | `POST /me/accounts` + IBAN allocator + limit requests | §2 (pots reuse the allocator) |
-> | [`spec-ledger-pagination-and-filters.md`](spec-ledger-pagination-and-filters.md) | keyset cursor + server-side ledger filters | §4 (insights aggregates) |
-> | [`spec-list-my-transfers.md`](spec-list-my-transfers.md) | `GET /transfers` across accounts | §4, §7 |
+> | [`spec-step-up-mfa.md`](spec-step-up-mfa.md) | TOTP MFA + step-up | §3 (card controls), §6 (FX confirm) |
 > | [`spec-notifications-events.md`](spec-notifications-events.md) | `GET /me/events` feed | §5 (schedule ran/failed), §7 (request received) |
-> | [`spec-disputes.md`](spec-disputes.md) | "I don't recognise this" → dispute claim | §3 (card chargebacks build on it) |
-> | [`spec-guided-transfer-suggestion.md`](spec-guided-transfer-suggestion.md) | `GET /transfers/suggestion` | (fraudbank UX) |
+>
+> **Shipped** (`docs/archive/`):
+>
+> | Spec | Covers | Relates to P3 § |
+> |------|--------|-----------------|
+> | [`spec-self-service-profile.md`](../archive/spec-self-service-profile.md) | `PATCH /me` profile edit | §1 (users lifecycle) |
+> | [`spec-change-password.md`](../archive/spec-change-password.md) | `POST /me/password` | §1 |
+> | [`spec-sessions-devices.md`](../archive/spec-sessions-devices.md) | `GET`/`DELETE /me/sessions` | §1 |
+> | [`spec-ledger-pagination-and-filters.md`](../archive/spec-ledger-pagination-and-filters.md) | keyset cursor + server-side ledger filters | §4 (insights aggregates) |
+> | [`spec-list-my-transfers.md`](../archive/spec-list-my-transfers.md) | `GET /transfers` across accounts | §4, §7 |
+> | [`spec-disputes.md`](../archive/spec-disputes.md) | "I don't recognise this" → dispute claim | §3 (card chargebacks build on it) |
+> | [`spec-guided-transfer-suggestion.md`](../archive/spec-guided-transfer-suggestion.md) | `GET /transfers/suggestion` | (fraudbank UX) |
 >
 > The gap backlog and BFF decision are in
 > [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md); the auth/MFA design in

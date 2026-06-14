@@ -15,7 +15,7 @@
 > surface.** Password change is [`spec-change-password.md`](spec-change-password.md)
 > (`POST /me/password`). Session/device listing + selective revoke is
 > [`spec-sessions-devices.md`](spec-sessions-devices.md) (`GET`/`DELETE
-> /me/sessions`). Step-up/MFA is [`spec-step-up-mfa.md`](spec-step-up-mfa.md).
+> /me/sessions`). Step-up/MFA is [`spec-step-up-mfa.md`](../specs/spec-step-up-mfa.md).
 > This file is **only** the profile PATCH; it references those for everything else.
 
 ---
@@ -117,7 +117,7 @@ SELECT update_user_info(
 ```
 
 > If [`spec-change-password.md`](spec-change-password.md) or
-> [`spec-step-up-mfa.md`](spec-step-up-mfa.md) introduces a new migration, this spec
+> [`spec-step-up-mfa.md`](../specs/spec-step-up-mfa.md) introduces a new migration, this spec
 > still adds **no migration of its own** — coordinate nothing. It is purely an API +
 > handler + query change.
 
@@ -142,7 +142,7 @@ generated `UpdateMe`.
    - non-existent user (can't happen for a valid JWT, but) → 404.
 5. Re-read `GetUserByID(subj)` (the no-password-hash projection) and return **200**
    `User` — so the client gets the canonical post-update state, including the unchanged
-   `onboarding_status` if [`spec-self-registration.md`](spec-self-registration.md) has
+   `onboarding_status` if [`spec-self-registration.md`](../specs/spec-self-registration.md) has
    landed.
 
 ### Ownership / scoping
@@ -199,7 +199,7 @@ account, set a password (bypassing the current-password gate), or change role.
 - [ ] Email/phone uniqueness is DB-enforced (`23505` → 409); a user can't claim
       another's contact details.
 - [ ] **Email/phone change does not re-verify** the new value. If
-      [`spec-self-registration.md`](spec-self-registration.md)'s contact verification is
+      [`spec-self-registration.md`](../specs/spec-self-registration.md)'s contact verification is
       live, a changed email/phone should be **marked unverified** (clear the relevant
       `*_verified_at`) and a re-verification challenge dispatched — note this as the
       integration point; if registration/verification is not yet built, accept the
@@ -231,7 +231,7 @@ account, set a password (bypassing the current-password gate), or change role.
    `oapi-codegen`; fix the compiler.
 3. Write the `UpdateMe` handler in `internal/api/handlers_users.go` (subject-scoped,
    `*string` pointer decode, re-read + return `User`).
-4. If [`spec-self-registration.md`](spec-self-registration.md) is live, wire the
+4. If [`spec-self-registration.md`](../specs/spec-self-registration.md) is live, wire the
    "changed contact → unverified + re-challenge" hook; otherwise leave a TODO referencing
    that spec.
 5. Write DB + API tests (§5). `go test ./...` green with and without
