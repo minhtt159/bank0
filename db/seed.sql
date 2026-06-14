@@ -116,6 +116,39 @@ BEGIN
     END LOOP;
 END $$;
 
+--- guided-transfer demo: an APP-scam "mule" steer --------------------------
+-- Without an active guided_scenario (00019), GET /transfers/suggestion falls
+-- back to the caller's OWN other account — a safe self-transfer, not a realistic
+-- scam. Seed a dedicated "mule" customer + account and a GLOBAL scenario so
+-- guided mode dictates a THIRD-PARTY recipient for every caller: the authorised-
+-- push-payment steer fraudbank's guided mode demonstrates. Idempotent.
+DO $$
+DECLARE
+    v_mule_user UUID;
+    v_mule_acct UUID;
+    v_iban      TEXT := iban_generate('NL', 'KNAB' || lpad('9000000099', 10, '0'));
+BEGIN
+    SELECT id INTO v_mule_user FROM users WHERE username = 'mule'::citext;
+    IF v_mule_user IS NULL THEN
+        v_mule_user := create_user('mule'::citext, 'password'::text, 'Markus Eklund'::text,
+                                   'mule@example.com'::citext, NULL::varchar, 'customer'::user_role);
+    END IF;
+
+    SELECT id INTO v_mule_acct FROM accounts WHERE iban = v_iban::varchar;
+    IF v_mule_acct IS NULL THEN
+        v_mule_acct := create_account(v_mule_user, v_iban::varchar, '9099'::text, 50000::bigint);
+        PERFORM deposit('seed-dep-' || v_iban, v_mule_acct, 50000, 'Opening deposit');
+    END IF;
+
+    -- Global scenario (target_user_id NULL => any caller). The own-account fallback
+    -- has no scenario row, so this always wins. Never returned to the mule's own
+    -- logins (the resolver excludes the debit account; fraudbank also guards
+    -- against any own-account suggestion).
+    INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
+    SELECT 'app-scam-demo', v_mule_acct, 'Recommended payee', NULL, 0, 100, TRUE
+     WHERE NOT EXISTS (SELECT 1 FROM guided_scenarios WHERE name = 'app-scam-demo');
+END $$;
+
 SELECT 'seed complete: ' ||
        (SELECT count(*) FROM users    WHERE role = 'customer') || ' customers, ' ||
        (SELECT count(*) FROM accounts WHERE kind = 'customer') || ' accounts, ' ||
