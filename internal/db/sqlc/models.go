@@ -506,6 +506,7 @@ type Account struct {
 	Status             AccountStatus `json:"status"`
 	CreatedAt          time.Time     `json:"created_at"`
 	UpdatedAt          time.Time     `json:"updated_at"`
+	HeldMinor          int64         `json:"held_minor"`
 }
 
 type AdminAction struct {
