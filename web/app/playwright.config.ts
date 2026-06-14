@@ -9,7 +9,9 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false, // one shared seeded backend
   workers: 1,
-  reporter: [["list"]],
+  // list for the console; html (never auto-served) so CI can upload a report with
+  // the retained traces as a failure artifact.
+  reporter: [["list"], ["html", { open: "never" }]],
   timeout: 30_000,
   expect: { timeout: 7_000 },
   globalSetup: "./e2e/global-setup.ts",
