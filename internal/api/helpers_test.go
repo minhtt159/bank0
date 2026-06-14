@@ -172,15 +172,31 @@ func TestPagerPrevNext(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
+	// Untrusted (the default): a client-supplied X-Forwarded-For is IGNORED — keying
+	// the rate limiter on it would let an attacker rotate the bucket per request. We
+	// fall back to RemoteAddr.
+	s := &Server{}
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
-	if ip := clientIP(r); ip != "1.2.3.4" {
-		t.Errorf("XFF should use first hop; got %q", ip)
+	r.RemoteAddr = "9.9.9.9:1234"
+	if ip := s.clientIP(r); ip != "9.9.9.9" {
+		t.Errorf("untrusted: must use RemoteAddr, not the spoofable XFF; got %q", ip)
 	}
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.RemoteAddr = "9.9.9.9:1234"
-	if ip := clientIP(r2); ip != "9.9.9.9" {
-		t.Errorf("RemoteAddr host; got %q", ip)
+
+	// Trusted edge: prefer Cloudflare's CF-Connecting-IP, else the first XFF hop.
+	st := &Server{}
+	st.cfg.Server.TrustProxyHeaders = true
+	rc := httptest.NewRequest("GET", "/", nil)
+	rc.Header.Set("CF-Connecting-IP", "203.0.113.7")
+	rc.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	if ip := st.clientIP(rc); ip != "203.0.113.7" {
+		t.Errorf("trusted: CF-Connecting-IP should win; got %q", ip)
+	}
+	rx := httptest.NewRequest("GET", "/", nil)
+	rx.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	rx.RemoteAddr = "9.9.9.9:1234"
+	if ip := st.clientIP(rx); ip != "1.2.3.4" {
+		t.Errorf("trusted: first XFF hop when no CF header; got %q", ip)
 	}
 }
 

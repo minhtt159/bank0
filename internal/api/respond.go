@@ -48,31 +48,41 @@ func mapDBError(w http.ResponseWriter, err error) {
 
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
+		// msg is the raw Postgres exception text. We echo it ONLY for developer-
+		// authored business RAISEs (P0001, and the crafted check_violation messages
+		// below) which are meaningful + safe for the client. For raw, Postgres-
+		// generated messages (a unique-constraint name, a generic check trip) we
+		// return a stable curated message instead, so internal schema details don't
+		// leak to client-scoped/unauthenticated callers. (Server-side logging of the
+		// raw error on the 500 path is a follow-up — it needs mapDBError to carry the
+		// request logger.)
 		msg := pg.Message
 		switch pg.Code {
-		case "23505": // unique_violation
-			writeError(w, http.StatusConflict, "already_exists", msg)
+		case "23505": // unique_violation (raw message names the constraint — curate)
+			writeError(w, http.StatusConflict, "already_exists", "that resource already exists")
 			return
 		case "23514": // check_violation (insufficient funds, key reuse, invalid state, ...)
-			code := "unprocessable"
-			if strings.Contains(msg, "insufficient") {
-				code = "insufficient_funds"
-			} else if strings.Contains(msg, "idempotency key") {
-				code = "idempotency_key_conflict"
+			switch {
+			case strings.Contains(msg, "insufficient"):
+				// Crafted, caller-meaningful message (e.g. clawback / funds) — safe to surface.
+				writeError(w, http.StatusUnprocessableEntity, "insufficient_funds", msg)
+			case strings.Contains(msg, "idempotency key"):
+				writeError(w, http.StatusUnprocessableEntity, "idempotency_key_conflict", "this request was already submitted with different parameters")
+			default: // raw constraint trip — don't leak the constraint name
+				writeError(w, http.StatusUnprocessableEntity, "unprocessable", "the request could not be processed")
 			}
-			writeError(w, http.StatusUnprocessableEntity, code, msg)
 			return
 		case "23001": // restrict_violation (append-only ledger / balance tamper guard)
-			writeError(w, http.StatusConflict, "immutable", msg)
+			writeError(w, http.StatusConflict, "immutable", "this resource cannot be modified")
 			return
 		case "55006": // object_in_use (idempotent request still in progress)
-			writeError(w, http.StatusConflict, "in_progress", msg)
+			writeError(w, http.StatusConflict, "in_progress", "a previous request is still being processed")
 			return
 		case "28000", "28P01": // refresh-token reuse/expiry/unknown -> re-authenticate
-			writeError(w, http.StatusUnauthorized, "unauthorized", msg)
+			writeError(w, http.StatusUnauthorized, "unauthorized", "please sign in again")
 			return
 		case "42501": // insufficient_privilege: caller doesn't own the debit account
-			writeError(w, http.StatusForbidden, "forbidden", msg)
+			writeError(w, http.StatusForbidden, "forbidden", "you do not have access to this resource")
 			return
 		case "P0001": // generic RAISE EXCEPTION — disambiguate by message
 			switch {

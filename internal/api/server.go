@@ -36,6 +36,8 @@ type Server struct {
 
 	loginLimiter   *rateLimiter // /auth/login per-IP backstop (nil = disabled)
 	refreshLimiter *rateLimiter // /auth/refresh per-IP backstop (nil = disabled)
+
+	metrics metrics // RED counters rendered at /metrics
 }
 
 func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
@@ -70,11 +72,18 @@ func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
 
 func (s *Server) Router() http.Handler {
 	r := mux.NewRouter()
-	r.Use(s.recoverer)
+	// Order: requestLogger is OUTERMOST (assigns the request id + logger to ctx, so
+	// recoverer/handlers can correlate), then recover from panics, harden headers,
+	// and bound each request's lifetime.
 	r.Use(s.requestLogger)
+	r.Use(s.recoverer)
+	r.Use(s.securityHeaders)
+	r.Use(s.timeout)
 
-	// Public on every surface: health probe + API docs.
+	// Public on every surface: liveness, readiness, metrics, API docs.
 	r.HandleFunc("/health", s.Health).Methods(http.MethodGet)
+	r.HandleFunc("/readyz", s.Ready).Methods(http.MethodGet)
+	r.HandleFunc("/metrics", s.Metrics).Methods(http.MethodGet)
 	r.HandleFunc("/openapi.yaml", s.handleOpenAPISpec).Methods(http.MethodGet)
 	r.HandleFunc("/docs", s.handleDocs).Methods(http.MethodGet)
 
@@ -102,9 +111,11 @@ func (s *Server) Router() http.Handler {
 		// refresh token itself (the access token may be expired). Registered on the
 		// parent ahead of the JWT-guarded subrouter so they aren't shadowed.
 		// (logout-all needs the subject, so it stays on the guarded subrouter.)
-		r.Handle("/auth/login", s.rateLimit(s.loginLimiter, clientIP, http.HandlerFunc(s.Login))).Methods(http.MethodPost)
-		r.Handle("/auth/refresh", s.rateLimit(s.refreshLimiter, clientIP, http.HandlerFunc(s.Refresh))).Methods(http.MethodPost)
-		r.HandleFunc("/auth/logout", s.Logout).Methods(http.MethodPost)
+		r.Handle("/auth/login", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.Login))).Methods(http.MethodPost)
+		r.Handle("/auth/refresh", s.rateLimit(s.refreshLimiter, s.clientIP, http.HandlerFunc(s.Refresh))).Methods(http.MethodPost)
+		// logout shares the refresh limiter so the whole /auth/* surface has the
+		// per-IP backstop (it consumes a refresh token and is reachable unauthenticated).
+		r.Handle("/auth/logout", s.rateLimit(s.refreshLimiter, s.clientIP, http.HandlerFunc(s.Logout))).Methods(http.MethodPost)
 		cr := r.PathPrefix("/").Subrouter()
 		cr.Use(s.requireJWT)
 		genclient.HandlerFromMux(s, cr)

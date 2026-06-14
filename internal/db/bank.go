@@ -145,36 +145,44 @@ const maintenanceLockKey int64 = 912000001
 // RunMaintenance runs expire_holds + cleanup, but only if it can grab the
 // transaction-scoped advisory lock. ran=false means another replica is handling
 // it this tick (not an error).
-func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessions int32, ran bool, err error) {
+func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessions, reconcileIssues int32, ran bool, err error) {
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	defer tx.Rollback(ctx)
 
 	if err = tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", maintenanceLockKey).Scan(&ran); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	if !ran {
-		return 0, 0, 0, false, nil
+		return 0, 0, 0, 0, false, nil
 	}
 	if err = tx.QueryRow(ctx, "SELECT expire_holds()").Scan(&expired); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	if err = tx.QueryRow(ctx, "SELECT cleanup_idempotency_keys()").Scan(&cleaned); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	if err = tx.QueryRow(ctx, "SELECT cleanup_sessions()").Scan(&sessions); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	var refreshCleaned int32
 	if err = tx.QueryRow(ctx, "SELECT cleanup_refresh_tokens()").Scan(&refreshCleaned); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
+	}
+	// Continuously assert the ledger/cache invariants (I1–I4): reconcile() returns
+	// one row per drift. Running it on the maintenance tick turns the correctness
+	// oracle from a manual spot-check into an automatic alarm, so a balance_minor /
+	// held_minor cache divergence is caught without waiting for an operator to open
+	// the Reconciliation panel. Read-only; shares the advisory lock + snapshot.
+	if err = tx.QueryRow(ctx, "SELECT count(*)::int FROM reconcile()").Scan(&reconcileIssues); err != nil {
+		return 0, 0, 0, 0, false, err
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
-	return expired, cleaned, sessions, true, nil
+	return expired, cleaned, sessions, reconcileIssues, true, nil
 }
 
 // ReconcileRow is one failing invariant from reconcile(). No rows => books balanced.

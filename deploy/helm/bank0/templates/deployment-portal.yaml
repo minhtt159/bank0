@@ -36,10 +36,13 @@ spec:
             - { name: APP_APP_ENV, value: "production" }
             {{- include "bank0.dsnEnv" . | nindent 12 }}
           readinessProbe:
-            httpGet: { path: /health, port: http }
+            # DB-aware: /readyz pings Postgres, so a pod with a dead/exhausted pool
+            # is pulled from rotation instead of serving 500s.
+            httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
+            # Cheap, DB-blind: a transient DB blip must not get the pod killed.
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 5
             periodSeconds: 15

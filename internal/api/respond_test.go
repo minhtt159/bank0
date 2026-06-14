@@ -63,6 +63,11 @@ func TestMapDBError(t *testing.T) {
 		{"check_other", pgErr("23514", "amount must be positive"), 422, "unprocessable"},
 		{"immutable", pgErr("23001", "ledger is append-only"), 409, "immutable"},
 		{"in_progress", pgErr("55006", "request still in progress"), 409, "in_progress"},
+		// The security-load-bearing branches: a foreign-debit / IDOR attempt (42501)
+		// must be 403, and refresh-token reuse/expiry (28000/28P01) must be 401.
+		{"forbidden_idor", pgErr("42501", "caller does not own debit account"), 403, "forbidden"},
+		{"token_reuse", pgErr("28000", "refresh token reused"), 401, "unauthorized"},
+		{"token_expired", pgErr("28P01", "refresh token expired"), 401, "unauthorized"},
 		{"raise_notfound", pgErr("P0001", "account 123 not found"), 404, "not_found"},
 		{"raise_state", pgErr("P0001", "cannot post transfer in state posted"), 409, "invalid_state"},
 		{"raise_notactive", pgErr("P0001", "debit account not active"), 409, "invalid_state"},
