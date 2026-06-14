@@ -43,7 +43,7 @@ BEGIN
         END IF;
 
         FOR j IN 1 .. acctcounts[i] LOOP
-            v_iban := 'SE45' || lpad(seq::text, 20, '0');                 -- 24 chars, [A-Z0-9]
+            v_iban := iban_generate('SE', lpad(seq::text, 20, '0'));      -- valid SE IBAN (checksum)
             SELECT id INTO v_acct FROM accounts WHERE iban = v_iban::varchar;
             IF v_acct IS NULL THEN
                 v_acct := create_account(v_user, v_iban::varchar, lpad((1000 + seq)::text, 4, '0')::text, 50000::bigint);

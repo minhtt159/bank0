@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import { userId } from "../store/auth";
 import { formatMinor, parseMajor } from "../lib/money";
 import { fuzzyFilter } from "../lib/fuzzy";
+import { isValidIBAN } from "../lib/iban";
 import type { Account, Beneficiary, ResolvedAccount } from "../api/types";
 
 export function Transfer() {
@@ -175,12 +176,15 @@ export function Transfer() {
           <label>IBAN</label>
           <input class="iban" value={newIban}
             onInput={(e) => { setNewIban((e.target as HTMLInputElement).value); setPreview(null); }} />
+          {newIban.trim() && !isValidIBAN(newIban) && (
+            <p class="error" style="font-size:13px">Invalid IBAN — check the digits, length, and country code.</p>
+          )}
           {preview && (
             <p class="muted">Confirmation of payee: <strong>{preview.owner_name_masked}</strong></p>
           )}
           <div class="row" style="margin-top:10px;gap:8px">
             {!preview
-              ? <button class="ghost" onClick={lookup} disabled={!newIban.trim()}>Look up</button>
+              ? <button class="ghost" onClick={lookup} disabled={!isValidIBAN(newIban)}>Look up</button>
               : <button onClick={savePayee} disabled={!newLabel.trim()}>Save payee</button>}
             <button class="ghost" onClick={() => { setAdding(false); setPreview(null); setAddErr(""); }}>Cancel</button>
           </div>

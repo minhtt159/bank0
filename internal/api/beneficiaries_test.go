@@ -104,8 +104,12 @@ func TestHTTPBeneficiaries(t *testing.T) {
 		t.Errorf("initial beneficiaries should be []; status %d", r.StatusCode)
 	}
 
-	// resolve unknown IBAN -> 404
-	if r := get(t, anon, ts.URL+"/beneficiaries/resolve?iban=DE00UNKNOWN0000000", bearer); r.StatusCode != 404 {
+	// resolve a malformed IBAN (bad checksum/length) -> 422
+	if r := get(t, anon, ts.URL+"/beneficiaries/resolve?iban=DE00UNKNOWN0000000", bearer); r.StatusCode != 422 {
+		t.Errorf("resolve malformed = %d, want 422", r.StatusCode)
+	}
+	// resolve a valid-but-unknown IBAN -> 404
+	if r := get(t, anon, ts.URL+"/beneficiaries/resolve?iban=GB82WEST12345698765432", bearer); r.StatusCode != 404 {
 		t.Errorf("resolve unknown = %d, want 404", r.StatusCode)
 	}
 

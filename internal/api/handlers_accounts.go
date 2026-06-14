@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/minhtt159/bank0/internal/api/genadmin"
 	"github.com/minhtt159/bank0/internal/api/genclient"
+	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
@@ -34,6 +35,10 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TransferLimitMinor == 0 {
 		req.TransferLimitMinor = 50000
+	}
+	if !iban.IsValid(req.Iban) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_iban", "iban failed checksum/format validation")
+		return
 	}
 	id, err := s.pg.Queries.CreateAccount(r.Context(), sqlc.CreateAccountParams{
 		UserID:             userID,

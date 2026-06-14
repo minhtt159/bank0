@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/minhtt159/bank0/internal/api/genclient"
+	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
@@ -53,8 +54,12 @@ func (s *Server) AddBeneficiary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "label and iban are required")
 		return
 	}
+	if !iban.IsValid(req.Iban) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_iban", "iban failed checksum/format validation")
+		return
+	}
 	id, err := s.pg.Queries.AddBeneficiary(r.Context(), sqlc.AddBeneficiaryParams{
-		Owner: subj, Label: req.Label, Iban: req.Iban,
+		Owner: subj, Label: req.Label, Iban: iban.Normalize(req.Iban),
 	})
 	if err != nil {
 		mapDBError(w, err)
@@ -79,7 +84,11 @@ func (s *Server) ResolveBeneficiary(w http.ResponseWriter, r *http.Request, para
 		writeError(w, http.StatusBadRequest, "bad_request", "iban is required")
 		return
 	}
-	a, err := s.pg.ResolveAccountByIban(r.Context(), params.Iban)
+	if !iban.IsValid(params.Iban) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_iban", "iban failed checksum/format validation")
+		return
+	}
+	a, err := s.pg.ResolveAccountByIban(r.Context(), iban.Normalize(params.Iban))
 	if err != nil {
 		mapDBError(w, err)
 		return

@@ -28,6 +28,7 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/08-deployment-cloud-run-supabase.md`](docs/08-deployment-cloud-run-supabase.md) | Supabase + Cloud Run + Cloudflare deploy path with CI/CD |
 | [`docs/09-fraudbank-bff-plan.md`](docs/09-fraudbank-bff-plan.md) | fraudbank clients: decisions + wave status (§0), BFF/CORS plan, client-API feature gaps (P0–P2), `/me/dashboard` aggregation |
 | [`docs/10-security-review.md`](docs/10-security-review.md) | API pentest pass 1: findings (admin RBAC fix), verified-safe areas, accepted gaps; protective tests in `security_test.go` |
+| [`docs/11-iban-verification.md`](docs/11-iban-verification.md) | IBAN validation (MOD-97) + generation: verified algorithm, full country table, where to validate (client/Go/Postgres); backs `internal/iban`, the `00022` checks, and the demo seed |
 
 ## Tech stack (carried from tf-backend, refined)
 
