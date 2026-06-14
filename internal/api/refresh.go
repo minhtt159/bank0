@@ -46,19 +46,14 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newRefresh := newSessionToken()
-	userID, err := s.pg.RotateRefreshToken(r.Context(),
+	userID, role, uname, err := s.pg.RotateRefreshToken(r.Context(),
 		hashToken(req.RefreshToken), hashToken(newRefresh),
 		int(s.refreshTTL.Seconds()), int(s.refreshAbs.Seconds()), r.UserAgent(), clientIP(r))
 	if err != nil {
 		mapDBError(w, err)
 		return
 	}
-	u, err := s.pg.Queries.GetUserByID(r.Context(), userID)
-	if err != nil {
-		mapDBError(w, err)
-		return
-	}
-	s.writeTokenPair(w, userID, string(u.Role), u.Username, newRefresh)
+	s.writeTokenPair(w, userID, role, uname, newRefresh)
 }
 
 // Logout implements genclient.ServerInterface: revoke the presented refresh token

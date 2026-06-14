@@ -147,7 +147,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	id, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
+	id, role, uname, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		mapDBError(w, err)
 		return
@@ -156,16 +156,11 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 		return
 	}
-	u, err := s.pg.Queries.GetUserByID(r.Context(), id)
-	if err != nil {
-		mapDBError(w, err)
-		return
-	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
 		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r), ""); err != nil {
 		mapDBError(w, err)
 		return
 	}
-	s.writeTokenPair(w, id, string(u.Role), u.Username, refresh)
+	s.writeTokenPair(w, id, role, uname, refresh)
 }

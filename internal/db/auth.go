@@ -10,20 +10,21 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Login verifies credentials via check_user_credentials, which returns NULL on
-// failure (a NULL that the generated non-nullable signature can't scan), so it
-// is hand-written with a nullable scan. ok=false means invalid credentials.
-func (p *Postgres) Login(ctx context.Context, username, password string) (id uuid.UUID, ok bool, err error) {
-	var got *uuid.UUID
+// Login verifies credentials via check_user_credentials, which returns the user's
+// id plus the JWT claims (role, username) so the handler can mint the access token
+// without a second GetUserByID round trip (AUTH-1). Invalid credentials yield zero
+// rows -> ok=false.
+func (p *Postgres) Login(ctx context.Context, username, password string) (id uuid.UUID, role, uname string, ok bool, err error) {
 	err = p.Pool.QueryRow(ctx,
-		`SELECT check_user_credentials($1::citext, $2::text)`, username, password).Scan(&got)
+		`SELECT user_id, role, username FROM check_user_credentials($1::citext, $2::text)`,
+		username, password).Scan(&id, &role, &uname)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, "", "", false, nil
+	}
 	if err != nil {
-		return uuid.Nil, false, err
+		return uuid.Nil, "", "", false, err
 	}
-	if got == nil {
-		return uuid.Nil, false, nil
-	}
-	return *got, true, nil
+	return id, role, uname, true, nil
 }
 
 // SessionUser is the authenticated subject behind a portal session.
@@ -158,12 +159,12 @@ func (p *Postgres) RevokeUserFamily(ctx context.Context, userID, familyID uuid.U
 // RotateRefreshToken consumes oldHash and mints newHash atomically. On reuse it
 // raises 28000 (family revoked); on expiry/unknown it raises 28P01 — both mapped
 // to 401 by the API. Returns the token's user id.
-func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash string, idleSeconds, absoluteSeconds int, userAgent, ip string) (uuid.UUID, error) {
-	var userID, family uuid.UUID
-	err := p.Pool.QueryRow(ctx,
-		`SELECT user_id, family_id FROM rotate_refresh_token($1::text, $2::text, $3::int, $4::int, $5::text, $6::text)`,
+func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash string, idleSeconds, absoluteSeconds int, userAgent, ip string) (userID uuid.UUID, role, uname string, err error) {
+	var family uuid.UUID
+	err = p.Pool.QueryRow(ctx,
+		`SELECT user_id, family_id, role, username FROM rotate_refresh_token($1::text, $2::text, $3::int, $4::int, $5::text, $6::text)`,
 		oldHash, newHash, idleSeconds, absoluteSeconds, userAgent, ip,
-	).Scan(&userID, &family)
+	).Scan(&userID, &family, &role, &uname)
 	if err != nil {
 		// Reuse detected (28000): rotate only RAISEd (its own UPDATE would roll
 		// back), so revoke the family here in a separate, committing statement.
@@ -171,9 +172,9 @@ func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash stri
 		if errors.As(err, &pgErr) && pgErr.Code == "28000" {
 			_, _ = p.Pool.Exec(ctx, `SELECT revoke_refresh_family($1::text)`, oldHash)
 		}
-		return uuid.Nil, err
+		return uuid.Nil, "", "", err
 	}
-	return userID, nil
+	return userID, role, uname, nil
 }
 
 // RevokeRefreshToken is single-session logout; idempotent (no error if unknown).

@@ -8,9 +8,6 @@ SELECT create_user(
     sqlc.arg(role)::user_role
 ) AS id;
 
--- name: CheckCredentials :one
-SELECT check_user_credentials(sqlc.arg(username)::citext, sqlc.arg(password)::text) AS user_id;
-
 -- name: GetUserByID :one
 SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
 FROM users WHERE id = sqlc.arg(id)::uuid;
