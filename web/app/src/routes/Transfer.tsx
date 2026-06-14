@@ -5,7 +5,7 @@ import { userId } from "../store/auth";
 import { formatMinor, parseMajor } from "../lib/money";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { isValidIBAN } from "../lib/iban";
-import type { Account, Beneficiary, ResolvedAccount } from "../api/types";
+import type { Account, Beneficiary, ResolvedAccount, TransferSuggestion } from "../api/types";
 
 export function Transfer() {
   const { route } = useLocation();
@@ -30,6 +30,11 @@ export function Transfer() {
   const [idemKey, setIdemKey] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Guided-transfer demo suggestion (read-only; never moves money). Dismissed once
+  // applied or rejected so it doesn't nag.
+  const [suggestion, setSuggestion] = useState<TransferSuggestion | null>(null);
+  const [suggestDismissed, setSuggestDismissed] = useState(false);
+
   useEffect(() => {
     api.accounts(userId.value).then((a) => {
       setAccounts(a);
@@ -38,6 +43,26 @@ export function Transfer() {
     }).catch((e) => setErr(e.message));
     api.beneficiaries().then(setBens).catch((e) => setErr(e.message));
   }, []);
+
+  // Re-ask for a suggestion as the source account / amount change so a scenario can
+  // gate on a threshold. 204 -> null (no banner). Failures are silent: it's a hint.
+  useEffect(() => {
+    if (!srcId) return;
+    const m = parseMajor(amount) ?? undefined;
+    api.transferSuggestion(srcId, m).then(setSuggestion).catch(() => setSuggestion(null));
+  }, [srcId, amount]);
+
+  function applySuggestion() {
+    if (!suggestion) return;
+    // Route the suggestion through the existing "add payee" flow: pre-fill the IBAN
+    // and label, then resolve it (confirmation of payee). The customer reviews the
+    // masked owner before saving, exactly like a manual payee.
+    setAdding(true);
+    setNewIban(suggestion.iban);
+    setNewLabel(suggestion.owner_name_masked || "Suggested payee");
+    setPreview(null);
+    setSuggestDismissed(true);
+  }
 
   const src = accounts.find((a) => a.id === srcId);
   const dst = bens.find((b) => b.id === dstId);
@@ -151,6 +176,20 @@ export function Transfer() {
       </div>
 
       <h2 style="margin-top:18px">To</h2>
+      {suggestion && !suggestDismissed && !adding && (
+        <div class="card" style="border-color:var(--accent)">
+          <div class="row">
+            <span>{suggestion.reason || "Suggested payee"}</span>
+            <button class="link" style="color:var(--accent)"
+              onClick={() => setSuggestDismissed(true)}>Dismiss</button>
+          </div>
+          <div style="margin:6px 0"><strong>{suggestion.owner_name_masked}</strong></div>
+          <div class="iban muted" style="font-size:13px">{suggestion.iban}</div>
+          <button class="ghost block" style="margin-top:10px" onClick={applySuggestion}>
+            Use this payee
+          </button>
+        </div>
+      )}
       {!adding && (
         <>
           <input placeholder="Search saved payees" value={dstQ}
