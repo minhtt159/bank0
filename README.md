@@ -26,7 +26,7 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/06-client-api.md`](docs/06-client-api.md) | Client API (api.\*): endpoints, JWT + refresh-token auth, ownership, MFA/step-up plan |
 | [`docs/07-client-web-app.md`](docs/07-client-web-app.md) | Customer PWA (bank0.\*, Cloudflare Workers): flows, beneficiaries, idempotency |
 | [`docs/08-deployment-cloud-run-supabase.md`](docs/08-deployment-cloud-run-supabase.md) | Supabase + Cloud Run + Cloudflare deploy path with CI/CD |
-| [`docs/09-fraudbank-bff-plan.md`](docs/09-fraudbank-bff-plan.md) | fraudbank clients: decisions + wave status (§0), BFF/CORS plan, client-API feature gaps (P0–P2), `/me/dashboard` aggregation |
+| [`docs/09-fraudbank-bff-plan.md`](docs/09-fraudbank-bff-plan.md) | fraudbank clients: BFF/CORS architecture, remaining client-API feature gaps, `/me/dashboard` aggregation |
 | [`docs/10-security-review.md`](docs/10-security-review.md) | API pentest pass 1: findings (admin RBAC fix), verified-safe areas, accepted gaps; protective tests in `security_test.go` |
 | [`docs/11-iban-verification.md`](docs/11-iban-verification.md) | IBAN validation (MOD-97) + generation: verified algorithm, full country table, where to validate (client/Go/Postgres); backs `internal/iban`, the `00022` checks, and the demo seed |
 
@@ -94,19 +94,19 @@ pre-upgrade migrate Job. See [`docs/04-deployment.md`](docs/04-deployment.md).
 
 ## Status
 
-**Working scaffold, validated end-to-end.** Migrations apply/rollback/re-apply on
-PostgreSQL 18; the ledger, idempotency, holds, reversals, the balance tamper
-guard, and `reconcile()` are exercised by [`db/smoke_test.sql`](db/smoke_test.sql)
-and by live HTTP runs. The contract-first API (oapi-codegen, both surfaces), the
-mode split, advisory-locked HA maintenance, embedded migrations, the Helm chart
-(Gateway API/Envoy; `helm lint`/`template` clean), and the **operator console**
-all build and run. The portal console is behind **DB-backed session auth** (login/logout, SHA-256
-token, 30-min sliding idle, staff-role check) and shows the dashboard (reconcile
-badge), accounts, and pending queue. The client API is behind **JWT bearer auth**
-(login issues an HS256 token) with **ownership scoping** that closes the IDOR gap —
-verified end-to-end: missing/bad token→401, and a customer cannot read or debit
-another customer's account/ledger/transfers (404/403). `go build`/`go vet` clean;
-`helm lint`/`template` clean.
+**Pre-deployment; validated end-to-end, not yet live.** Migrations apply/rollback/re-apply
+on PostgreSQL 18; the ledger, idempotency, holds, reversals, the balance tamper guard, and
+`reconcile()` are exercised by the DSN-gated DB integration suite (`internal/db`). The
+contract-first API (oapi-codegen, both surfaces), the mode split, advisory-locked HA
+maintenance, embedded migrations, and the Helm chart (Gateway API/Envoy; `helm lint`/`template`
+clean) all build and run. The **operator console** is feature-complete for daily ops —
+DB-backed staff sessions (30-min sliding idle, role-gated), dashboards, post/cancel/reverse,
+credit/withdraw, the maker-checker approvals queue, search, and disputes. The **client API**
+is behind JWT + refresh-token auth with ownership scoping (IDOR-closed; HTTP suite in
+`internal/api`), covering `/me` profile + password + sessions, transfers + list-my-transfers,
+ledger filters, beneficiaries, guided suggestion, and disputes.
 
-**Next:** console actions (post/cancel/reverse, credit/debit) with confirm modals
-+ idempotency keys, the maker-checker approvals queue, role-gating on actions, and search.
+Remaining backlog (customer self-registration, account opening, step-up MFA, notifications,
+the token-holding Worker BFF) lives in [`docs/specs/`](docs/specs/) and
+[`docs/09-fraudbank-bff-plan.md`](docs/09-fraudbank-bff-plan.md); shipped feature specs are
+archived under [`docs/archive/`](docs/archive/).

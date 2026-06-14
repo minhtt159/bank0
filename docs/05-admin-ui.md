@@ -150,7 +150,7 @@ green page — and that emptiness is the product.
 A **Disputes** nav screen renders the triage queue (newest first) and drives the
 resolve state machine, backed by the same endpoints the JSON admin API exposes
 ([`06-client-api.md`](06-client-api.md) §1; spec
-[`specs/spec-disputes.md`](specs/spec-disputes.md)):
+[`archive/spec-disputes.md`](archive/spec-disputes.md)):
 
 - **Queue** (`GET /console/disputes` → `/console/disputes/results`): each row shows
   raised-at, raiser, category, status, from/to IBANs, and amount. Backed by

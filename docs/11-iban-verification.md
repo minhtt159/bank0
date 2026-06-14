@@ -215,50 +215,27 @@ Validate at every layer with a clear **authority split**: the client is convenie
 | Go server | `internal/api/handlers_beneficiaries.go`, `handlers_accounts.go` | **Authority #1** — fail fast, clean `400` | Reject bad checksum before touching the DB, with a precise message via `writeError` |
 | PostgreSQL 18 | `db/migrations/NNNN_*.sql` | **Authority #2** — non-bypassable backstop | `IMMUTABLE` plpgsql MOD-97 in a `CHECK`/`DOMAIN`; protects admin console, seeds, migrations, any future writer |
 
-**Current state.** bank0's only IBAN constraint today is `db/migrations/00003_init_tables.sql:40` — `CHECK (iban IS NULL OR iban ~ '^[A-Z0-9]{15,34}$')`. That is a **format gate only**: it accepts checksum-invalid strings like `GB00WEST12345698765432`. The handlers (`handlers_beneficiaries.go`, `handlers_accounts.go`) only check presence (`req.Iban == ""`); `Transfer.tsx` passes raw input straight to the API. So the right shape exists, but no checksum authority does.
+**As built.** Both authorities enforce the checksum: `internal/iban` (Go, fail-fast `400`) and the `iban_is_valid()` MOD-97 validator behind `CHECK`s on `accounts.iban` and `beneficiaries.iban` (Postgres backstop, `23514` → `422`). `web/app/src/lib/iban.ts` is the convenience-only client check. See §6 for the migration breakdown.
 
 **The split, resolved.** A format regex is **necessary but not sufficient** (it cannot catch a transposed digit). The checksum must live in at least one *authority*. For a core-banking ledger the best answer is **both**: Go (fail-fast, good errors) **and** Postgres (last line of defense). This is defense in depth with the DB as the non-bypassable backstop — directly honoring bank0 **rule #1** ("logic lives in the database") and **rule #2** ("the ledger/DB is the source of truth"). A `23514` check-violation already flows cleanly through `mapDBError` in `internal/api/respond.go` (→ `422`).
 
 **Postgres cost assessment — cheap.** The MOD-97 validator is a pure function of its argument with no DB reads, so it can be marked **`IMMUTABLE PARALLEL SAFE`**; Postgres already assumes `CHECK` conditions are immutable, so a pure validator fits the model perfectly, and a `DOMAIN` caches the constraint lookup per session. It is a **bounded loop over ≤34 chars** doing small modular arithmetic (the accumulator stays `< 97` — no bignum), so it is trivially cheap for per-insert enforcement.
 
-> **Benchmarked** on a throwaway Postgres 18.4: 1,000,000 calls on 27-char (FR, with letter) and 31-char (MT) IBANs ran in **~92–94 ms** vs a **~98 ms** bare `generate_series + count` baseline — marginal cost **~0.1 µs/call**, in the noise versus INSERT/trigger cost. Correctness confirmed on GB/DE/FR vectors (accepts valid, rejects bad-checksum/too-short, passes `NULL` through); it worked identically inside a `CHECK` and a `CREATE DOMAIN`. ([Postgres function volatility](https://aws.amazon.com/blogs/database/volatility-classification-in-postgresql/); [Cybertec on IMMUTABLE](https://www.cybertec-postgresql.com/en/functions-the-most-widely-ignored-performance-tweak/))
+> **Benchmarked** on Postgres 18.4: ~0.1 µs/call (1M calls on 27/31-char IBANs), in the noise versus INSERT/trigger cost — cheap enough for per-insert enforcement.
 
 ---
 
-## 6. Concrete plan for bank0
+## 6. As built
 
-A three-layer, two-authority rollout. Each step names the file and follows the CLAUDE.md conventions (DB logic in migrations, generated code committed, DSN-gated tests on PG18).
-
-> **Status (shipped).** Implemented across two migrations: `00022_iban_validation.sql` (the checksum `iban_is_valid`/`iban_generate` + the `accounts.iban` CHECK) and `00023_iban_country_length.sql` (the per-country length table as a shared `iban_country_length()` helper, an unregistered-country reject, a BBAN-length guard in `iban_generate`, and the matching `beneficiaries.iban` CHECK). All three layers — `internal/iban`, the two migrations, and `web/app/src/lib/iban.ts` — carry the **same 89-country table** and agree byte-for-byte. Two column CHECKs were used rather than a shared `DOMAIN` (the `iban` columns predate this work). DB-layer coverage lives in `internal/db/iban_test.go`.
-
-### 6.1 Postgres — the backstop (do this first; it's the source of truth)
-
-Add a migration `db/migrations/NNNN_iban_checksum.sql` with a working `-- +goose Down`:
-
-- `CREATE FUNCTION iban_is_valid(text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE` implementing §2: a cheap leading format check (`^[A-Z]{2}[0-9]{2}[A-Z0-9]+$`, length 15–34, and the exact per-country length from §4 hard-coded as a `CASE`/lookup), then the rotate-4 + letter-fold + piecewise MOD-97 loop (`acc` folds the two-digit letter expansion in one step so it stays `< 97`). Pass `NULL` through (returns `NULL`).
-- Replace the format-only `CHECK` on `accounts.iban` (currently `00003_init_tables.sql:40`) and add the same to `beneficiaries.iban` with `CHECK (iban IS NULL OR iban_is_valid(iban))`. **Preferred:** define `CREATE DOMAIN iban AS varchar(34) CHECK (VALUE IS NULL OR iban_is_valid(VALUE))` and use the domain for both columns.
-- Run **migrate up → down → up** on a throwaway PG18; add a DSN-gated test asserting a bad-checksum INSERT is rejected with SQLSTATE `23514` (which `mapDBError` turns into `422`).
-
-### 6.2 Go — `internal/iban` package (validate + generate), authority #1
-
-Create a small package `internal/iban/iban.go` exposing:
-
-- `Validate(s string) error` — strip/upcase, char + per-country length check against the §4 map, rotate-4, letter-fold, piecewise MOD-97 (`rem = (rem*10 + d) % 97`; no `math/big` needed). Fixture test against `GB82WEST12345698765432` (and the §2 valid/invalid vectors).
-- `Generate(countryCode, bban string) (string, error)` — the §3 construction; **deterministic BBAN synthesis from the account sequence/UUID** for reproducible, collision-free seeds, ideally an all-numeric-BBAN country (NO or DE). Round-trip test: `Validate(Generate(...)) == nil`.
-
-Call `iban.Validate` before the DB call in `handlers_beneficiaries.go` (`CreateBeneficiary` body + `ResolveByIban` param) and `handlers_accounts.go`, returning `400 bad_request "invalid IBAN"` via `writeError`. (A ~30-line custom MOD-97 keeps bank0 dependency-free and is sufficient for checksum + length; pull in [`github.com/jacoelho/banking/iban`](https://github.com/jacoelho/banking) only if full per-country BBAN *structure* validation is later required.)
-
-### 6.3 Client — tiny TS check (UX only)
-
-In `web/app/src/routes/Transfer.tsx`, gate the Look-up / Save buttons and show an inline hint with either a **~15-line custom TS MOD-97** (zero new deps) or [`ibantools`](https://www.npmjs.com/package/ibantools) (`isValidIBAN()` — zero-runtime-dep, MIT/MPL, TS-native, also gives per-country structure + pretty-printing). After touching `web/app/`, rebuild with `task webapp:build`. Never treat the client as authoritative.
-
-### 6.4 Demo seed IBANs via generation
-
-Use `iban.Generate` (6.2) to **mint the demo seed's IBANs** deterministically from each seed account's stable id, so re-seeding is idempotent and won't collide under the `iban` `UNIQUE`/`DOMAIN` constraint. These are format- and checksum-valid but unregistered — **gate them behind demo/test mode** so they can never reach a real payment rail, and don't reuse the published `GB82WEST…`/`DE89…` examples as live demo accounts (reserve those as validator fixtures only).
-
-### Net
-
-`regex` = necessary structural gate, insufficient alone → `checksum` = the real authority, enforced in **both** Go (fast, good errors) and Postgres (non-bypassable backstop) → client = convenience. Generation reuses the same MOD-97 core in reverse and feeds reproducible, safely-fenced demo data.
+Shipped across two migrations: **`00022_iban_validation.sql`** (the `iban_is_valid`/`iban_generate`
+MOD-97 functions + the `accounts.iban` CHECK) and **`00023_iban_country_length.sql`** (the
+per-country length table as a shared `iban_country_length()` helper, an unregistered-country
+reject, a BBAN-length guard in `iban_generate`, and the matching `beneficiaries.iban` CHECK).
+All three layers — `internal/iban`, the two migrations, and `web/app/src/lib/iban.ts` — carry
+the **same 89-country table** and agree byte-for-byte. Two column CHECKs were used rather than a
+shared `DOMAIN` (the `iban` columns predate this work). DB-layer coverage lives in
+`internal/db/iban_test.go`; the demo seed mints deterministic, checksum-valid-but-unregistered
+IBANs via `iban.Generate`, fenced to demo mode.
 
 ---
 
