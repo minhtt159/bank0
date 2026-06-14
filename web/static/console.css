@@ -184,7 +184,11 @@ button.primary.sm { width:auto; margin-top:0; padding:.4rem .8rem; font-size:.85
 .navitem.active { background:color-mix(in srgb, var(--accent) 13%, transparent); color:var(--accent); }
 .navitem.disabled { color:var(--faint); cursor:default; }
 .navitem.disabled:hover { background:none; }
-#main-panel { padding:1.2rem 1.4rem; overflow:auto; min-width:0; }
+/* The console <main> fills its grid column. Reset the generic `main` rule's
+   max-width:1100px + margin:0 auto (that rule is for the standalone layout pages) —
+   otherwise the console centers in a 1100px box, leaving a side gap and forcing the
+   wide tables to scroll horizontally. */
+#main-panel { padding:1.2rem 1.4rem; overflow:auto; min-width:0; max-width:none; margin:0; }
 .rail-wrap { border-left:1px solid var(--line); background:var(--surface); min-width:0; display:flex; flex-direction:column; overflow:hidden; }
 .rail-bar { display:flex; justify-content:flex-end; padding:.4rem .5rem 0; }
 .rail-close { background:none; border:none; color:var(--muted); font-size:1.4rem; line-height:1; cursor:pointer; padding:0 .4rem; border-radius:var(--r-sm); }
