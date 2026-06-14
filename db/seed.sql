@@ -3,8 +3,9 @@
 -- Run:  psql "$DSN" -f db/seed.sql      (or via the compose `seed` service)
 --
 -- Shape: 30 customers, 1-3 accounts each (72 accounts total) — ~5-10% of the
--- generated demo seed (db/seed_demo.sql). Account IBANs are valid NL IBANs
--- (iban_generate -> MOD-97 checksum, satisfies the accounts_iban_checksum CHECK).
+-- generated demo seed (db/seed_demo.sql). Account IBANs are structurally-realistic
+-- NL IBANs: a real 4-letter bank code (ABNA/INGB/RABO/…) + a 10-digit account number,
+-- iban_generate -> MOD-97 checksum (satisfies the accounts_iban_checksum CHECK).
 -- Every account gets an opening deposit + a ring transfer (out and in). Plus a
 -- handful of pending transfers for the operator queue and one canceled + one
 -- reversed transfer so the lifecycle states are all represented. The richer,
@@ -35,6 +36,9 @@ DECLARE
         3, 2, 3, 2, 2, 3, 2, 3, 2, 2,
         3, 2, 3, 2, 2, 3, 2, 3, 2, 2,
         3, 2, 3, 2, 2, 3, 2, 3, 2, 2];
+    -- Real NL bank codes, cycled, so the BBAN is bank-code + 10-digit account number
+    -- (a realistic NL IBAN) rather than 14 raw digits.
+    bankcodes  TEXT[] := ARRAY['ABNA', 'INGB', 'RABO', 'TRIO', 'SNSB', 'KNAB'];
     aids       UUID[] := '{}';
     v_user     UUID;
     v_acct     UUID;
@@ -62,7 +66,8 @@ BEGIN
         END IF;
 
         FOR j IN 1 .. acctcounts[i] LOOP
-            v_iban := iban_generate('NL', lpad(seq::text, 14, '0'));      -- valid NL IBAN (checksum)
+            -- realistic NL BBAN: 4-letter bank code + 10-digit account number.
+            v_iban := iban_generate('NL', bankcodes[1 + (seq % array_length(bankcodes, 1))] || lpad(seq::text, 10, '0'));
             SELECT id INTO v_acct FROM accounts WHERE iban = v_iban::varchar;
             IF v_acct IS NULL THEN
                 v_acct := create_account(v_user, v_iban::varchar, lpad((1000 + seq)::text, 4, '0')::text, 50000::bigint);
