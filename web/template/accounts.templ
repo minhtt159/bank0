@@ -13,7 +13,7 @@ templ AccountsPanel() {
 }
 
 // AccountsRows: each row opens the owner's detail in the rail (where actions live).
-templ AccountsRows(rows []sqlc.SearchAccountsRow) {
+templ AccountsRows(rows []sqlc.SearchAccountsRow, prevURL string, nextURL string) {
 	<table>
 		<thead>
 			<tr>
@@ -39,4 +39,5 @@ templ AccountsRows(rows []sqlc.SearchAccountsRow) {
 			}
 		</tbody>
 	</table>
+	@pager(prevURL, nextURL, "accounts-results")
 }

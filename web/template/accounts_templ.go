@@ -62,7 +62,7 @@ func AccountsPanel() templ.Component {
 }
 
 // AccountsRows: each row opens the owner's detail in the rail (where actions live).
-func AccountsRows(rows []sqlc.SearchAccountsRow) templ.Component {
+func AccountsRows(rows []sqlc.SearchAccountsRow, prevURL string, nextURL string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -200,6 +200,10 @@ func AccountsRows(rows []sqlc.SearchAccountsRow) templ.Component {
 			}
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</tbody></table>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = pager(prevURL, nextURL, "accounts-results").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

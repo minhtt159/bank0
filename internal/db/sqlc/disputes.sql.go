@@ -95,14 +95,16 @@ LEFT JOIN users u ON u.id  = d.raised_by_user_id
 JOIN accounts da  ON da.id = t.debit_account_id
 JOIN accounts ca  ON ca.id = t.credit_account_id
 WHERE ($1::dispute_status IS NULL OR d.status = $1::dispute_status)
-  AND ($2::timestamptz  IS NULL OR d.created_at < $2::timestamptz)
-ORDER BY d.created_at DESC
-LIMIT $3::int
+  AND ($2::timestamptz IS NULL
+       OR (d.created_at, d.id) < ($2::timestamptz, $3::uuid))
+ORDER BY d.created_at DESC, d.id DESC
+LIMIT $4::int
 `
 
 type ListDisputesAdminParams struct {
 	Status    NullDisputeStatus `json:"status"`
 	Cursor    *time.Time        `json:"cursor"`
+	CursorID  *uuid.UUID        `json:"cursor_id"`
 	PageLimit int32             `json:"page_limit"`
 }
 
@@ -121,7 +123,12 @@ type ListDisputesAdminRow struct {
 }
 
 func (q *Queries) ListDisputesAdmin(ctx context.Context, arg ListDisputesAdminParams) ([]ListDisputesAdminRow, error) {
-	rows, err := q.db.Query(ctx, listDisputesAdmin, arg.Status, arg.Cursor, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listDisputesAdmin,
+		arg.Status,
+		arg.Cursor,
+		arg.CursorID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

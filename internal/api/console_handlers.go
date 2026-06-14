@@ -224,16 +224,23 @@ func (s *Server) consoleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consoleUsersResults(w http.ResponseWriter, r *http.Request) {
+	q := searchQ(r)
+	ts, cid := pageCursor(r)
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.SearchUsers(r.Context(), sqlc.SearchUsersParams{
-		Q: searchQ(r), PageLimit: s.cfg.Server.DefaultPageLimit,
+		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
 	if err != nil {
 		s.log.Error("search users", "err", err)
 		http.Error(w, "users error", http.StatusInternalServerError)
 		return
 	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(u sqlc.SearchUsersRow) (time.Time, uuid.UUID) {
+		return u.CreatedAt, u.ID
+	})
+	prev, next := pagerLinks(r, "/console/users/results", q, lastTs, lastID, hasMore)
 	s.html(w)
-	_ = template.UsersRows(rows).Render(r.Context(), w)
+	_ = template.UsersRows(rows, prev, next).Render(r.Context(), w)
 }
 
 func (s *Server) consoleAccounts(w http.ResponseWriter, r *http.Request) {
@@ -242,16 +249,23 @@ func (s *Server) consoleAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consoleAccountsResults(w http.ResponseWriter, r *http.Request) {
+	q := searchQ(r)
+	ts, cid := pageCursor(r)
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.SearchAccounts(r.Context(), sqlc.SearchAccountsParams{
-		Q: searchQ(r), PageLimit: s.cfg.Server.DefaultPageLimit,
+		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
 	if err != nil {
 		s.log.Error("search accounts", "err", err)
 		http.Error(w, "accounts error", http.StatusInternalServerError)
 		return
 	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.SearchAccountsRow) (time.Time, uuid.UUID) {
+		return a.CreatedAt, a.ID
+	})
+	prev, next := pagerLinks(r, "/console/accounts/results", q, lastTs, lastID, hasMore)
 	s.html(w)
-	_ = template.AccountsRows(rows).Render(r.Context(), w)
+	_ = template.AccountsRows(rows, prev, next).Render(r.Context(), w)
 }
 
 func (s *Server) consoleReconcile(w http.ResponseWriter, r *http.Request) {
@@ -661,7 +675,7 @@ func (s *Server) transfersPage(r *http.Request) ([]sqlc.SearchTransfersRow, stri
 	ctx := r.Context()
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.SearchTransfers(ctx, sqlc.SearchTransfersParams{
 		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -717,7 +731,7 @@ func (s *Server) consoleAudit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) consoleAuditResults(w http.ResponseWriter, r *http.Request) {
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.ListAuditLog(r.Context(), sqlc.ListAuditLogParams{
 		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -744,7 +758,7 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.AccountStatement(ctx, sqlc.AccountStatementParams{
 		AccountID: id, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -841,18 +855,26 @@ func (s *Server) consoleApprovals(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, flash string) {
 	ctx := r.Context()
-	rows, err := s.pg.Queries.ListPendingApprovals(ctx, s.cfg.Server.DefaultPageLimit)
+	ts, cid := pageCursor(r)
+	limit := s.consolePageLimit(r)
+	rows, err := s.pg.Queries.ListPendingApprovals(ctx, sqlc.ListPendingApprovalsParams{
+		Cursor: ts, CursorID: cid, PageLimit: limit + 1,
+	})
 	if err != nil {
 		s.log.Error("list approvals", "err", err)
 		http.Error(w, "approvals error", http.StatusInternalServerError)
 		return
 	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.ListPendingApprovalsRow) (time.Time, uuid.UUID) {
+		return a.CreatedAt, a.ID
+	})
+	prev, next := pagerLinks(r, "/console/approvals/results", nil, lastTs, lastID, hasMore)
 	canAct := false
 	if su, ok := userFromContext(ctx); ok {
 		canAct = canApprove(su.Role)
 	}
 	s.html(w)
-	_ = template.ApprovalRows(rows, canAct, flash).Render(ctx, w)
+	_ = template.ApprovalRows(rows, canAct, prev, next, flash).Render(ctx, w)
 }
 
 func (s *Server) consoleApprovalsResults(w http.ResponseWriter, r *http.Request) {
@@ -929,20 +951,26 @@ func (s *Server) consoleDisputes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) renderDisputes(w http.ResponseWriter, r *http.Request, flash string) {
 	ctx := r.Context()
+	ts, cid := pageCursor(r)
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.ListDisputesAdmin(ctx, sqlc.ListDisputesAdminParams{
-		PageLimit: s.cfg.Server.DefaultPageLimit, // status NULL => all; cursor nil => first page
+		Cursor: ts, CursorID: cid, PageLimit: limit + 1, // status NULL => all
 	})
 	if err != nil {
 		s.log.Error("list disputes", "err", err)
 		http.Error(w, "disputes error", http.StatusInternalServerError)
 		return
 	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(d sqlc.ListDisputesAdminRow) (time.Time, uuid.UUID) {
+		return d.CreatedAt, d.ID
+	})
+	prev, next := pagerLinks(r, "/console/disputes/results", nil, lastTs, lastID, hasMore)
 	canAct := false
 	if su, ok := userFromContext(ctx); ok {
 		canAct = canActOnMoney(su.Role)
 	}
 	s.html(w)
-	_ = template.DisputeRows(rows, canAct, flash).Render(ctx, w)
+	_ = template.DisputeRows(rows, canAct, prev, next, flash).Render(ctx, w)
 }
 
 func (s *Server) consoleDisputesResults(w http.ResponseWriter, r *http.Request) {

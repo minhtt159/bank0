@@ -525,6 +525,7 @@ type BankSetting struct {
 	DefaultTransferLimitMinor  int64      `json:"default_transfer_limit_minor"`
 	UpdatedAt                  time.Time  `json:"updated_at"`
 	UpdatedBy                  *uuid.UUID `json:"updated_by"`
+	DefaultPageLimit           int32      `json:"default_page_limit"`
 }
 
 type Beneficiary struct {

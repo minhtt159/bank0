@@ -14,7 +14,7 @@ templ UsersPanel(canManageUsers bool) {
 }
 
 // UsersRows is the results fragment (rows open the detail in the rail).
-templ UsersRows(rows []sqlc.SearchUsersRow) {
+templ UsersRows(rows []sqlc.SearchUsersRow, prevURL string, nextURL string) {
 	<table>
 		<thead>
 			<tr><th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr>
@@ -34,6 +34,7 @@ templ UsersRows(rows []sqlc.SearchUsersRow) {
 			}
 		</tbody>
 	</table>
+	@pager(prevURL, nextURL, "users-results")
 }
 
 // CreateUserForm renders in the right rail (single .detail root).
