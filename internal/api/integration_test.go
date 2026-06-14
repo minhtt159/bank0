@@ -19,6 +19,7 @@ import (
 
 	"github.com/minhtt159/bank0/internal/config"
 	"github.com/minhtt159/bank0/internal/db"
+	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 	"github.com/minhtt159/bank0/internal/migrate"
 )
@@ -79,8 +80,12 @@ func mkUser(t *testing.T, pg *db.Postgres, role sqlc.UserRole) (uuid.UUID, strin
 
 func mkAcct(t *testing.T, pg *db.Postgres, owner uuid.UUID, fundMinor int64) uuid.UUID {
 	t.Helper()
+	ibanStr, err := iban.Generate("SE")
+	if err != nil {
+		t.Fatalf("gen iban: %v", err)
+	}
 	id, err := pg.Queries.CreateAccount(context.Background(), sqlc.CreateAccountParams{
-		UserID: owner, Iban: "SE" + uhex(22), Pin: "1234", TransferLimitMinor: 100_000_000,
+		UserID: owner, Iban: ibanStr, Pin: "1234", TransferLimitMinor: 100_000_000,
 	})
 	if err != nil {
 		t.Fatalf("create account: %v", err)

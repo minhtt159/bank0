@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/minhtt159/bank0/internal/config"
+	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 	"github.com/minhtt159/bank0/internal/migrate"
 )
@@ -68,8 +69,12 @@ func mkCustomer(t *testing.T, pg *Postgres) uuid.UUID {
 
 func mkAccount(t *testing.T, pg *Postgres, owner uuid.UUID) uuid.UUID {
 	t.Helper()
+	ibanStr, err := iban.Generate("SE")
+	if err != nil {
+		t.Fatalf("gen iban: %v", err)
+	}
 	id, err := pg.Queries.CreateAccount(context.Background(), sqlc.CreateAccountParams{
-		UserID: owner, Iban: "SE" + uniqHex(22), Pin: "1234", TransferLimitMinor: 100_000_000,
+		UserID: owner, Iban: ibanStr, Pin: "1234", TransferLimitMinor: 100_000_000,
 	})
 	if err != nil {
 		t.Fatalf("create account: %v", err)
