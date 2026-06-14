@@ -1,5 +1,35 @@
 package template
 
+// htmxSrc is the single pinned htmx CDN URL for the operator console. Both the SPA
+// shell and the standalone layout load it from here, so the version is set once.
+const htmxSrc = "https://unpkg.com/htmx.org@2.0.3"
+
+// consoleHead is the shared <head> for the operator console (Shell + layout): meta,
+// the pinned htmx script, the pre-paint theme bootstrap, and the stylesheet.
+templ consoleHead(title string) {
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<title>{ title }</title>
+		<script src={ htmxSrc }></script>
+		@templ.Raw(themeScript)
+		<link rel="stylesheet" href="/static/console.css"/>
+	</head>
+}
+
+// consolePanel is the shared main-panel scaffold: a titled head (with caller-
+// supplied search box / hint / actions as children) plus the HTMX-swapped results
+// container. extraTrigger appends to the default load+refresh trigger (e.g. polling).
+templ consolePanel(title, resultsID, resultsURL, extraTrigger string) {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>{ title }</h1>
+			{ children... }
+		</div>
+		<div id={ resultsID } hx-get={ resultsURL } hx-trigger={ "load, bank0:refresh from:body" + extraTrigger } hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
 // searchBox is a live-search input. It swaps only the results fragment (target),
 // so the input keeps focus while typing. type=search gives a native clear (x),
 // and the "search" trigger fires when cleared. hx-disinherit keeps child results

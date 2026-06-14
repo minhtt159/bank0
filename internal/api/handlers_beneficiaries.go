@@ -27,10 +27,7 @@ func (s *Server) ListBeneficiaries(w http.ResponseWriter, r *http.Request) {
 		mapDBError(w, err)
 		return
 	}
-	if rows == nil {
-		rows = []sqlc.ListBeneficiariesRow{}
-	}
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, http.StatusOK, rows) // writeJSON coerces a nil slice to []
 }
 
 type addBeneficiaryReq struct {

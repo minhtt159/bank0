@@ -161,6 +161,22 @@ func pagerLinks(r *http.Request, base string, q *string, lastTs time.Time, lastI
 	return prev, next
 }
 
+// paginate trims a keyset page fetched with PageLimit=limit+1: it drops the probe
+// row, reports whether a following page exists, and returns the (timestamp, id)
+// cursor of the last row on the page. cursorOf reads the keyset columns from a row.
+// Callers build their own pager links from the returned cursor, since the base URL
+// / q / nav handling differs per screen.
+func paginate[T any](rows []T, limit int32, cursorOf func(T) (time.Time, uuid.UUID)) (page []T, lastTs time.Time, lastID uuid.UUID, hasMore bool) {
+	hasMore = int32(len(rows)) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	if hasMore && len(rows) > 0 {
+		lastTs, lastID = cursorOf(rows[len(rows)-1])
+	}
+	return rows, lastTs, lastID, hasMore
+}
+
 // ---- shell + main-panel screens ----------------------------------------
 
 func (s *Server) consoleHome(w http.ResponseWriter, r *http.Request) {
@@ -427,17 +443,41 @@ func (s *Server) accountOwnerOrFail(w http.ResponseWriter, r *http.Request, acct
 	return *owner, true
 }
 
-func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.requireRole(w, r, canActOnMoney)
-	if !ok {
+// consoleAccountContext is the shared preamble for the account rail actions:
+// money-role gate -> {id} parse -> resolve the owning user (for the re-render). It
+// writes the response and returns ok=false on any problem.
+func (s *Server) consoleAccountContext(w http.ResponseWriter, r *http.Request) (actor db.SessionUser, acctID, owner uuid.UUID, ok bool) {
+	if actor, ok = s.requireRole(w, r, canActOnMoney); !ok {
 		return
 	}
-	acctID, err := pathID(r)
-	if err != nil {
+	var err error
+	if acctID, err = pathID(r); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
-		return
+		return db.SessionUser{}, uuid.Nil, uuid.Nil, false
 	}
-	owner, ok := s.accountOwnerOrFail(w, r, acctID)
+	owner, ok = s.accountOwnerOrFail(w, r, acctID)
+	return
+}
+
+// consoleMoneyDir bundles the pieces that distinguish a console credit from a
+// withdrawal, so consoleMoveMoney can drive both. post is the below-threshold call
+// that posts immediately; request stages a PENDING transfer for maker-checker.
+type consoleMoneyDir struct {
+	kind           string // "credit" / "withdraw" (also the approval-detail tag + error verb)
+	noun           string // "Credit" / "Withdrawal" (threshold message)
+	postedVerb     string // "Credited" / "Withdrew" (success message)
+	auditPosted    string // audit action when posted directly
+	auditRequested string // audit action when routed to approvals
+	post           func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error)
+	request        func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error)
+}
+
+// consoleMoveMoney is the shared body for consoleCredit/consoleWithdraw: gate +
+// resolve owner, parse the amount + idempotency key, then either post directly or
+// (above the maker-checker threshold) stage a PENDING request and enqueue it for a
+// second admin. Only the per-direction DB calls and user-facing strings vary.
+func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir consoleMoneyDir) {
+	actor, acctID, owner, ok := s.consoleAccountContext(w, r)
 	if !ok {
 		return
 	}
@@ -452,18 +492,13 @@ func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
 		key = uuid.NewString()
 	}
 	ctx := r.Context()
-	// Maker-checker: above the threshold, the credit becomes a PENDING deposit and
-	// goes to the Approvals queue for a second admin instead of posting now.
 	if amount > s.cfg.Admin.MakerCheckerThresholdMinor {
-		tid, err := s.pg.Queries.RequestDeposit(ctx, sqlc.RequestDepositParams{
-			IdempotencyKey: key, AccountID: acctID, AmountMinor: amount,
-			Description: "Console credit (awaiting approval)",
-		})
+		tid, err := dir.request(key, acctID, amount)
 		if err != nil {
 			s.renderUserDetail(w, r, owner, "Could not submit: "+dbErrorMessage(err))
 			return
 		}
-		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": "credit", "account_id": acctID.String()})
+		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": dir.kind, "account_id": acctID.String()})
 		if _, err := s.pg.Queries.CreateApprovalRequest(ctx, sqlc.CreateApprovalRequestParams{
 			Maker: actor.UserID, TransferID: tid, Detail: detail,
 		}); err != nil {
@@ -471,105 +506,57 @@ func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		refresh(w)
-		s.audit(ctx, actor, "credit_requested", &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
-		s.renderUserDetail(w, r, owner, "Credit of "+money.FormatMinor(amount)+" exceeds the "+
+		s.audit(ctx, actor, dir.auditRequested, &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
+		s.renderUserDetail(w, r, owner, dir.noun+" of "+money.FormatMinor(amount)+" exceeds the "+
 			money.FormatMinor(s.cfg.Admin.MakerCheckerThresholdMinor)+" threshold — sent to Approvals for a second admin.")
 		return
 	}
-	tid, err := s.pg.Queries.Deposit(ctx, sqlc.DepositParams{
-		IdempotencyKey: key,
-		AccountID:      acctID,
-		AmountMinor:    amount,
-		Description:    "Console credit",
-	})
+	tid, err := dir.post(key, acctID, amount)
 	if err != nil {
-		s.renderUserDetail(w, r, owner, "Could not credit: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, owner, "Could not "+dir.kind+": "+dbErrorMessage(err))
 		return
 	}
 	refresh(w)
-	s.audit(ctx, actor, "credit", &acctID, map[string]any{
-		"amount_minor": amount, "transfer_id": tid.String(),
+	s.audit(ctx, actor, dir.auditPosted, &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
+	s.renderUserDetail(w, r, owner, dir.postedVerb+" "+money.FormatMinor(amount)+".")
+}
+
+func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
+	s.consoleMoveMoney(w, r, consoleMoneyDir{
+		kind: "credit", noun: "Credit", postedVerb: "Credited",
+		auditPosted: "credit", auditRequested: "credit_requested",
+		post: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
+			return s.pg.Queries.Deposit(r.Context(), sqlc.DepositParams{
+				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console credit",
+			})
+		},
+		request: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
+			return s.pg.Queries.RequestDeposit(r.Context(), sqlc.RequestDepositParams{
+				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console credit (awaiting approval)",
+			})
+		},
 	})
-	s.renderUserDetail(w, r, owner, "Credited "+money.FormatMinor(amount)+".")
 }
 
 func (s *Server) consoleWithdraw(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.requireRole(w, r, canActOnMoney)
-	if !ok {
-		return
-	}
-	acctID, err := pathID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
-		return
-	}
-	owner, ok := s.accountOwnerOrFail(w, r, acctID)
-	if !ok {
-		return
-	}
-	_ = r.ParseForm()
-	amount, perr := money.ParseEuros(r.PostFormValue("amount"))
-	if perr != nil || amount <= 0 {
-		s.renderUserDetail(w, r, owner, "Enter a positive amount.")
-		return
-	}
-	key := strings.TrimSpace(r.PostFormValue("idempotency_key"))
-	if key == "" {
-		key = uuid.NewString()
-	}
-	ctx := r.Context()
-	// Maker-checker: above the threshold, the withdrawal is staged as PENDING
-	// (the hold reserves funds) and routed to Approvals for a second admin.
-	if amount > s.cfg.Admin.MakerCheckerThresholdMinor {
-		tid, err := s.pg.Queries.RequestWithdrawal(ctx, sqlc.RequestWithdrawalParams{
-			IdempotencyKey: key, AccountID: acctID, AmountMinor: amount,
-			Description: "Console withdrawal (awaiting approval)",
-		})
-		if err != nil {
-			s.renderUserDetail(w, r, owner, "Could not submit: "+dbErrorMessage(err))
-			return
-		}
-		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": "withdraw", "account_id": acctID.String()})
-		if _, err := s.pg.Queries.CreateApprovalRequest(ctx, sqlc.CreateApprovalRequestParams{
-			Maker: actor.UserID, TransferID: tid, Detail: detail,
-		}); err != nil {
-			s.renderUserDetail(w, r, owner, "Could not submit for approval: "+dbErrorMessage(err))
-			return
-		}
-		refresh(w)
-		s.audit(ctx, actor, "withdraw_requested", &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
-		s.renderUserDetail(w, r, owner, "Withdrawal of "+money.FormatMinor(amount)+" exceeds the "+
-			money.FormatMinor(s.cfg.Admin.MakerCheckerThresholdMinor)+" threshold — sent to Approvals for a second admin.")
-		return
-	}
-	tid, err := s.pg.Queries.Withdraw(ctx, sqlc.WithdrawParams{
-		IdempotencyKey: key,
-		AccountID:      acctID,
-		AmountMinor:    amount,
-		Description:    "Console withdrawal",
+	s.consoleMoveMoney(w, r, consoleMoneyDir{
+		kind: "withdraw", noun: "Withdrawal", postedVerb: "Withdrew",
+		auditPosted: "withdraw", auditRequested: "withdraw_requested",
+		post: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
+			return s.pg.Queries.Withdraw(r.Context(), sqlc.WithdrawParams{
+				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console withdrawal",
+			})
+		},
+		request: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
+			return s.pg.Queries.RequestWithdrawal(r.Context(), sqlc.RequestWithdrawalParams{
+				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console withdrawal (awaiting approval)",
+			})
+		},
 	})
-	if err != nil {
-		s.renderUserDetail(w, r, owner, "Could not withdraw: "+dbErrorMessage(err))
-		return
-	}
-	refresh(w)
-	s.audit(ctx, actor, "withdraw", &acctID, map[string]any{
-		"amount_minor": amount, "transfer_id": tid.String(),
-	})
-	s.renderUserDetail(w, r, owner, "Withdrew "+money.FormatMinor(amount)+".")
 }
 
 func (s *Server) consoleAccountStatus(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.requireRole(w, r, canActOnMoney)
-	if !ok {
-		return
-	}
-	acctID, err := pathID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
-		return
-	}
-	owner, ok := s.accountOwnerOrFail(w, r, acctID)
+	actor, acctID, owner, ok := s.consoleAccountContext(w, r)
 	if !ok {
 		return
 	}
@@ -593,16 +580,7 @@ func (s *Server) consoleAccountStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consoleAccountLimit(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.requireRole(w, r, canActOnMoney)
-	if !ok {
-		return
-	}
-	acctID, err := pathID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
-		return
-	}
-	owner, ok := s.accountOwnerOrFail(w, r, acctID)
+	actor, acctID, owner, ok := s.consoleAccountContext(w, r)
 	if !ok {
 		return
 	}
@@ -624,16 +602,7 @@ func (s *Server) consoleAccountLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consoleAccountDefault(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.requireRole(w, r, canActOnMoney)
-	if !ok {
-		return
-	}
-	acctID, err := pathID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
-		return
-	}
-	owner, ok := s.accountOwnerOrFail(w, r, acctID)
+	actor, acctID, owner, ok := s.consoleAccountContext(w, r)
 	if !ok {
 		return
 	}
@@ -691,16 +660,9 @@ func (s *Server) transfersPage(r *http.Request) ([]sqlc.SearchTransfersRow, stri
 		s.log.Error("list transfers", "err", err)
 		return nil, "", "", false, err
 	}
-	hasMore := int32(len(rows)) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-	var lastTs time.Time
-	var lastID uuid.UUID
-	if hasMore {
-		last := rows[len(rows)-1]
-		lastTs, lastID = last.RequestedAt, last.ID
-	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(t sqlc.SearchTransfersRow) (time.Time, uuid.UUID) {
+		return t.RequestedAt, t.ID
+	})
 	prev, next := pagerLinks(r, "/console/transfers/results", q, lastTs, lastID, hasMore)
 	canAct := false
 	if su, ok := userFromContext(ctx); ok {
@@ -755,16 +717,9 @@ func (s *Server) consoleAuditResults(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "audit error", http.StatusInternalServerError)
 		return
 	}
-	hasMore := int32(len(rows)) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-	var lastTs time.Time
-	var lastID uuid.UUID
-	if hasMore {
-		last := rows[len(rows)-1]
-		lastTs, lastID = last.CreatedAt, last.ID
-	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.ListAuditLogRow) (time.Time, uuid.UUID) {
+		return a.CreatedAt, a.ID
+	})
 	prev, next := pagerLinks(r, "/console/audit/results", q, lastTs, lastID, hasMore)
 	s.html(w)
 	_ = template.AuditRows(rows, prev, next).Render(r.Context(), w)
@@ -788,16 +743,9 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 		mapDBError(w, err)
 		return
 	}
-	hasMore := int32(len(rows)) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-	var lastTs time.Time
-	var lastID uuid.UUID
-	if hasMore {
-		last := rows[len(rows)-1]
-		lastTs, lastID = last.PostedAt, last.ID
-	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(e sqlc.AccountStatementRow) (time.Time, uuid.UUID) {
+		return e.PostedAt, e.ID
+	})
 	prev, next := pagerLinks(r, "/console/accounts/"+id.String()+"/statement", nil, lastTs, lastID, hasMore)
 	s.html(w)
 	if isPagerNav(r) {

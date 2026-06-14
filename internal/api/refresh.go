@@ -1,6 +1,30 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/google/uuid"
+)
+
+// writeTokenPair issues an access JWT for the user and writes the standard auth
+// response (access token + the given refresh token). Login and Refresh share it.
+// Returns false (after writing a 500) if the JWT can't be minted.
+func (s *Server) writeTokenPair(w http.ResponseWriter, userID uuid.UUID, role, username, refresh string) bool {
+	token, exp, err := s.issueJWT(userID, role, username)
+	if err != nil {
+		s.log.Error("issue jwt", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return false
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user_id":       userID,
+		"token":         token,
+		"token_type":    "Bearer",
+		"expires_at":    exp,
+		"refresh_token": refresh,
+	})
+	return true
+}
 
 // Refresh-token rotation for the client (api) surface (docs/06 §3). The refresh
 // token is an opaque random string; the DB stores only sha256(token). Rotation
@@ -34,19 +58,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		mapDBError(w, err)
 		return
 	}
-	token, exp, err := s.issueJWT(userID, string(u.Role), u.Username)
-	if err != nil {
-		s.log.Error("issue jwt", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":       userID,
-		"token":         token,
-		"token_type":    "Bearer",
-		"expires_at":    exp,
-		"refresh_token": newRefresh,
-	})
+	s.writeTokenPair(w, userID, string(u.Role), u.Username, newRefresh)
 }
 
 // Logout implements genclient.ServerInterface: revoke the presented refresh token

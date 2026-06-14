@@ -161,23 +161,11 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		mapDBError(w, err)
 		return
 	}
-	token, exp, err := s.issueJWT(id, string(u.Role), u.Username)
-	if err != nil {
-		s.log.Error("issue jwt", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
 		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r), ""); err != nil {
 		mapDBError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":       id,
-		"token":         token,
-		"token_type":    "Bearer",
-		"expires_at":    exp,
-		"refresh_token": refresh,
-	})
+	s.writeTokenPair(w, id, string(u.Role), u.Username, refresh)
 }

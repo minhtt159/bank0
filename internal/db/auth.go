@@ -97,17 +97,19 @@ func (p *Postgres) IssueRefreshToken(ctx context.Context, userID uuid.UUID, toke
 	var family uuid.UUID
 	err := p.Pool.QueryRow(ctx,
 		`SELECT issue_refresh_token($1::uuid, $2::text, $3::int, $4::text, $5::text, $6::text)`,
-		userID, tokenHash, idleSeconds, userAgent, ip, nullIfEmpty(deviceLabel),
+		userID, tokenHash, idleSeconds, userAgent, ip, nilIfZero(deviceLabel),
 	).Scan(&family)
 	return family, err
 }
 
-// nullIfEmpty returns nil for an empty string so pgx binds SQL NULL (not '').
-func nullIfEmpty(s string) any {
-	if s == "" {
+// nilIfZero returns nil for a zero value (e.g. "" or uuid.Nil) so pgx binds SQL
+// NULL rather than the zero literal.
+func nilIfZero[T comparable](v T) any {
+	var zero T
+	if v == zero {
 		return nil
 	}
-	return s
+	return v
 }
 
 // Session is one active refresh-token family (a device/login) for GET /me/sessions.
@@ -200,13 +202,9 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 // RevokeUserRefreshExceptFamily revokes every live refresh family for the user
 // except keepFamily (pass uuid.Nil to revoke all). Returns the count revoked.
 func (p *Postgres) RevokeUserRefreshExceptFamily(ctx context.Context, userID, keepFamily uuid.UUID) (int, error) {
-	var keep any
-	if keepFamily != uuid.Nil {
-		keep = keepFamily
-	}
 	var n int
 	err := p.Pool.QueryRow(ctx,
-		`SELECT revoke_user_refresh_except_family($1::uuid, $2::uuid)`, userID, keep).Scan(&n)
+		`SELECT revoke_user_refresh_except_family($1::uuid, $2::uuid)`, userID, nilIfZero(keepFamily)).Scan(&n)
 	return n, err
 }
 

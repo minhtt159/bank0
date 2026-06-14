@@ -5,16 +5,12 @@ import sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 // UsersPanel is the main-panel Users screen: search box + a results container
 // that lazy-loads the rows and reloads on bank0:refresh.
 templ UsersPanel(canManageUsers bool) {
-	<div class="panel">
-		<div class="panel-head">
-			<h1>Users</h1>
-			@searchBox("Search users by name, username, email…", "/console/users/results", "users-results")
-			if canManageUsers {
-				<button class="primary sm" hx-get="/console/users/new" hx-target="#rail">+ New user</button>
-			}
-		</div>
-		<div id="users-results" hx-get="/console/users/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
-	</div>
+	@consolePanel("Users", "users-results", "/console/users/results", "") {
+		@searchBox("Search users by name, username, email…", "/console/users/results", "users-results")
+		if canManageUsers {
+			<button class="primary sm" hx-get="/console/users/new" hx-target="#rail">+ New user</button>
+		}
+	}
 }
 
 // UsersRows is the results fragment (rows open the detail in the rail).

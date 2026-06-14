@@ -10,13 +10,9 @@ import (
 // state machine (open → under_review → resolved | rejected). Resolving is gated to
 // operators/admins; auditors see the queue read-only.
 templ DisputesPanel(canResolve bool) {
-	<div class="panel">
-		<div class="panel-head">
-			<h1>Disputes</h1>
-			<span class="muted small">Customer "I don't recognise this" claims. Resolve or reject with an optional note.</span>
-		</div>
-		<div id="disputes-results" hx-get="/console/disputes/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
-	</div>
+	@consolePanel("Disputes", "disputes-results", "/console/disputes/results", "") {
+		<span class="muted small">Customer "I don't recognise this" claims. Resolve or reject with an optional note.</span>
+	}
 }
 
 templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, flash string) {

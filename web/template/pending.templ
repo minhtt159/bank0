@@ -7,13 +7,9 @@ import (
 
 // TransfersPanel: search box + results container (full transfer history).
 templ TransfersPanel() {
-	<div class="panel">
-		<div class="panel-head">
-			<h1>Transfers</h1>
-			@searchBox("Search transfers by IBAN or description…", "/console/transfers/results", "transfers-results")
-		</div>
-		<div id="transfers-results" hx-get="/console/transfers/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
-	</div>
+	@consolePanel("Transfers", "transfers-results", "/console/transfers/results", "") {
+		@searchBox("Search transfers by IBAN or description…", "/console/transfers/results", "transfers-results")
+	}
 }
 
 // TransferTable: full table + pager. Returned for first page, search, an action,
