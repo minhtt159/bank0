@@ -75,9 +75,17 @@ LEFT JOIN users u ON u.id  = aa.actor_user_id
 JOIN accounts da  ON da.id = t.debit_account_id
 JOIN accounts ca  ON ca.id = t.credit_account_id
 WHERE aa.action = 'approval_request' AND aa.approved_by IS NULL AND t.status = 'pending'
-ORDER BY aa.created_at DESC
-LIMIT $1::int
+  AND ($1::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < ($1::timestamptz, $2::uuid))
+ORDER BY aa.created_at DESC, aa.id DESC
+LIMIT $3::int
 `
+
+type ListPendingApprovalsParams struct {
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	PageLimit int32      `json:"page_limit"`
+}
 
 type ListPendingApprovalsRow struct {
 	ID          uuid.UUID `json:"id"`
@@ -89,8 +97,8 @@ type ListPendingApprovalsRow struct {
 	DebitIban   string    `json:"debit_iban"`
 }
 
-func (q *Queries) ListPendingApprovals(ctx context.Context, pageLimit int32) ([]ListPendingApprovalsRow, error) {
-	rows, err := q.db.Query(ctx, listPendingApprovals, pageLimit)
+func (q *Queries) ListPendingApprovals(ctx context.Context, arg ListPendingApprovalsParams) ([]ListPendingApprovalsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingApprovals, arg.Cursor, arg.CursorID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}

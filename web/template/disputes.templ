@@ -15,7 +15,7 @@ templ DisputesPanel(canResolve bool) {
 	}
 }
 
-templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, flash string) {
+templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, prevURL string, nextURL string, flash string) {
 	if flash != "" {
 		<div class="flash">{ flash }</div>
 	}
@@ -66,4 +66,5 @@ templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, flash strin
 			</tbody>
 		</table>
 	}
+	@pager(prevURL, nextURL, "disputes-results")
 }

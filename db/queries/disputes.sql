@@ -44,6 +44,7 @@ LEFT JOIN users u ON u.id  = d.raised_by_user_id
 JOIN accounts da  ON da.id = t.debit_account_id
 JOIN accounts ca  ON ca.id = t.credit_account_id
 WHERE (sqlc.narg(status)::dispute_status IS NULL OR d.status = sqlc.narg(status)::dispute_status)
-  AND (sqlc.narg(cursor)::timestamptz  IS NULL OR d.created_at < sqlc.narg(cursor)::timestamptz)
-ORDER BY d.created_at DESC
+  AND (sqlc.narg(cursor)::timestamptz IS NULL
+       OR (d.created_at, d.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+ORDER BY d.created_at DESC, d.id DESC
 LIMIT sqlc.arg(page_limit)::int;

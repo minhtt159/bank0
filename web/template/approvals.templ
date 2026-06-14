@@ -13,7 +13,7 @@ templ ApprovalsPanel(canApprove bool) {
 	}
 }
 
-templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash string) {
+templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, prevURL string, nextURL string, flash string) {
 	if flash != "" {
 		<div class="flash">{ flash }</div>
 	}
@@ -52,4 +52,5 @@ templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash s
 			</tbody>
 		</table>
 	}
+	@pager(prevURL, nextURL, "approvals-results")
 }

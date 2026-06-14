@@ -37,7 +37,9 @@ LEFT JOIN users u ON u.id  = aa.actor_user_id
 JOIN accounts da  ON da.id = t.debit_account_id
 JOIN accounts ca  ON ca.id = t.credit_account_id
 WHERE aa.action = 'approval_request' AND aa.approved_by IS NULL AND t.status = 'pending'
-ORDER BY aa.created_at DESC
+  AND (sqlc.narg(cursor)::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+ORDER BY aa.created_at DESC, aa.id DESC
 LIMIT sqlc.arg(page_limit)::int;
 
 -- name: RequestWithdrawal :one

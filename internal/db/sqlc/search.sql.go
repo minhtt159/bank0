@@ -17,23 +17,29 @@ SELECT a.id, a.user_id,
        COALESCE(u.full_name, '') AS owner,
        COALESCE(a.iban, '')      AS iban,
        a.status, a.balance_minor,
-       account_available(a.id)   AS available_minor
+       account_available(a.id)   AS available_minor,
+       a.created_at
 FROM accounts a
 LEFT JOIN users u ON u.id = a.user_id
-WHERE a.kind = 'customer' AND (
-      $1::text IS NULL OR $1::text = ''
-   OR a.iban::text ILIKE '%' || $1 || '%'
-   OR u.full_name ILIKE '%' || $1 || '%'
-   OR word_similarity($1::text, COALESCE(a.iban::text, '')) > 0.3
-   OR word_similarity($1::text, COALESCE(u.full_name, '')) > 0.3
-)
-ORDER BY a.created_at DESC
-LIMIT $2::int
+WHERE a.kind = 'customer'
+  AND ($1::timestamptz IS NULL
+       OR (a.created_at, a.id) < ($1::timestamptz, $2::uuid))
+  AND (
+      $3::text IS NULL OR $3::text = ''
+   OR a.iban::text ILIKE '%' || $3 || '%'
+   OR u.full_name ILIKE '%' || $3 || '%'
+   OR word_similarity($3::text, COALESCE(a.iban::text, '')) > 0.3
+   OR word_similarity($3::text, COALESCE(u.full_name, '')) > 0.3
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $4::int
 `
 
 type SearchAccountsParams struct {
-	Q         *string `json:"q"`
-	PageLimit int32   `json:"page_limit"`
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	Q         *string    `json:"q"`
+	PageLimit int32      `json:"page_limit"`
 }
 
 type SearchAccountsRow struct {
@@ -44,10 +50,16 @@ type SearchAccountsRow struct {
 	Status         AccountStatus `json:"status"`
 	BalanceMinor   int64         `json:"balance_minor"`
 	AvailableMinor int64         `json:"available_minor"`
+	CreatedAt      time.Time     `json:"created_at"`
 }
 
 func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) ([]SearchAccountsRow, error) {
-	rows, err := q.db.Query(ctx, searchAccounts, arg.Q, arg.PageLimit)
+	rows, err := q.db.Query(ctx, searchAccounts,
+		arg.Cursor,
+		arg.CursorID,
+		arg.Q,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +75,7 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg SearchAccountsParams) 
 			&i.Status,
 			&i.BalanceMinor,
 			&i.AvailableMinor,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -151,22 +164,25 @@ const searchUsers = `-- name: SearchUsers :many
 
 SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
 FROM users
-WHERE $1::text IS NULL OR $1::text = ''
-   OR username::text ILIKE '%' || $1 || '%'
-   OR full_name ILIKE '%' || $1 || '%'
-   OR COALESCE(email::text, '') ILIKE '%' || $1 || '%'
-   OR word_similarity($1::text, username::text) > 0.3
-   OR word_similarity($1::text, full_name) > 0.3
-ORDER BY GREATEST(
-           word_similarity(COALESCE($1::text, ''), username::text),
-           word_similarity(COALESCE($1::text, ''), full_name)
-         ) DESC, created_at DESC
-LIMIT $2::int
+WHERE ($1::timestamptz IS NULL
+       OR (created_at, id) < ($1::timestamptz, $2::uuid))
+  AND (
+      $3::text IS NULL OR $3::text = ''
+   OR username::text ILIKE '%' || $3 || '%'
+   OR full_name ILIKE '%' || $3 || '%'
+   OR COALESCE(email::text, '') ILIKE '%' || $3 || '%'
+   OR word_similarity($3::text, username::text) > 0.3
+   OR word_similarity($3::text, full_name) > 0.3
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $4::int
 `
 
 type SearchUsersParams struct {
-	Q         *string `json:"q"`
-	PageLimit int32   `json:"page_limit"`
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	Q         *string    `json:"q"`
+	PageLimit int32      `json:"page_limit"`
 }
 
 type SearchUsersRow struct {
@@ -182,10 +198,17 @@ type SearchUsersRow struct {
 }
 
 // Unified list+search queries. When q is NULL/” they return everything (the
-// plain list); otherwise they fuzzy-match (substring ILIKE OR trigram
-// word_similarity > 0.3), ranked by similarity.
+// plain list); otherwise q is a FILTER only (substring ILIKE OR trigram
+// word_similarity > 0.3). Ordering is a stable (created_at, id) keyset so the
+// list keyset-paginates correctly — a similarity rank can't be keyset-paginated
+// (and recomputing word_similarity per row to rank was a known perf drag).
 func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]SearchUsersRow, error) {
-	rows, err := q.db.Query(ctx, searchUsers, arg.Q, arg.PageLimit)
+	rows, err := q.db.Query(ctx, searchUsers,
+		arg.Cursor,
+		arg.CursorID,
+		arg.Q,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
