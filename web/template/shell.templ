@@ -6,14 +6,7 @@ package template
 templ Shell(username string, role string, pendingApprovals int) {
 	<!DOCTYPE html>
 	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>bank0 · operator console</title>
-			<script src="https://unpkg.com/htmx.org@2.0.3"></script>
-			@templ.Raw(themeScript)
-			<link rel="stylesheet" href="/static/console.css"/>
-		</head>
+		@consoleHead("bank0 · operator console")
 		<body>
 			<div id="progress"></div>
 			<header class="topbar">

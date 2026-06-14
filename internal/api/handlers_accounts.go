@@ -124,9 +124,11 @@ type amountReq struct {
 	Description string `json:"description"`
 }
 
-// Deposit implements genadmin.ServerInterface. Money above the maker-checker
-// threshold should route to the approvals queue (future work).
-func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.DepositParams) {
+// adminMoneyMove is the shared envelope for the admin Deposit/Withdraw handlers:
+// money-role gate -> decode amount -> default description -> run the (differing)
+// money fn -> respond with the maker-checker hint. post performs the one DB call
+// that distinguishes deposit from withdrawal.
+func (s *Server) adminMoneyMove(w http.ResponseWriter, r *http.Request, defaultDesc string, post func(req amountReq) (uuid.UUID, error)) {
 	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
 		return
 	}
@@ -135,14 +137,9 @@ func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_type
 		return
 	}
 	if req.Description == "" {
-		req.Description = "Deposit"
+		req.Description = defaultDesc
 	}
-	tid, err := s.pg.Queries.Deposit(r.Context(), sqlc.DepositParams{
-		IdempotencyKey: params.IdempotencyKey,
-		AccountID:      uuid.UUID(id),
-		AmountMinor:    req.AmountMinor,
-		Description:    req.Description,
-	})
+	tid, err := post(req)
 	if err != nil {
 		mapDBError(w, err)
 		return
@@ -153,31 +150,29 @@ func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_type
 	})
 }
 
+// Deposit implements genadmin.ServerInterface. The requires_approval flag is a
+// hint only; routing above-threshold money to the approvals queue happens in the
+// console credit/withdraw flow.
+func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.DepositParams) {
+	s.adminMoneyMove(w, r, "Deposit", func(req amountReq) (uuid.UUID, error) {
+		return s.pg.Queries.Deposit(r.Context(), sqlc.DepositParams{
+			IdempotencyKey: params.IdempotencyKey,
+			AccountID:      uuid.UUID(id),
+			AmountMinor:    req.AmountMinor,
+			Description:    req.Description,
+		})
+	})
+}
+
 // Withdraw implements genadmin.ServerInterface.
 func (s *Server) Withdraw(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.WithdrawParams) {
-	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
-		return
-	}
-	var req amountReq
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	if req.Description == "" {
-		req.Description = "Withdrawal"
-	}
-	tid, err := s.pg.Queries.Withdraw(r.Context(), sqlc.WithdrawParams{
-		IdempotencyKey: params.IdempotencyKey,
-		AccountID:      uuid.UUID(id),
-		AmountMinor:    req.AmountMinor,
-		Description:    req.Description,
-	})
-	if err != nil {
-		mapDBError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"transfer_id":       tid,
-		"requires_approval": req.AmountMinor > s.cfg.Admin.MakerCheckerThresholdMinor,
+	s.adminMoneyMove(w, r, "Withdrawal", func(req amountReq) (uuid.UUID, error) {
+		return s.pg.Queries.Withdraw(r.Context(), sqlc.WithdrawParams{
+			IdempotencyKey: params.IdempotencyKey,
+			AccountID:      uuid.UUID(id),
+			AmountMinor:    req.AmountMinor,
+			Description:    req.Description,
+		})
 	})
 }
 

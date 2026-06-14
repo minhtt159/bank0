@@ -7,6 +7,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minhtt159/bank0/internal/config"
@@ -29,6 +30,17 @@ func NewPostgres(cfg config.DatabaseConfig) (*Postgres, error) {
 	}
 	poolCfg.MaxConns = int32(cfg.MaxOpenConns)
 	poolCfg.MinConns = int32(cfg.MaxIdleConns)
+	// Be explicit about the connection lifecycle rather than leaning on pgx's
+	// defaults: recycle connections hourly (with jitter so a whole pool doesn't
+	// reconnect at once), reap idle ones above MinConns, and health-check
+	// periodically. Crucially set a per-dial connect timeout — without it a hung TCP
+	// dial to Postgres during normal operation (not just the startup Ping below) can
+	// block a request indefinitely waiting to acquire a connection.
+	poolCfg.MaxConnLifetime = time.Hour
+	poolCfg.MaxConnLifetimeJitter = 5 * time.Minute
+	poolCfg.MaxConnIdleTime = 30 * time.Minute
+	poolCfg.HealthCheckPeriod = time.Minute
+	poolCfg.ConnConfig.ConnectTimeout = cfg.ConnTimeout
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

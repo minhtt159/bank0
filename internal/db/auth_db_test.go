@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // These exercise the auth PL/pgSQL surface directly via raw SQL:
@@ -406,10 +408,14 @@ func changePassword(ctx context.Context, pg *Postgres, id uuid.UUID, current, ne
 
 func credsValid(t *testing.T, pg *Postgres, username, password string) bool {
 	t.Helper()
-	var id *uuid.UUID
-	if err := pg.Pool.QueryRow(context.Background(),
-		`SELECT check_user_credentials($1,$2)`, username, password).Scan(&id); err != nil {
+	var id uuid.UUID
+	err := pg.Pool.QueryRow(context.Background(),
+		`SELECT user_id FROM check_user_credentials($1,$2)`, username, password).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	if err != nil {
 		t.Fatalf("check_user_credentials: %v", err)
 	}
-	return id != nil
+	return true
 }

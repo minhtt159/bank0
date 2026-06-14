@@ -5,13 +5,9 @@ import sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 // AuditPanel: the operator audit trail (admin_actions). Read-only, searchable.
 // Pairs with the Transfers ledger to answer "who authorized this, and why".
 templ AuditPanel() {
-	<div class="panel">
-		<div class="panel-head">
-			<h1>Audit log</h1>
-			@searchBox("Search audit by action, operator, detail…", "/console/audit/results", "audit-results")
-		</div>
-		<div id="audit-results" hx-get="/console/audit/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
-	</div>
+	@consolePanel("Audit log", "audit-results", "/console/audit/results", "") {
+		@searchBox("Search audit by action, operator, detail…", "/console/audit/results", "audit-results")
+	}
 }
 
 templ AuditRows(rows []sqlc.ListAuditLogRow, prevURL string, nextURL string) {

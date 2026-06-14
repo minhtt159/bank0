@@ -43,6 +43,17 @@ function buildInit(method: string, opts: Opts): RequestInit {
   };
 }
 
+// postJSON is a bare POST for the auth endpoints (refresh/logout): JSON body, no
+// Authorization header, and crucially no 401-refresh loop — those endpoints manage
+// tokens themselves, so they must not recurse through req(). Returns the raw Response.
+function postJSON(path: string, body: unknown): Promise<Response> {
+  return fetch(BASE + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // Single-flight refresh: concurrent 401s share one /auth/refresh round-trip.
 let refreshing: Promise<boolean> | null = null;
 
@@ -52,11 +63,7 @@ function tryRefresh(): Promise<boolean> {
     const rt = refreshToken.value;
     if (!rt) return false;
     try {
-      const resp = await fetch(`${BASE}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: rt }),
-      });
+      const resp = await postJSON("/auth/refresh", { refresh_token: rt });
       if (!resp.ok) return false;
       const d = (await resp.json()) as LoginResponse;
       setAuth({ token: d.token, userId: d.user_id, expiresAt: d.expires_at, refreshToken: d.refresh_token });
@@ -102,11 +109,7 @@ export const api = {
     const rt = refreshToken.value;
     if (rt) {
       try {
-        await fetch(`${BASE}/auth/logout`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: rt }),
-        });
+        await postJSON("/auth/logout", { refresh_token: rt });
       } catch {
         /* ignore — clearing local state below is what matters */
       }

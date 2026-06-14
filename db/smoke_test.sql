@@ -6,7 +6,8 @@ SELECT create_account(:'alice_id','DE00ALICE00000001','1234') AS alice_acct \gse
 SELECT create_account(:'bob_id',  'DE00BOB0000000001','5678') AS bob_acct   \gset
 
 \echo '== 2. login check (bcrypt) -> returns alice id, then NULL for wrong pw =='
-SELECT check_user_credentials('alice','pw1') AS ok, check_user_credentials('alice','nope') AS bad;
+SELECT (SELECT user_id FROM check_user_credentials('alice','pw1'))  AS ok,
+       (SELECT user_id FROM check_user_credentials('alice','nope')) AS bad;
 
 \echo '== 3. deposit EUR 100.00 to Alice (via external_clearing) =='
 SELECT deposit('dep-alice-1', :'alice_acct', 10000, 'Initial funding');

@@ -12,22 +12,6 @@ import (
 	uuid "github.com/google/uuid"
 )
 
-const checkCredentials = `-- name: CheckCredentials :one
-SELECT check_user_credentials($1::citext, $2::text) AS user_id
-`
-
-type CheckCredentialsParams struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-func (q *Queries) CheckCredentials(ctx context.Context, arg CheckCredentialsParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, checkCredentials, arg.Username, arg.Password)
-	var user_id uuid.UUID
-	err := row.Scan(&user_id)
-	return user_id, err
-}
-
 const createUser = `-- name: CreateUser :one
 SELECT create_user(
     $1::citext,

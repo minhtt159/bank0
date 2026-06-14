@@ -8,13 +8,9 @@ import (
 // ApprovalsPanel: the maker-checker queue. High-value credits land here as
 // PENDING and need a second admin (≠ the maker) to approve or reject.
 templ ApprovalsPanel(canApprove bool) {
-	<div class="panel">
-		<div class="panel-head">
-			<h1>Approvals</h1>
-			<span class="muted small">Four-eyes: a different admin must approve high-value credits.</span>
-		</div>
-		<div id="approvals-results" hx-get="/console/approvals/results" hx-trigger="load, bank0:refresh from:body, every 15s" hx-swap="innerHTML" hx-disinherit="*"></div>
-	</div>
+	@consolePanel("Approvals", "approvals-results", "/console/approvals/results", ", every 15s") {
+		<span class="muted small">Four-eyes: a different admin must approve high-value credits.</span>
+	}
 }
 
 templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, flash string) {

@@ -147,7 +147,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	id, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
+	id, role, uname, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		mapDBError(w, err)
 		return
@@ -156,28 +156,11 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 		return
 	}
-	u, err := s.pg.Queries.GetUserByID(r.Context(), id)
-	if err != nil {
-		mapDBError(w, err)
-		return
-	}
-	token, exp, err := s.issueJWT(id, string(u.Role), u.Username)
-	if err != nil {
-		s.log.Error("issue jwt", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "internal error")
-		return
-	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
 		int(s.refreshTTL.Seconds()), r.UserAgent(), clientIP(r), ""); err != nil {
 		mapDBError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":       id,
-		"token":         token,
-		"token_type":    "Bearer",
-		"expires_at":    exp,
-		"refresh_token": refresh,
-	})
+	s.writeTokenPair(w, id, role, uname, refresh)
 }

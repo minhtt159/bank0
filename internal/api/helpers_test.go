@@ -1,12 +1,38 @@
 package api
 
 import (
+	"bytes"
+	"context"
+	"io/fs"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	webstatic "github.com/minhtt159/bank0/web/static"
+	template "github.com/minhtt159/bank0/web/template"
 )
+
+// The operator console moves money, so it must load htmx from our own origin
+// (vendored + embedded), never a third-party CDN with no integrity guarantee
+// (WEB-4 / docs/10). Guard both the embed and the rendered markup.
+func TestHTMXSelfHosted(t *testing.T) {
+	if _, err := fs.Stat(webstatic.FS, "htmx.min.js"); err != nil {
+		t.Fatalf("htmx.min.js must be embedded for same-origin serving: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := template.Shell("op", "admin", 0).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render shell: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, `src="/static/htmx.min.js"`) {
+		t.Error("console shell must load htmx from /static/htmx.min.js")
+	}
+	if strings.Contains(html, "unpkg") || strings.Contains(html, "://cdn") {
+		t.Error("console shell must not reference a third-party CDN")
+	}
+}
 
 func TestRoleGates(t *testing.T) {
 	cases := []struct {
