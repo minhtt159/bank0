@@ -71,6 +71,9 @@ func mapDBError(w http.ResponseWriter, err error) {
 		case "28000", "28P01": // refresh-token reuse/expiry/unknown -> re-authenticate
 			writeError(w, http.StatusUnauthorized, "unauthorized", msg)
 			return
+		case "42501": // insufficient_privilege: caller doesn't own the debit account
+			writeError(w, http.StatusForbidden, "forbidden", msg)
+			return
 		case "P0001": // generic RAISE EXCEPTION — disambiguate by message
 			switch {
 			case strings.Contains(msg, "not found"), strings.Contains(msg, "does not exist"):

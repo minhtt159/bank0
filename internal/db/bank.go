@@ -35,6 +35,26 @@ func (p *Postgres) Transfer(
 	return r, err
 }
 
+// ClientTransfer is the client-surface auto-post transfer: client_transfer enforces
+// (in the DB) that the caller owns the debit account, then runs transfer(). This
+// replaces the handler's separate ownership-probe round trip (TRANSFER-1). Non-
+// ownership raises 42501 -> 403 via mapDBError.
+func (p *Postgres) ClientTransfer(
+	ctx context.Context,
+	subject uuid.UUID,
+	idempotencyKey string,
+	debit, credit uuid.UUID,
+	amountMinor int64,
+	description string,
+) (TransferResult, error) {
+	const q = `SELECT transfer_id, status, was_replay
+	           FROM client_transfer($1::uuid, $2::text, $3::uuid, $4::uuid, $5::bigint, $6::text)`
+	var r TransferResult
+	err := p.Pool.QueryRow(ctx, q, subject, idempotencyKey, debit, credit, amountMinor, description).
+		Scan(&r.TransferID, &r.Status, &r.WasReplay)
+	return r, err
+}
+
 // RequestTransfer creates a transfer in the `pending` state (places a hold but
 // does not post). Used for deferred settlement and the maker-checker queue; an
 // operator later posts or cancels it. Idempotent on idempotencyKey.
