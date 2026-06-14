@@ -28,6 +28,7 @@ principles (see [`docs/01-overview.md`](docs/01-overview.md)):
 | [`docs/08-deployment-cloud-run-supabase.md`](docs/08-deployment-cloud-run-supabase.md) | Supabase + Cloud Run + Cloudflare deploy path with CI/CD |
 | [`docs/09-fraudbank-bff-plan.md`](docs/09-fraudbank-bff-plan.md) | fraudbank clients: decisions + wave status (§0), BFF/CORS plan, client-API feature gaps (P0–P2), `/me/dashboard` aggregation |
 | [`docs/10-security-review.md`](docs/10-security-review.md) | API pentest pass 1: findings (admin RBAC fix), verified-safe areas, accepted gaps; protective tests in `security_test.go` |
+| [`docs/11-iban-verification.md`](docs/11-iban-verification.md) | IBAN validation (MOD-97) + generation: verified algorithm, full country table, where to validate (client/Go/Postgres); backs `internal/iban`, the `00022` checks, and the demo seed |
 
 ## Tech stack (carried from tf-backend, refined)
 
@@ -72,9 +73,12 @@ open http://localhost:8090/docs    # client API reference (Scalar)
 - **client API**  → http://localhost:8090  (mode=api, JWT bearer)
 
 Seeded logins (dev passwords): `admin`/`admin`, `operator1`/`operator`,
-`auditor1`/`auditor` (staff); customers `alice`/`password` … `frank` (no console
-access). The seed (`db/seed.sql`, idempotent) loads 6 customers, 7 accounts, and
-16 transfers (3 pending). **Change the admin password immediately.**
+`auditor1`/`auditor` (staff); 30 customers (`alice`, `bob`, … `dario`; password
+`password`, no console access). The seed (`db/seed.sql`, idempotent) loads 30
+customers, 72 accounts (valid **NL** IBANs), and ~240 transfers (4 pending, plus a
+canceled and a reversed one for the full lifecycle). For a much larger randomized
+data set, use `db/seed_demo.sql` (`task seed:demo`). **Change the admin password
+immediately.**
 
 Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
 

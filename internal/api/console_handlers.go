@@ -14,6 +14,7 @@ import (
 
 	"github.com/minhtt159/bank0/internal/db"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+	"github.com/minhtt159/bank0/internal/iban"
 	"github.com/minhtt159/bank0/internal/money"
 	template "github.com/minhtt159/bank0/web/template"
 )
@@ -390,9 +391,14 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 			limit = m
 		}
 	}
+	normIban := iban.Normalize(r.PostFormValue("iban"))
+	if !iban.IsValid(normIban) {
+		s.renderUserDetail(w, r, userID, "Invalid IBAN: failed checksum/format validation.")
+		return
+	}
 	acctID, err := s.pg.Queries.CreateAccount(r.Context(), sqlc.CreateAccountParams{
 		UserID:             userID,
-		Iban:               strings.TrimSpace(r.PostFormValue("iban")),
+		Iban:               normIban,
 		Pin:                strings.TrimSpace(r.PostFormValue("pin")),
 		TransferLimitMinor: limit,
 	})
@@ -402,7 +408,7 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh(w)
 	s.audit(r.Context(), actor, "create_account", &acctID, map[string]any{
-		"iban": strings.TrimSpace(r.PostFormValue("iban")), "user_id": userID.String(),
+		"iban": normIban, "user_id": userID.String(),
 	})
 	s.renderUserDetail(w, r, userID, "Account created.")
 }
