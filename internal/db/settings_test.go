@@ -16,10 +16,10 @@ func TestBankSettingsAuthority(t *testing.T) {
 	pg := newTestPG(t)
 	ctx := context.Background()
 	t.Cleanup(func() {
-		_, _ = pg.Pool.Exec(ctx, `SELECT update_bank_settings(1000000, 50000, NULL)`)
+		_, _ = pg.Pool.Exec(ctx, `SELECT update_bank_settings(1000000, 50000, 15, NULL)`)
 	})
 
-	// Seeded default: €10,000 threshold.
+	// Seeded defaults: €10,000 threshold, page size 15.
 	ra, err := pg.RequiresApproval(ctx, 2_000_000)
 	if err != nil {
 		t.Fatalf("requires_approval: %v", err)
@@ -27,11 +27,17 @@ func TestBankSettingsAuthority(t *testing.T) {
 	if !ra.Required || ra.ThresholdMinor != 1_000_000 {
 		t.Errorf("seeded: required=%v threshold=%d, want true/1000000", ra.Required, ra.ThresholdMinor)
 	}
+	if bs, _ := pg.Queries.GetBankSettings(ctx); bs.DefaultPageLimit != 15 {
+		t.Errorf("seeded page size = %d, want 15", bs.DefaultPageLimit)
+	}
 
-	// Raise the threshold; the same amount no longer needs approval — the decision
-	// follows the DB, not a hardcoded value.
-	if _, err := pg.Pool.Exec(ctx, `SELECT update_bank_settings($1,$2,NULL)`, int64(5_000_000), int64(70_000)); err != nil {
+	// Raise the threshold + page size; the decision and page size follow the DB, not
+	// a hardcoded value.
+	if _, err := pg.Pool.Exec(ctx, `SELECT update_bank_settings($1,$2,$3,NULL)`, int64(5_000_000), int64(70_000), 20); err != nil {
 		t.Fatalf("update_bank_settings: %v", err)
+	}
+	if bs, _ := pg.Queries.GetBankSettings(ctx); bs.DefaultPageLimit != 20 {
+		t.Errorf("after update, page size = %d, want 20", bs.DefaultPageLimit)
 	}
 	ra, _ = pg.RequiresApproval(ctx, 2_000_000)
 	if ra.Required || ra.ThresholdMinor != 5_000_000 {

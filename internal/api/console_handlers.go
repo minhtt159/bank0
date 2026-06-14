@@ -226,7 +226,7 @@ func (s *Server) consoleUsers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) consoleUsersResults(w http.ResponseWriter, r *http.Request) {
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.SearchUsers(r.Context(), sqlc.SearchUsersParams{
 		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -251,7 +251,7 @@ func (s *Server) consoleAccounts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) consoleAccountsResults(w http.ResponseWriter, r *http.Request) {
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.SearchAccounts(r.Context(), sqlc.SearchAccountsParams{
 		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -675,7 +675,7 @@ func (s *Server) transfersPage(r *http.Request) ([]sqlc.SearchTransfersRow, stri
 	ctx := r.Context()
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.SearchTransfers(ctx, sqlc.SearchTransfersParams{
 		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -731,7 +731,7 @@ func (s *Server) consoleAudit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) consoleAuditResults(w http.ResponseWriter, r *http.Request) {
 	q := searchQ(r)
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.ListAuditLog(r.Context(), sqlc.ListAuditLogParams{
 		Q: q, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -758,7 +758,7 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.AccountStatement(ctx, sqlc.AccountStatementParams{
 		AccountID: id, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -856,7 +856,7 @@ func (s *Server) consoleApprovals(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, flash string) {
 	ctx := r.Context()
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.ListPendingApprovals(ctx, sqlc.ListPendingApprovalsParams{
 		Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
@@ -952,7 +952,7 @@ func (s *Server) consoleDisputes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderDisputes(w http.ResponseWriter, r *http.Request, flash string) {
 	ctx := r.Context()
 	ts, cid := pageCursor(r)
-	limit := s.cfg.Server.DefaultPageLimit
+	limit := s.consolePageLimit(r)
 	rows, err := s.pg.Queries.ListDisputesAdmin(ctx, sqlc.ListDisputesAdminParams{
 		Cursor: ts, CursorID: cid, PageLimit: limit + 1, // status NULL => all
 	})

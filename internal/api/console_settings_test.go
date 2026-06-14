@@ -14,7 +14,7 @@ import (
 func TestHTTPConsoleSettings(t *testing.T) {
 	ts, pg := newTestServer(t)
 	t.Cleanup(func() {
-		_, _ = pg.Pool.Exec(context.Background(), `SELECT update_bank_settings(1000000, 50000, NULL)`)
+		_, _ = pg.Pool.Exec(context.Background(), `SELECT update_bank_settings(1000000, 50000, 15, NULL)`)
 	})
 	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
 	_, auditorName := mkUser(t, pg, sqlc.UserRoleAuditor)
@@ -35,15 +35,19 @@ func TestHTTPConsoleSettings(t *testing.T) {
 		t.Error("auditor must not see the edit form")
 	}
 
-	// admin can save
+	// admin can save (incl. the configurable page size)
 	if code, _ := sessForm(t, admin, ts.URL+"/console/settings", url.Values{
-		"maker_checker_threshold": {"250.00"}, "default_transfer_limit": {"500.00"},
+		"maker_checker_threshold": {"250.00"}, "default_transfer_limit": {"500.00"}, "page_size": {"20"},
 	}); code != 200 {
 		t.Errorf("admin save = %d, want 200", code)
 	}
+	// the saved page size round-trips into the panel
+	if r := get(t, admin, ts.URL+"/console/settings", nil); !strings.Contains(body(t, r), `value="20"`) {
+		t.Error("page size 20 did not persist into the settings panel")
+	}
 	// auditor cannot save -> 403 (canManageSettings = admin only)
 	if code, _ := sessForm(t, auditor, ts.URL+"/console/settings", url.Values{
-		"maker_checker_threshold": {"999.00"}, "default_transfer_limit": {"500.00"},
+		"maker_checker_threshold": {"999.00"}, "default_transfer_limit": {"500.00"}, "page_size": {"20"},
 	}); code != 403 {
 		t.Errorf("auditor save = %d, want 403", code)
 	}

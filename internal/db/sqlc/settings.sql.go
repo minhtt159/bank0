@@ -13,13 +13,14 @@ import (
 )
 
 const getBankSettings = `-- name: GetBankSettings :one
-SELECT maker_checker_threshold_minor, default_transfer_limit_minor, updated_at, updated_by
+SELECT maker_checker_threshold_minor, default_transfer_limit_minor, default_page_limit, updated_at, updated_by
 FROM bank_settings WHERE id
 `
 
 type GetBankSettingsRow struct {
 	MakerCheckerThresholdMinor int64      `json:"maker_checker_threshold_minor"`
 	DefaultTransferLimitMinor  int64      `json:"default_transfer_limit_minor"`
+	DefaultPageLimit           int32      `json:"default_page_limit"`
 	UpdatedAt                  time.Time  `json:"updated_at"`
 	UpdatedBy                  *uuid.UUID `json:"updated_by"`
 }
@@ -30,6 +31,7 @@ func (q *Queries) GetBankSettings(ctx context.Context) (GetBankSettingsRow, erro
 	err := row.Scan(
 		&i.MakerCheckerThresholdMinor,
 		&i.DefaultTransferLimitMinor,
+		&i.DefaultPageLimit,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 	)
@@ -40,17 +42,24 @@ const updateBankSettings = `-- name: UpdateBankSettings :exec
 SELECT update_bank_settings(
     $1::bigint,
     $2::bigint,
-    $3::uuid
+    $3::int,
+    $4::uuid
 )
 `
 
 type UpdateBankSettingsParams struct {
 	ThresholdMinor    int64     `json:"threshold_minor"`
 	DefaultLimitMinor int64     `json:"default_limit_minor"`
+	PageLimit         int32     `json:"page_limit"`
 	Actor             uuid.UUID `json:"actor"`
 }
 
 func (q *Queries) UpdateBankSettings(ctx context.Context, arg UpdateBankSettingsParams) error {
-	_, err := q.db.Exec(ctx, updateBankSettings, arg.ThresholdMinor, arg.DefaultLimitMinor, arg.Actor)
+	_, err := q.db.Exec(ctx, updateBankSettings,
+		arg.ThresholdMinor,
+		arg.DefaultLimitMinor,
+		arg.PageLimit,
+		arg.Actor,
+	)
 	return err
 }

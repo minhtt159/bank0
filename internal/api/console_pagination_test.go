@@ -85,17 +85,18 @@ func TestHTTPConsoleUsersPaginate(t *testing.T) {
 	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
 	admin := login(t, ts, adminName, "pw")
 
-	// 26 (> DefaultPageLimit=25) users sharing a full_name tag, inserted in one
-	// transaction so they share created_at. We page by ?q=<tag> (the search FILTER)
-	// so we only ever see our own rows — robust to data left by other tests.
+	// Page size is the operator-configurable bank_settings value (default 15). Seed a
+	// few more than one page (sharing a full_name tag, in one transaction so they
+	// share created_at) and page by ?q=<tag> so we only ever see our own rows.
+	pageSize := configuredPageSize(t, pg)
 	tag := uniqTag("pgu")
-	want := seedTaggedUsers(t, pg, tag, 26)
+	want := seedTaggedUsers(t, pg, tag, pageSize+5)
 
-	// First page returns exactly DefaultPageLimit rows and a Next link (the bug:
-	// no Next link existed, so row 26 was unreachable).
+	// First page returns exactly one page of rows and a Next link (the bug: no Next
+	// link existed, so the overflow rows were unreachable).
 	first := body(t, get(t, admin, ts.URL+"/console/users/results?q="+tag, nil))
-	if got := len(rowIDs(first, "/console/users/")); got != 25 {
-		t.Fatalf("first users page = %d rows, want 25 (DefaultPageLimit)", got)
+	if got := len(rowIDs(first, "/console/users/")); got != pageSize {
+		t.Fatalf("first users page = %d rows, want %d (configured page size)", got, pageSize)
 	}
 	if nextLink(first, "/console/users/results") == "" {
 		t.Fatal("first users page must offer a Next link when more rows exist")
@@ -111,12 +112,14 @@ func TestHTTPConsoleAccountsPaginate(t *testing.T) {
 	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
 	admin := login(t, ts, adminName, "pw")
 
-	// 26 accounts owned by one tagged user, inserted in one transaction (shared
-	// created_at). Account rows drill into /console/users/<owner> (one repeated
-	// owner id), so we cannot dedupe by row link — instead we assert the two pages
-	// carry DISJOINT account IBANs and together cover all 26.
+	// pageSize+5 accounts under one tagged user, inserted in one transaction (shared
+	// created_at), so they fall across exactly two pages. Account rows drill into
+	// /console/users/<owner> (one repeated owner id), so we can't dedupe by row link —
+	// instead we assert the two pages carry DISJOINT IBANs and together cover all.
+	pageSize := configuredPageSize(t, pg)
+	n := pageSize + 5
 	tag := uniqTag("pga")
-	ibans := seedTaggedAccounts(t, pg, tag, 26)
+	ibans := seedTaggedAccounts(t, pg, tag, n)
 
 	first := body(t, get(t, admin, ts.URL+"/console/accounts/results?q="+tag, nil))
 	next := nextLink(first, "/console/accounts/results")
@@ -127,8 +130,8 @@ func TestHTTPConsoleAccountsPaginate(t *testing.T) {
 
 	p1 := ibansIn(first, ibans)
 	p2 := ibansIn(second, ibans)
-	if len(p1) != 25 {
-		t.Fatalf("first accounts page = %d tagged rows, want 25", len(p1))
+	if len(p1) != pageSize {
+		t.Fatalf("first accounts page = %d tagged rows, want %d", len(p1), pageSize)
 	}
 	for ib := range p2 {
 		if p1[ib] {
@@ -142,9 +145,19 @@ func TestHTTPConsoleAccountsPaginate(t *testing.T) {
 	for ib := range p2 {
 		union[ib] = true
 	}
-	if len(union) != 26 {
-		t.Fatalf("two accounts pages covered %d of 26 distinct IBANs", len(union))
+	if len(union) != n {
+		t.Fatalf("two accounts pages covered %d of %d distinct IBANs", len(union), n)
 	}
+}
+
+// configuredPageSize reads the operator-configurable console page size (bank_settings).
+func configuredPageSize(t *testing.T, pg *db.Postgres) int {
+	t.Helper()
+	bs, err := pg.Queries.GetBankSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	return int(bs.DefaultPageLimit)
 }
 
 // --- helpers --------------------------------------------------------------

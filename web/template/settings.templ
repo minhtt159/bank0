@@ -29,6 +29,11 @@ templ SettingsPanel(s sqlc.GetBankSettingsRow, canEdit bool, flash string) {
 					<input name="default_transfer_limit" type="text" inputmode="decimal" value={ money.PlainMinor(s.DefaultTransferLimitMinor) }/>
 				</label>
 				<p class="muted small">Applied to a new account when no per-account limit is set.</p>
+				<label>
+					Default page size (rows)
+					<input name="page_size" type="number" min="1" max="200" value={ i64(int64(s.DefaultPageLimit)) }/>
+				</label>
+				<p class="muted small">Rows per page in the console lists (Users, Accounts, Transfers, …).</p>
 				<button class="primary" type="submit">Save settings</button>
 			</form>
 		} else {
@@ -37,6 +42,8 @@ templ SettingsPanel(s sqlc.GetBankSettingsRow, canEdit bool, flash string) {
 				<dd>{ money.FormatMinor(s.MakerCheckerThresholdMinor) }</dd>
 				<dt>Default transfer limit</dt>
 				<dd>{ money.FormatMinor(s.DefaultTransferLimitMinor) }</dd>
+				<dt>Default page size</dt>
+				<dd>{ i64(int64(s.DefaultPageLimit)) } rows</dd>
 			</dl>
 			<p class="muted small">Only admins can change these.</p>
 		}
