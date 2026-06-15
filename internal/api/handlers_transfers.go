@@ -81,7 +81,7 @@ func (s *Server) ListMyTransfers(w http.ResponseWriter, r *http.Request, params 
 	}
 	rows, err := s.pg.Queries.ListMyTransfers(r.Context(), q)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows) // writeJSON coerces a nil slice -> []
@@ -121,7 +121,7 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 	res, err := s.pg.ClientTransfer(r.Context(), subj, params.IdempotencyKey, debit, credit,
 		req.AmountMinor, req.Description)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -132,7 +132,7 @@ func (s *Server) GetTransfer(w http.ResponseWriter, r *http.Request, id openapi_
 	if subj, ok := clientSubject(r.Context()); ok {
 		o, err := s.pg.Queries.TransferOwners(r.Context(), uuid.UUID(id))
 		if err != nil {
-			mapDBError(w, err)
+			s.mapDBError(w, r, err)
 			return
 		}
 		if !ownsAccount(subj, o.DebitOwner) && !ownsAccount(subj, o.CreditOwner) {
@@ -142,7 +142,7 @@ func (s *Server) GetTransfer(w http.ResponseWriter, r *http.Request, id openapi_
 	}
 	t, err := s.pg.Queries.GetTransfer(r.Context(), uuid.UUID(id))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -178,7 +178,7 @@ func (s *Server) respondPending(w http.ResponseWriter, r *http.Request, cursor *
 		PageLimit: s.limitOr(limit),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -197,7 +197,7 @@ func (s *Server) PostTransfer(w http.ResponseWriter, r *http.Request, id openapi
 		CallerSubject: subj, ID: uuid.UUID(id),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
@@ -221,7 +221,7 @@ func (s *Server) CancelTransfer(w http.ResponseWriter, r *http.Request, id opena
 		CallerSubject: subj, ID: uuid.UUID(id), Reason: req.Reason,
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
@@ -240,7 +240,7 @@ func (s *Server) ReverseTransfer(w http.ResponseWriter, r *http.Request, id open
 		ID: uuid.UUID(id), IdempotencyKey: params.IdempotencyKey, Reason: req.Reason,
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"reversal_id": reversalID})

@@ -60,7 +60,7 @@ func (s *Server) RaiseDispute(w http.ResponseWriter, r *http.Request, id openapi
 	})
 	if err != nil {
 		// not-a-party / unknown transfer -> 404; not disputable -> 422; dup open -> 409.
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	d, err := s.pg.Queries.GetDisputeForRaiser(r.Context(), sqlc.GetDisputeForRaiserParams{
@@ -68,7 +68,7 @@ func (s *Server) RaiseDispute(w http.ResponseWriter, r *http.Request, id openapi
 		Raiser: subj,
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, d)
@@ -87,7 +87,7 @@ func (s *Server) ListMyDisputes(w http.ResponseWriter, r *http.Request, params g
 		PageLimit: s.limitOr(params.Limit),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows) // writeJSON coerces a nil slice -> []
@@ -106,7 +106,7 @@ func (s *Server) GetDispute(w http.ResponseWriter, r *http.Request, id openapi_t
 		Raiser: subj,
 	})
 	if err != nil {
-		mapDBError(w, err) // ErrNoRows -> 404
+		s.mapDBError(w, r, err) // ErrNoRows -> 404
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
@@ -125,7 +125,7 @@ func (s *Server) ListDisputes(w http.ResponseWriter, r *http.Request, params gen
 		PageLimit: s.limitOr(params.Limit),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -159,12 +159,12 @@ func (s *Server) ResolveDispute(w http.ResponseWriter, r *http.Request, id opena
 		Status:    sqlc.DisputeStatus(req.Status),
 		Note:      req.ResolutionNote,
 	}); err != nil {
-		mapDBError(w, err) // unknown -> 404; illegal transition -> 409 invalid_state
+		s.mapDBError(w, r, err) // unknown -> 404; illegal transition -> 409 invalid_state
 		return
 	}
 	d, err := s.pg.Queries.GetDisputeAdmin(r.Context(), uuid.UUID(id))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, d)

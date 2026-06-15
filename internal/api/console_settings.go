@@ -61,7 +61,7 @@ func (s *Server) consoleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if err := s.pg.Queries.UpdateBankSettings(r.Context(), sqlc.UpdateBankSettingsParams{
 		ThresholdMinor: threshold, DefaultLimitMinor: limit, PageLimit: int32(pageSize), Actor: actor.UserID,
 	}); err != nil {
-		s.renderSettings(w, r, "Could not save: "+dbErrorMessage(err))
+		s.renderSettings(w, r, "Could not save: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w) // lists that show limits/thresholds re-pull

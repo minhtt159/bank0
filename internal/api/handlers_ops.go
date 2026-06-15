@@ -35,7 +35,7 @@ func (s *Server) Ready(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Reconcile(w http.ResponseWriter, r *http.Request) {
 	issues, err := s.pg.Reconcile(r.Context())
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -51,7 +51,7 @@ func (s *Server) ExpireHolds(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := s.pg.Queries.ExpireHolds(r.Context())
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"expired": n})

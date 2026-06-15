@@ -40,27 +40,6 @@ func (q *Queries) CountPendingApprovals(ctx context.Context) (int32, error) {
 	return column_1, err
 }
 
-const createApprovalRequest = `-- name: CreateApprovalRequest :one
-SELECT create_approval_request(
-    $1::uuid,
-    $2::uuid,
-    $3::jsonb
-) AS id
-`
-
-type CreateApprovalRequestParams struct {
-	Maker      uuid.UUID `json:"maker"`
-	TransferID uuid.UUID `json:"transfer_id"`
-	Detail     []byte    `json:"detail"`
-}
-
-func (q *Queries) CreateApprovalRequest(ctx context.Context, arg CreateApprovalRequestParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createApprovalRequest, arg.Maker, arg.TransferID, arg.Detail)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const listPendingApprovals = `-- name: ListPendingApprovals :many
 SELECT aa.id,
        aa.created_at,
@@ -137,62 +116,6 @@ type RejectRequestParams struct {
 
 func (q *Queries) RejectRequest(ctx context.Context, arg RejectRequestParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, rejectRequest, arg.RequestID, arg.Approver, arg.Reason)
-	var transfer_id uuid.UUID
-	err := row.Scan(&transfer_id)
-	return transfer_id, err
-}
-
-const requestDeposit = `-- name: RequestDeposit :one
-SELECT request_deposit(
-    $1::text,
-    $2::uuid,
-    $3::bigint,
-    $4::text
-) AS transfer_id
-`
-
-type RequestDepositParams struct {
-	IdempotencyKey string    `json:"idempotency_key"`
-	AccountID      uuid.UUID `json:"account_id"`
-	AmountMinor    int64     `json:"amount_minor"`
-	Description    string    `json:"description"`
-}
-
-func (q *Queries) RequestDeposit(ctx context.Context, arg RequestDepositParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, requestDeposit,
-		arg.IdempotencyKey,
-		arg.AccountID,
-		arg.AmountMinor,
-		arg.Description,
-	)
-	var transfer_id uuid.UUID
-	err := row.Scan(&transfer_id)
-	return transfer_id, err
-}
-
-const requestWithdrawal = `-- name: RequestWithdrawal :one
-SELECT request_withdrawal(
-    $1::text,
-    $2::uuid,
-    $3::bigint,
-    $4::text
-) AS transfer_id
-`
-
-type RequestWithdrawalParams struct {
-	IdempotencyKey string    `json:"idempotency_key"`
-	AccountID      uuid.UUID `json:"account_id"`
-	AmountMinor    int64     `json:"amount_minor"`
-	Description    string    `json:"description"`
-}
-
-func (q *Queries) RequestWithdrawal(ctx context.Context, arg RequestWithdrawalParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, requestWithdrawal,
-		arg.IdempotencyKey,
-		arg.AccountID,
-		arg.AmountMinor,
-		arg.Description,
-	)
 	var transfer_id uuid.UUID
 	err := row.Scan(&transfer_id)
 	return transfer_id, err

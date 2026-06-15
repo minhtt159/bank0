@@ -12,17 +12,6 @@ SELECT create_user(
 SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
 FROM users WHERE id = sqlc.arg(id)::uuid;
 
--- name: GetUserByUsername :one
-SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
-FROM users WHERE username = sqlc.arg(username)::citext;
-
--- name: ListUsers :many
-SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
-FROM users
-WHERE created_at < COALESCE(sqlc.narg(cursor)::timestamptz, now())
-ORDER BY created_at DESC
-LIMIT sqlc.arg(page_limit)::int;
-
 -- name: UpdateUserInfo :exec
 SELECT update_user_info(
     sqlc.arg(user_id)::uuid,

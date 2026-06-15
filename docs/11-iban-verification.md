@@ -1,6 +1,6 @@
 # IBAN verification & generation
 
-> Implementation-ready research note for the **bank0** core-banking backend. Scope: validate and generate International Bank Account Numbers (IBANs), and place that logic correctly across bank0's three surfaces. All facts below were verified; an executable check of the MOD-97 algorithm and a four-source cross-check of the length table both passed (see §2, §4).
+> How the **bank0** core-banking backend validates and generates International Bank Account Numbers (IBANs), and where that logic sits across bank0's three surfaces. The MOD-97 algorithm and the per-country length table are both verified — an executable check of the algorithm and a four-source cross-check of the table both passed (see §2, §4).
 
 ---
 
@@ -201,7 +201,7 @@ Full ISO 13616 / SWIFT IBAN Registry (Release 99, December 2024 — current at t
 
 Range: **NO=15 (shortest) → RU=33 (longest in registry)**; the ISO 13616 maximum permitted is 34. The ~22 "experimental"/non-registry codes that aggregators list (AO, BF, BJ, CI, CM, DZ, MA, ML, SN, …) and unconfirmed entries (KM, MG) are deliberately excluded — treat them as a separate lower-trust list only if a broader definition of "IBAN-participating" is needed. ([iban.com/structure](https://www.iban.com/structure))
 
-> **Verified.** A 38-country subset was cross-checked four ways — in-code go-iban table, iban.com/structure, Wikipedia, and *empirical character-length measurement of real sample IBAN files* in `tf-backend/assets/ibans/` — with **zero discrepancies**. The full registry table above is the basis for the strict `COUNTRY_LENGTHS` map in §2/§6.
+> **Verified.** A 38-country subset was cross-checked four ways — the in-code go-iban table, iban.com/structure, Wikipedia, and *empirical character-length measurement of real sample IBAN files* — with **zero discrepancies**. The full registry table above is the basis for the strict `COUNTRY_LENGTHS` map in §2/§6.
 
 ---
 
@@ -211,13 +211,23 @@ Validate at every layer with a clear **authority split**: the client is convenie
 
 | Layer | File(s) | Role | What it does |
 |---|---|---|---|
-| Client (Preact/TS) | `web/app/src/routes/Transfer.tsx` | UX only — *never* authority | Instant inline "invalid IBAN" hint; gate the Look-up / Save buttons |
-| Go server | `internal/api/handlers_beneficiaries.go`, `handlers_accounts.go` | **Authority #1** — fail fast, clean `422` | Reject bad checksum before touching the DB, with a precise message via `writeError` |
-| PostgreSQL 18 | `db/migrations/NNNN_*.sql` | **Authority #2** — non-bypassable backstop | `IMMUTABLE` plpgsql MOD-97 in a `CHECK`/`DOMAIN`; protects admin console, seeds, migrations, any future writer |
+| Client (Preact/TS) | `web/app/src/lib/iban.ts`, `web/app/src/routes/Transfer.tsx` | UX only — *never* authority | Instant inline "invalid IBAN" hint; gate the Look-up / Save buttons |
+| Go server | `internal/iban`, `internal/api/handlers_beneficiaries.go`, `handlers_accounts.go` | **Authority #1** — fail fast, clean `422` | Reject bad checksum before touching the DB, with a precise message via `writeError` |
+| PostgreSQL | `00002_iban.sql` (functions), `00004_accounts.sql` / `00008_features.sql` (CHECKs) | **Authority #2** — non-bypassable backstop | `IMMUTABLE` plpgsql MOD-97 in a `CHECK`; protects admin console, seeds, migrations, any future writer |
 
-**As built.** Both authorities enforce the checksum: `internal/iban` (Go, fail-fast `422 invalid_iban`) and the `iban_is_valid()` MOD-97 validator behind `CHECK`s on `accounts.iban` and `beneficiaries.iban` (Postgres backstop, `23514` → `422`). `web/app/src/lib/iban.ts` is the convenience-only client check. See §6 for the migration breakdown.
+Both authorities enforce the checksum: `internal/iban` (Go, fail-fast
+`422 invalid_iban`) and the `iban_is_valid()` MOD-97 validator behind `CHECK`s on
+`accounts.iban` and `beneficiaries.iban` (Postgres backstop, `23514` → `422`).
+`web/app/src/lib/iban.ts` is the convenience-only client check. See §6 for the
+migration breakdown.
 
-**The split, resolved.** A format regex is **necessary but not sufficient** (it cannot catch a transposed digit). The checksum must live in at least one *authority*. For a core-banking ledger the best answer is **both**: Go (fail-fast, good errors) **and** Postgres (last line of defense). This is defense in depth with the DB as the non-bypassable backstop — directly honoring bank0 **rule #1** ("logic lives in the database") and **rule #2** ("the ledger/DB is the source of truth"). A `23514` check-violation already flows cleanly through `mapDBError` in `internal/api/respond.go` (→ `422`).
+**Why both layers.** A format regex is **necessary but not sufficient** (it cannot
+catch a transposed digit), so the checksum lives in at least one *authority*. For a
+core-banking ledger the answer is **both**: Go (fail-fast, good errors) **and**
+Postgres (last line of defense) — defense in depth with the DB as the
+non-bypassable backstop, honoring bank0's "logic lives in the database" and
+"the DB is the source of truth" rules. A `23514` check-violation flows cleanly
+through `mapDBError` in `internal/api/respond.go` (→ `422`).
 
 **Postgres cost assessment — cheap.** The MOD-97 validator is a pure function of its argument with no DB reads, so it can be marked **`IMMUTABLE PARALLEL SAFE`**; Postgres already assumes `CHECK` conditions are immutable, so a pure validator fits the model perfectly, and a `DOMAIN` caches the constraint lookup per session. It is a **bounded loop over ≤34 chars** doing small modular arithmetic (the accumulator stays `< 97` — no bignum), so it is trivially cheap for per-insert enforcement.
 
@@ -225,17 +235,21 @@ Validate at every layer with a clear **authority split**: the client is convenie
 
 ---
 
-## 6. As built
+## 6. Where it lives in the baseline
 
-Shipped across two migrations: **`00022_iban_validation.sql`** (the `iban_is_valid`/`iban_generate`
-MOD-97 functions + the `accounts.iban` CHECK) and **`00023_iban_country_length.sql`** (the
-per-country length table as a shared `iban_country_length()` helper, an unregistered-country
-reject, a BBAN-length guard in `iban_generate`, and the matching `beneficiaries.iban` CHECK).
-All three layers — `internal/iban`, the two migrations, and `web/app/src/lib/iban.ts` — carry
-the **same 89-country table** and agree byte-for-byte. Two column CHECKs were used rather than a
-shared `DOMAIN` (the `iban` columns predate this work). DB-layer coverage lives in
-`internal/db/iban_test.go`; the demo seed mints deterministic, checksum-valid-but-unregistered
-IBANs via `iban.Generate`, fenced to demo mode.
+The `iban_is_valid` / `iban_generate` MOD-97 functions, the per-country length
+table as a shared `iban_country_length()` helper, the unregistered-country reject,
+and the BBAN-length guard in `iban_generate` all live in
+[`00002_iban.sql`](../db/migrations/00002_iban.sql). The matching CHECK constraints
+sit alongside their tables: `accounts.iban` in
+[`00004_accounts.sql`](../db/migrations/00004_accounts.sql) and
+`beneficiaries.iban` in
+[`00008_features.sql`](../db/migrations/00008_features.sql). All three layers —
+`internal/iban`, the DB migrations, and `web/app/src/lib/iban.ts` — carry the
+**same 89-country table** and agree byte-for-byte. Column CHECKs are used rather
+than a shared `DOMAIN`. DB-layer coverage lives in `internal/db/iban_test.go`; the
+demo seed mints deterministic, checksum-valid-but-unregistered IBANs via
+`iban.Generate`, fenced to demo mode.
 
 ---
 
@@ -249,4 +263,4 @@ IBANs via `iban.Generate`, fenced to demo mode.
 - Test-IBAN fixtures (vendor conventions, not a standard): https://www.iban.com/testibans · https://docs.rapyd.net/en/iban-numbers-for-testing.html
 - Libraries: https://github.com/jacoelho/banking (Go) · https://github.com/Simplify/ibantools + https://www.npmjs.com/package/ibantools (JS/TS) · https://schwifty.readthedocs.io/ (Python)
 - Postgres `IMMUTABLE`/volatility: https://aws.amazon.com/blogs/database/volatility-classification-in-postgresql/ · https://www.cybertec-postgresql.com/en/functions-the-most-widely-ignored-performance-tweak/
-- bank0 current state: `db/migrations/00003_init_tables.sql:40`, `internal/api/handlers_beneficiaries.go`, `internal/api/handlers_accounts.go`, `internal/api/respond.go`, `web/app/src/routes/Transfer.tsx`
+- bank0 source: `db/migrations/00002_iban.sql`, `internal/iban`, `internal/api/handlers_beneficiaries.go`, `internal/api/handlers_accounts.go`, `internal/api/respond.go`, `web/app/src/lib/iban.ts`, `web/app/src/routes/Transfer.tsx`

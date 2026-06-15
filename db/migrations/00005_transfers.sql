@@ -1,4 +1,156 @@
 -- +goose Up
+-- ─────────────────────────────────────────────────────────────────────────────
+-- TRANSFERS & THE LEDGER — the double-entry source of truth and the money paths
+-- The heart of bank0 (rules 1 & 2), split out of the former core_banking monolith.
+-- Holds the transfers table (the operation/intent carrying the lifecycle), the
+-- append-only ledger_entries source of truth, the idempotency_keys table, the
+-- ledger triggers (the ONE balance writer + the append-only guard), and every money
+-- function: request_transfer, post_transfer, cancel/fail_transfer, the transfer()
+-- auto-post, reverse_transfer (clawback), deposit/withdraw, and the client_*
+-- ownership wrappers (+ assert_caller_owns).
+--
+-- Depends on accounts/holds (00004): the ledger trigger writes accounts.balance_minor
+-- (under the in_ledger guard), and holds.transfer_id gets its FK to transfers here.
+-- bank_settings / maker-checker (the request_money_with_approval staging path) live
+-- in 00006; maintenance sweeps + reconcile() in 00007.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- transfers  (the operation/intent carrying the lifecycle; NOT the ledger)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE transfers (
+    id                UUID PRIMARY KEY DEFAULT uuidv7(),
+    debit_account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    credit_account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+    amount_minor      BIGINT  NOT NULL,
+    currency          CHAR(3) NOT NULL DEFAULT 'EUR',
+    status            transfer_status NOT NULL DEFAULT 'pending',
+    kind              transfer_kind   NOT NULL DEFAULT 'transfer',
+    reverses_id       UUID REFERENCES transfers(id),
+    description       TEXT NOT NULL DEFAULT '',
+    idempotency_key   TEXT,                                              -- soft ref to idempotency_keys.key
+    failure_reason    TEXT,
+    requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    posted_at         TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CHECK (amount_minor > 0),
+    CHECK (debit_account_id <> credit_account_id),
+    -- posted_at is set once a transfer reaches the ledger; a reversed transfer
+    -- was posted, so it keeps its posted_at.
+    CHECK ((posted_at IS NOT NULL) = (status IN ('posted', 'reversed'))),
+    CHECK ((kind = 'reversal')  = (reverses_id IS NOT NULL))
+);
+
+-- Now that transfers exists, wire up holds.transfer_id (declared FK-less in 00004).
+ALTER TABLE holds
+    ADD CONSTRAINT holds_transfer_id_fkey FOREIGN KEY (transfer_id) REFERENCES transfers(id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ledger_entries  (append-only source of truth)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE ledger_entries (
+    id            UUID PRIMARY KEY DEFAULT uuidv7(),
+    transfer_id   UUID NOT NULL REFERENCES transfers(id) ON DELETE RESTRICT,
+    account_id    UUID NOT NULL REFERENCES accounts(id)  ON DELETE RESTRICT,
+    direction     entry_direction NOT NULL,
+    amount_minor  BIGINT NOT NULL,
+    signed_amount BIGINT GENERATED ALWAYS AS
+                  (CASE direction WHEN 'debit' THEN -amount_minor ELSE amount_minor END) STORED,
+    balance_after BIGINT NOT NULL,                                       -- running balance, set by trigger
+    currency      CHAR(3) NOT NULL DEFAULT 'EUR',
+    posted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CHECK (amount_minor > 0)
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- idempotency_keys  (DB-enforced replay safety for money moves)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE idempotency_keys (
+    key          TEXT PRIMARY KEY,
+    scope        TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status       ik_status NOT NULL DEFAULT 'in_progress',
+    transfer_id  UUID REFERENCES transfers(id),
+    response     JSONB,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days'
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- indexes (statement pagination, pending queue, history, TTL, fuzzy search)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Account statement pagination (cursor on posted_at, id). id is UUIDv7 -> time-ordered tiebreak.
+CREATE INDEX idx_ledger_account_posted ON ledger_entries (account_id, posted_at DESC, id DESC);
+-- Fetch both legs of a transfer.
+CREATE INDEX idx_ledger_transfer       ON ledger_entries (transfer_id);
+
+-- operator "pending queue".
+CREATE INDEX idx_transfers_pending     ON transfers (requested_at) WHERE status = 'pending';
+-- per-account transfer history (the tf-backend UNION ALL pattern hits these independently).
+CREATE INDEX idx_transfers_debit       ON transfers (debit_account_id, created_at DESC);
+CREATE INDEX idx_transfers_credit      ON transfers (credit_account_id, created_at DESC);
+-- ListMyTransfers keyset cursor on (requested_at, id) for each OR arm.
+CREATE INDEX idx_transfers_debit_req   ON transfers (debit_account_id, requested_at DESC, id DESC);
+CREATE INDEX idx_transfers_credit_req  ON transfers (credit_account_id, requested_at DESC, id DESC);
+-- fuzzy transfer-description search (trigram GIN).
+CREATE INDEX idx_transfers_desc_trgm   ON transfers USING gin (description gin_trgm_ops);
+
+-- idempotency key TTL cleanup.
+CREATE INDEX idx_idempotency_expiry    ON idempotency_keys (expires_at);
+
+-- +goose StatementBegin
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Ledger triggers & trigger functions
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- The ONE balance writer. Inserting a ledger entry is the only thing in the
+-- entire system that may change accounts.balance_minor. It also stamps the
+-- per-entry running balance (balance_after).
+--
+-- Runs BEFORE INSERT so it can set NEW.balance_after. We compute the signed
+-- delta directly from direction/amount (the generated column signed_amount is
+-- not yet populated in a BEFORE trigger).
+CREATE OR REPLACE FUNCTION ledger_apply_to_balance() RETURNS TRIGGER AS $$
+DECLARE
+    v_delta   BIGINT := CASE NEW.direction WHEN 'debit' THEN -NEW.amount_minor
+                                            ELSE NEW.amount_minor END;
+    v_balance BIGINT;
+BEGIN
+    SELECT balance_minor INTO v_balance FROM accounts WHERE id = NEW.account_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'ledger entry references missing account %', NEW.account_id;
+    END IF;
+
+    v_balance := v_balance + v_delta;
+    NEW.balance_after := v_balance;
+
+    -- Flag this UPDATE as ledger-originated so the balance guard allows it.
+    PERFORM set_config('bank0.in_ledger', 'on', true);
+    UPDATE accounts SET balance_minor = v_balance WHERE id = NEW.account_id;
+    PERFORM set_config('bank0.in_ledger', 'off', true);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Append-only enforcement: ledger history can never be edited or deleted.
+-- Corrections happen via reverse_transfer (new inverse entries).
+CREATE OR REPLACE FUNCTION ledger_block_mutation() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'ledger_entries is append-only (% blocked)', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+CREATE TRIGGER trg_transfers_updated_at BEFORE UPDATE ON transfers FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_ledger_apply_balance BEFORE INSERT ON ledger_entries FOR EACH ROW EXECUTE FUNCTION ledger_apply_to_balance();
+CREATE TRIGGER trg_ledger_immutable     BEFORE UPDATE OR DELETE ON ledger_entries FOR EACH ROW EXECUTE FUNCTION ledger_block_mutation();
+
 -- +goose StatementBegin
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -199,8 +351,13 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- reverse_transfer: posted -> reversed. Appends inverse ledger entries via a new
--- 'reversal' transfer. The original is never edited. Idempotent on the key.
+-- reverse_transfer (clawback safety): posted -> reversed. Appends inverse ledger
+-- entries via a new 'reversal' transfer. The original is never edited. Idempotent
+-- on the key. Verifies up front that the counterparty (the original CREDIT account,
+-- which the reversal DEBITS) still holds enough to be clawed back — otherwise we'd
+-- drive its balance below zero and trip the raw accounts CHECK. Reversal
+-- deliberately does NOT enforce the active-account check the forward path applies;
+-- a clawback is an operator remedy and may credit a frozen/closed account.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION reverse_transfer(
     p_transfer_id     UUID,
@@ -211,6 +368,7 @@ DECLARE
     v_orig     transfers%ROWTYPE;
     v_existing idempotency_keys%ROWTYPE;
     v_rev_id   UUID;
+    v_cp       accounts%ROWTYPE;
     v_hash     TEXT := encode(digest('reverse|' || p_transfer_id::text, 'sha256'), 'hex');
 BEGIN
     INSERT INTO idempotency_keys (key, scope, request_hash, status)
@@ -234,6 +392,16 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
+    -- Clawback safety: lock the account the reversal will DEBIT (the original
+    -- CREDIT account) and confirm it still holds enough to be reversed. Reversal
+    -- intentionally bypasses the active-account check applied on the forward path
+    -- (see the header note) — only the funds check is enforced here.
+    SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id FOR UPDATE;
+    IF v_cp.kind <> 'system' AND v_cp.balance_minor < v_orig.amount_minor THEN
+        RAISE EXCEPTION 'cannot reverse transfer %: recipient has insufficient funds to claw back', p_transfer_id
+            USING ERRCODE = 'check_violation';
+    END IF;
+
     INSERT INTO transfers (debit_account_id, credit_account_id, amount_minor, currency,
                            status, kind, reverses_id, description, idempotency_key, posted_at)
     VALUES (v_orig.credit_account_id, v_orig.debit_account_id, v_orig.amount_minor, v_orig.currency,
@@ -253,6 +421,8 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────────────────────────────────────────
 -- deposit / withdraw: money crossing the bank boundary, via external_clearing.
 -- A deposit is a posted transfer external_clearing -> customer (no money minted).
+-- High-value moves that need 4-eyes go through request_money_with_approval (00006),
+-- which stages a PENDING transfer directly via request_transfer.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION deposit(
     p_idempotency_key TEXT,
@@ -286,9 +456,82 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- client_* ownership wrappers: client-surface money entrypoints that enforce caller
+-- ownership IN THE DB, so the Go handlers skip a separate ownership-probe round trip.
+-- The admin/console surface keeps calling the unguarded base functions.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- assert_caller_owns: raise 42501 (-> 403) unless p_subject owns p_account. A
+-- nonexistent or system-owned (NULL) account is treated as not-owned.
+CREATE OR REPLACE FUNCTION assert_caller_owns(p_subject UUID, p_account UUID) RETURNS VOID AS $$
+DECLARE v_owner UUID;
+BEGIN
+    SELECT user_id INTO v_owner FROM accounts WHERE id = p_account;
+    IF v_owner IS NULL OR v_owner <> p_subject THEN
+        RAISE EXCEPTION 'debit account not owned by caller' USING ERRCODE = '42501';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- client_transfer: the caller may only debit an account they own; then auto-post via
+-- transfer(). Same RETURNS shape as transfer() so the handler is unchanged downstream.
+CREATE OR REPLACE FUNCTION client_transfer(
+    p_caller_subject  UUID,
+    p_idempotency_key TEXT,
+    p_debit_account   UUID,
+    p_credit_account  UUID,
+    p_amount_minor    BIGINT,
+    p_description     TEXT DEFAULT ''
+) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
+BEGIN
+    PERFORM assert_caller_owns(p_caller_subject, p_debit_account);
+    RETURN QUERY
+        SELECT t.transfer_id, t.status, t.was_replay
+        FROM transfer(p_idempotency_key, p_debit_account, p_credit_account,
+                      p_amount_minor, p_description, 'transfer') t;
+END;
+$$ LANGUAGE plpgsql;
+
+-- client_post_transfer / client_cancel_transfer: act on a pending transfer only if
+-- the caller owns its DEBIT account. A transfer the caller doesn't own (or that does
+-- not exist) raises 'not found' -> 404, hiding existence.
+CREATE OR REPLACE FUNCTION client_post_transfer(p_caller_subject UUID, p_transfer_id UUID)
+RETURNS transfer_status AS $$
+DECLARE v_owner UUID;
+BEGIN
+    SELECT a.user_id INTO v_owner
+    FROM transfers t JOIN accounts a ON a.id = t.debit_account_id
+    WHERE t.id = p_transfer_id;
+    IF v_owner IS NULL OR v_owner <> p_caller_subject THEN
+        RAISE EXCEPTION 'transfer % not found', p_transfer_id;
+    END IF;
+    RETURN post_transfer(p_transfer_id);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION client_cancel_transfer(p_caller_subject UUID, p_transfer_id UUID, p_reason TEXT DEFAULT '')
+RETURNS transfer_status AS $$
+DECLARE v_owner UUID;
+BEGIN
+    SELECT a.user_id INTO v_owner
+    FROM transfers t JOIN accounts a ON a.id = t.debit_account_id
+    WHERE t.id = p_transfer_id;
+    IF v_owner IS NULL OR v_owner <> p_caller_subject THEN
+        RAISE EXCEPTION 'transfer % not found', p_transfer_id;
+    END IF;
+    RETURN cancel_transfer(p_transfer_id, p_reason);
+END;
+$$ LANGUAGE plpgsql;
+
 -- +goose StatementEnd
 
 -- +goose Down
+-- +goose StatementBegin
+DROP FUNCTION IF EXISTS client_cancel_transfer(UUID, UUID, TEXT);
+DROP FUNCTION IF EXISTS client_post_transfer(UUID, UUID);
+DROP FUNCTION IF EXISTS client_transfer(UUID, TEXT, UUID, UUID, BIGINT, TEXT);
+DROP FUNCTION IF EXISTS assert_caller_owns(UUID, UUID);
 DROP FUNCTION IF EXISTS withdraw(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS reverse_transfer(UUID, TEXT, TEXT);
@@ -297,3 +540,15 @@ DROP FUNCTION IF EXISTS fail_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS post_transfer(UUID);
 DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL);
+-- +goose StatementEnd
+DROP TRIGGER IF EXISTS trg_ledger_immutable     ON ledger_entries;
+DROP TRIGGER IF EXISTS trg_ledger_apply_balance ON ledger_entries;
+DROP TRIGGER IF EXISTS trg_transfers_updated_at ON transfers;
+-- +goose StatementBegin
+DROP FUNCTION IF EXISTS ledger_block_mutation();
+DROP FUNCTION IF EXISTS ledger_apply_to_balance();
+-- +goose StatementEnd
+ALTER TABLE holds DROP CONSTRAINT IF EXISTS holds_transfer_id_fkey;
+DROP TABLE IF EXISTS idempotency_keys;
+DROP TABLE IF EXISTS ledger_entries;
+DROP TABLE IF EXISTS transfers;

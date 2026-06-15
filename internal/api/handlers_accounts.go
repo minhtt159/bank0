@@ -46,7 +46,7 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		TransferLimitMinor: req.TransferLimitMinor,
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
@@ -56,7 +56,7 @@ func (s *Server) CreateAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) GetAccount(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
 	a, err := s.pg.Queries.GetAccount(r.Context(), uuid.UUID(id))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	if subj, ok := clientSubject(r.Context()); ok && !ownsAccount(subj, a.UserID) {
@@ -74,7 +74,7 @@ func (s *Server) ListUserAccounts(w http.ResponseWriter, r *http.Request, id ope
 	}
 	rows, err := s.pg.Queries.ListAccountsByUser(r.Context(), uuid.UUID(id))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -85,7 +85,7 @@ func (s *Server) GetAccountLedger(w http.ResponseWriter, r *http.Request, id ope
 	if subj, ok := clientSubject(r.Context()); ok {
 		owner, err := s.pg.Queries.AccountOwner(r.Context(), uuid.UUID(id))
 		if err != nil {
-			mapDBError(w, err)
+			s.mapDBError(w, r, err)
 			return
 		}
 		if !ownsAccount(subj, owner) {
@@ -111,7 +111,7 @@ func (s *Server) GetAccountLedger(w http.ResponseWriter, r *http.Request, id ope
 		PageLimit: s.limitOr(params.Limit),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -139,7 +139,7 @@ func (s *Server) adminMoneyMove(w http.ResponseWriter, r *http.Request, defaultD
 	}
 	tid, err := post(req)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	ra, _ := s.pg.RequiresApproval(r.Context(), req.AmountMinor) // hint only; DB is the authority
@@ -197,7 +197,7 @@ func (s *Server) SetAccountStatus(w http.ResponseWriter, r *http.Request, id ope
 	if err := s.pg.Queries.SetAccountStatus(r.Context(), sqlc.SetAccountStatusParams{
 		AccountID: uuid.UUID(id), Status: sqlc.AccountStatus(req.Status),
 	}); err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": req.Status})

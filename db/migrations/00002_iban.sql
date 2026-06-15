@@ -1,15 +1,15 @@
 -- +goose Up
--- +goose StatementBegin
+-- ─────────────────────────────────────────────────────────────────────────────
+-- AUXILIARY — IBAN PRIMITIVES
+-- Pure, table-independent helper functions: the IBAN authority (ISO 7064
+-- MOD-97-10 checksum + per-country length table) and the name-masking helper used
+-- by confirmation-of-payee. These are IMMUTABLE and depend on nothing, so they
+-- load before core-banking — where accounts.iban's checksum CHECK calls
+-- iban_is_valid(). Algorithms verified in docs/11-iban-verification.md; they mirror
+-- internal/iban (Go) and web/app/src/lib/iban.ts (TS) — keep all three in sync.
+-- ─────────────────────────────────────────────────────────────────────────────
 
--- Make the DB IBAN authority length- and country-aware, so the Postgres CHECK
--- agrees byte-for-byte with internal/iban (Go) and web/app/src/lib/iban.ts (TS).
--- Migration 00022 added a checksum-only validator (structure + MOD-97); it accepted
--- checksum-valid strings of the WRONG per-country length or an UNREGISTERED country
--- code (e.g. iban_is_valid('GB18…', 24 chars) -> TRUE though GB is 22; 'ZZ…' -> TRUE).
--- The app layers already reject those via the 89-entry length table; this brings the
--- non-bypassable backstop (the accounts_iban_checksum CHECK + the new beneficiaries
--- CHECK) up to the same authority, per docs/11 §6.1. Still IMMUTABLE + a bounded
--- per-character fold (no bignum), so it stays cheap for a per-insert CHECK.
+-- +goose StatementBegin
 
 -- Single source of truth for the per-country total IBAN length (SWIFT IBAN Registry,
 -- Release 99, Dec 2024; NO=15 .. RU=33). NULL = country not registered for IBAN.
@@ -44,7 +44,11 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     END;
 $$;
 
--- iban_is_valid: structure + registered country + exact per-country length + MOD-97.
+-- iban_is_valid: structure (2 alpha, 2 digit, rest alnum) + registered country +
+-- exact per-country length + MOD-97 == 1. The non-bypassable DB authority behind
+-- the accounts/beneficiaries IBAN checksum CHECKs (core-banking / features below).
+-- IMMUTABLE + a bounded per-character fold (accumulator stays < 9700, no bignum) →
+-- cheap enough for a per-insert CHECK.
 CREATE OR REPLACE FUNCTION iban_is_valid(p_iban TEXT) RETURNS BOOLEAN
 LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
 DECLARE
@@ -79,8 +83,10 @@ BEGIN
 END;
 $$;
 
--- iban_generate: build a checksum-valid IBAN; reject unknown country / wrong BBAN length
--- so the generator cannot mint an IBAN its own validator (and Go's) would reject.
+-- iban_generate: build a checksum-valid IBAN from a country code + BBAN; reject an
+-- unknown country / wrong BBAN length so the generator cannot mint an IBAN its own
+-- validator (and Go's) would reject. check digits = 98 - mod97(BBAN || CC || '00').
+-- Used by the seeds.
 CREATE OR REPLACE FUNCTION iban_generate(p_country TEXT, p_bban TEXT) RETURNS TEXT
 LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE cc TEXT; bban TEXT; want INT; rot TEXT; rem INT := 0; i INT; code INT; chk INT;
@@ -108,66 +114,21 @@ BEGIN
 END;
 $$;
 
--- Beneficiaries store an IBAN too (00016). 00022 constrained only accounts.iban;
--- close the gap so every persisted IBAN passes the same checksum authority.
-ALTER TABLE beneficiaries
-    ADD CONSTRAINT beneficiaries_iban_checksum CHECK (iban_is_valid(iban));
+-- mask_name keeps the first letter of each word and stars the rest:
+-- 'Alice Anderson' -> 'A**** A*******'. In Postgres' regex, \Y is the
+-- non-word-boundary assertion, so \Y\w matches a word char that is NOT at a word
+-- boundary, i.e. every letter except each word's first. Used by confirmation-of-payee
+-- (resolve_account_by_iban) and the guided-transfer resolver (features below).
+CREATE OR REPLACE FUNCTION mask_name(p_name TEXT) RETURNS TEXT AS $$
+    SELECT regexp_replace(COALESCE(p_name, ''), '\Y\w', '*', 'g');
+$$ LANGUAGE sql IMMUTABLE;
 
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-
-ALTER TABLE beneficiaries DROP CONSTRAINT IF EXISTS beneficiaries_iban_checksum;
-
--- Restore the 00022 checksum-only (length-blind) bodies, then drop the helper.
-CREATE OR REPLACE FUNCTION iban_is_valid(p_iban TEXT) RETURNS BOOLEAN
-LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
-DECLARE
-    s    TEXT;
-    rot  TEXT;
-    rem  INT := 0;
-    i    INT;
-    code INT;
-BEGIN
-    IF p_iban IS NULL THEN
-        RETURN NULL;
-    END IF;
-    s := upper(regexp_replace(p_iban, '\s', '', 'g'));
-    IF s !~ '^[A-Z]{2}[0-9]{2}[A-Z0-9]+$' OR length(s) < 15 OR length(s) > 34 THEN
-        RETURN FALSE;
-    END IF;
-    rot := substr(s, 5) || substr(s, 1, 4);
-    FOR i IN 1 .. length(rot) LOOP
-        code := ascii(substr(rot, i, 1));
-        IF code BETWEEN 48 AND 57 THEN
-            rem := (rem * 10 + (code - 48)) % 97;
-        ELSE
-            rem := (rem * 100 + (code - 55)) % 97;
-        END IF;
-    END LOOP;
-    RETURN rem = 1;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION iban_generate(p_country TEXT, p_bban TEXT) RETURNS TEXT
-LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE rot TEXT; rem INT := 0; i INT; code INT; chk INT;
-BEGIN
-    rot := upper(p_bban) || upper(p_country) || '00';
-    FOR i IN 1 .. length(rot) LOOP
-        code := ascii(substr(rot, i, 1));
-        IF code BETWEEN 48 AND 57 THEN
-            rem := (rem * 10 + (code - 48)) % 97;
-        ELSE
-            rem := (rem * 100 + (code - 55)) % 97;
-        END IF;
-    END LOOP;
-    chk := 98 - rem;
-    RETURN upper(p_country) || lpad(chk::text, 2, '0') || upper(p_bban);
-END;
-$$;
-
+DROP FUNCTION IF EXISTS mask_name(TEXT);
+DROP FUNCTION IF EXISTS iban_generate(TEXT, TEXT);
+DROP FUNCTION IF EXISTS iban_is_valid(TEXT);
 DROP FUNCTION IF EXISTS iban_country_length(TEXT);
-
 -- +goose StatementEnd

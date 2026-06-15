@@ -9,7 +9,7 @@
 > **not a re-architecture**. The companion line-level specs it leans on are
 > [`spec-step-up-mfa.md`](spec-step-up-mfa.md) and
 > [`spec-notifications-events.md`](spec-notifications-events.md); the shipped
-> guided endpoint it evolves is [`../archive/spec-guided-transfer-suggestion.md`](../archive/spec-guided-transfer-suggestion.md).
+> guided endpoint it evolves (v1) is documented as-built in [`../06-client-api.md`](../06-client-api.md) §1.
 >
 > **Confidence & hedges.** Facts from EUR-Lex, IETF, the UK PSR and the EU Instant
 > Payments Regulation are high-confidence. EPC primary PDFs (rulebooks, VOP API
@@ -264,7 +264,7 @@ answered as a feature→capability table:
 > roadmap. Open question 5.6 resolved per the recommendation: the client picks once per
 > `from_account`/amount change (matches the existing clear-on-change behaviour).
 
-> Evolves the shipped [`../archive/spec-guided-transfer-suggestion.md`](../archive/spec-guided-transfer-suggestion.md).
+> Evolves the shipped guided-transfer v1 endpoint (as-built: [`../06-client-api.md`](../06-client-api.md) §1).
 > Still **read-only; never moves money** — selecting a suggestion still goes
 > through `POST /transfers` (idempotency-key). Same privacy envelope as
 > `/beneficiaries/resolve` (masked name + iban + account_id only).

@@ -32,14 +32,14 @@ stateDiagram-v2
 
 **Terminal states** (`posted` can still be `reversed`): `failed`, `canceled`,
 `reversed`. There is no edit and no delete — only forward transitions and
-reversing entries. This is what makes the history trustworthy (P4).
+reversing entries. That is what makes the history trustworthy.
 
-> **Why two phases?** You chose the full lifecycle, so reserve (`pending`+hold)
-> and settle (`posted`+ledger) are distinct. This models real authorization:
-> a hold reserves `available` funds immediately, while the actual ledger posting
-> can happen now (synchronous) or later (deferred settlement). The PoC default is
-> to post immediately after request (see §5 `transfer()` convenience), but the
-> states remain first-class so the deferred path exists.
+> **Why two phases?** Reserve (`pending`+hold) and settle (`posted`+ledger) are
+> distinct, modelling real authorization: a hold reserves `available` funds
+> immediately, while the actual ledger posting can happen now (synchronous) or
+> later (deferred settlement). The default is to post immediately after request
+> (see §5 `transfer()` convenience), but the states remain first-class so the
+> deferred path exists.
 
 ---
 
@@ -264,10 +264,9 @@ END;
 $$;
 ```
 
-This is the principled replacement for tf-backend's `admin_credit_account` /
-direct-balance-write TODO: an admin credit is just a `deposit`, fully on the
-ledger, fully reconcilable, and the `external_clearing` balance tells you exactly
-how much money has entered the bank.
+An admin credit is just a `deposit`, fully on the ledger, fully reconcilable —
+there is no direct-balance write anywhere. The `external_clearing` balance tells
+you exactly how much money has entered the bank.
 
 ### 2.6 `expire_holds` — batch sweep (scheduler-driven)
 
@@ -288,7 +287,8 @@ END;
 $$;
 ```
 
-Run by an in-process Go ticker for the PoC (could be `pg_cron` in production).
+Run by the in-process maintenance sweep (advisory-locked; could be `pg_cron` or a
+scheduled job instead — see [`04-deployment.md`](04-deployment.md) §3).
 
 ### 2.7 `reconcile` — assert the invariants
 
@@ -317,8 +317,8 @@ $$;
 
 ## 3. Idempotency — the contract with the API
 
-> Your preference: idempotency at the DB level so there is **no business
-> confusion on the API backend**. Here is exactly what the API can assume.
+> Idempotency lives at the DB level, so the API carries **no business logic** of
+> its own. Here is exactly what the API can assume.
 
 **The rule the API relies on:** *calling a money-moving function twice with the
 same idempotency key has the same effect as calling it once, and returns the same
@@ -344,7 +344,7 @@ What this buys each layer:
   original transfer, never a duplicate.
 - **Operator**: a double-click on "Post" or "Credit" can't create two movements.
 
-Three classes of idempotency in bank0, matching your "both" choice:
+Four classes of idempotency in bank0:
 
 | Class | Mechanism | Example |
 |-------|-----------|---------|
@@ -382,11 +382,10 @@ processed").
 > `db/smoke_test.sql` (a direct balance UPDATE raises `restrict_violation`).
 
 > **Balance-after detail.** `balance_after` needs the post-update balance, so the
-> cleanest implementation is a `BEFORE INSERT` trigger that reads the current
-> `accounts.balance_minor` under the row lock already held by `post_transfer`,
-> computes `balance_after = balance_minor + signed_amount`, sets it on `NEW`, and
-> applies the `UPDATE accounts`. Documented as one logical "balance-follows-ledger"
-> step; may be split across BEFORE/AFTER in the migration.
+> `BEFORE INSERT` trigger reads the current `accounts.balance_minor` under the row
+> lock already held by `post_transfer`, computes
+> `balance_after = balance_minor + signed_amount`, sets it on `NEW`, and applies
+> the `UPDATE accounts` — one logical "balance-follows-ledger" step.
 
 The immutability trigger is what lets the rest of the system *trust* the ledger:
 nothing — not a buggy function, not a stray `psql` `UPDATE`, not the admin UI —

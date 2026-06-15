@@ -316,7 +316,7 @@ func (s *Server) consoleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.html(w)
-		_ = template.CreateUserForm("Could not create user: "+dbErrorMessage(err)).Render(r.Context(), w)
+		_ = template.CreateUserForm("Could not create user: "+s.dbFlash(r, err)).Render(r.Context(), w)
 		return
 	}
 	refresh(w)
@@ -339,12 +339,12 @@ func (s *Server) renderUserDetail(w http.ResponseWriter, r *http.Request, id uui
 	ctx := r.Context()
 	u, err := s.pg.Queries.GetUserByID(ctx, id)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	accts, err := s.pg.Queries.ListAccountsByUser(ctx, id)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	role := ""
@@ -378,7 +378,7 @@ func (s *Server) consoleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Status:      status,
 	})
 	if err != nil {
-		s.renderUserDetail(w, r, id, "Could not save: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, id, "Could not save: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -400,7 +400,7 @@ func (s *Server) consoleRevokeSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := s.pg.RevokeUserRefresh(r.Context(), id)
 	if err != nil {
-		s.renderUserDetail(w, r, id, "Could not revoke sessions: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, id, "Could not revoke sessions: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -439,7 +439,7 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		TransferLimitMinor: limit,
 	})
 	if err != nil {
-		s.renderUserDetail(w, r, userID, "Could not create account: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, userID, "Could not create account: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -453,7 +453,7 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) accountOwnerOrFail(w http.ResponseWriter, r *http.Request, acctID uuid.UUID) (uuid.UUID, bool) {
 	owner, err := s.pg.Queries.AccountOwner(r.Context(), acctID)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return uuid.Nil, false
 	}
 	if owner == nil {
@@ -523,14 +523,14 @@ func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir co
 	ctx := r.Context()
 	ra, err := s.pg.RequiresApproval(ctx, amount)
 	if err != nil {
-		s.renderUserDetail(w, r, owner, "Could not read policy: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, owner, "Could not read policy: "+s.dbFlash(r, err))
 		return
 	}
 	if ra.Required {
 		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": dir.kind, "account_id": acctID.String()})
 		mc, err := s.pg.RequestMoneyWithApproval(ctx, actor.UserID, key, acctID, amount, dir.transferKind, dir.requestDesc, detail)
 		if err != nil {
-			s.renderUserDetail(w, r, owner, "Could not submit for approval: "+dbErrorMessage(err))
+			s.renderUserDetail(w, r, owner, "Could not submit for approval: "+s.dbFlash(r, err))
 			return
 		}
 		refresh(w)
@@ -541,7 +541,7 @@ func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir co
 	}
 	tid, err := dir.post(key, acctID, amount)
 	if err != nil {
-		s.renderUserDetail(w, r, owner, "Could not "+dir.kind+": "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, owner, "Could not "+dir.kind+": "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -591,7 +591,7 @@ func (s *Server) consoleAccountStatus(w http.ResponseWriter, r *http.Request) {
 	if err := s.pg.Queries.SetAccountStatus(r.Context(), sqlc.SetAccountStatusParams{
 		AccountID: acctID, Status: sqlc.AccountStatus(st),
 	}); err != nil {
-		s.renderUserDetail(w, r, owner, "Could not change status: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, owner, "Could not change status: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -613,7 +613,7 @@ func (s *Server) consoleAccountLimit(w http.ResponseWriter, r *http.Request) {
 	if err := s.pg.Queries.UpdateTransferLimit(r.Context(), sqlc.UpdateTransferLimitParams{
 		AccountID: acctID, TransferLimitMinor: limit,
 	}); err != nil {
-		s.renderUserDetail(w, r, owner, "Could not set limit: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, owner, "Could not set limit: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -629,7 +629,7 @@ func (s *Server) consoleAccountDefault(w http.ResponseWriter, r *http.Request) {
 	if err := s.pg.Queries.SetDefaultAccount(r.Context(), sqlc.SetDefaultAccountParams{
 		UserID: owner, AccountID: acctID,
 	}); err != nil {
-		s.renderUserDetail(w, r, owner, "Could not set default: "+dbErrorMessage(err))
+		s.renderUserDetail(w, r, owner, "Could not set default: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -697,7 +697,7 @@ func (s *Server) consolePostTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.pg.Queries.PostTransfer(r.Context(), id); err != nil {
-		s.renderTransfers(w, r, "Could not post: "+dbErrorMessage(err))
+		s.renderTransfers(w, r, "Could not post: "+s.dbFlash(r, err))
 		return
 	}
 	s.audit(r.Context(), su, "post_transfer", &id, nil)
@@ -711,7 +711,7 @@ func (s *Server) consoleCancelTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	reason := "cancelled via console by " + su.Username
 	if _, err := s.pg.Queries.CancelTransfer(r.Context(), sqlc.CancelTransferParams{ID: id, Reason: reason}); err != nil {
-		s.renderTransfers(w, r, "Could not cancel: "+dbErrorMessage(err))
+		s.renderTransfers(w, r, "Could not cancel: "+s.dbFlash(r, err))
 		return
 	}
 	s.audit(r.Context(), su, "cancel_transfer", &id, map[string]any{"reason": reason})
@@ -760,7 +760,7 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 		AccountID: id, Cursor: ts, CursorID: cid, PageLimit: limit + 1,
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(e sqlc.AccountStatementRow) (time.Time, uuid.UUID) {
@@ -774,7 +774,7 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 	}
 	acct, err := s.pg.Queries.GetAccount(ctx, id)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	_ = template.StatementView(acct, rows, prev, next).Render(ctx, w)
@@ -793,12 +793,12 @@ func (s *Server) renderTransferDetail(w http.ResponseWriter, r *http.Request, id
 	ctx := r.Context()
 	t, err := s.pg.Queries.GetTransferDetail(ctx, id)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	legs, err := s.pg.Queries.TransferLegs(ctx, id)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	holds, _ := s.pg.Queries.HoldForTransfer(ctx, id)
@@ -831,7 +831,7 @@ func (s *Server) consoleReverse(w http.ResponseWriter, r *http.Request) {
 		ID: id, IdempotencyKey: key, Reason: reason,
 	})
 	if err != nil {
-		s.renderTransferDetail(w, r, id, "Could not reverse: "+dbErrorMessage(err))
+		s.renderTransferDetail(w, r, id, "Could not reverse: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -890,7 +890,7 @@ func (s *Server) consoleApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	tid, err := s.pg.Queries.ApproveRequest(r.Context(), sqlc.ApproveRequestParams{RequestID: id, Approver: actor.UserID})
 	if err != nil {
-		s.renderApprovals(w, r, "Could not approve: "+dbErrorMessage(err))
+		s.renderApprovals(w, r, "Could not approve: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -912,7 +912,7 @@ func (s *Server) consoleReject(w http.ResponseWriter, r *http.Request) {
 		RequestID: id, Approver: actor.UserID, Reason: "rejected via console by " + actor.Username,
 	})
 	if err != nil {
-		s.renderApprovals(w, r, "Could not reject: "+dbErrorMessage(err))
+		s.renderApprovals(w, r, "Could not reject: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)
@@ -997,7 +997,7 @@ func (s *Server) consoleResolveDispute(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.pg.Queries.ResolveDispute(r.Context(), sqlc.ResolveDisputeParams{
 		DisputeID: id, Resolver: actor.UserID, Status: sqlc.DisputeStatus(status), Note: note,
 	}); err != nil {
-		s.renderDisputes(w, r, "Could not resolve: "+dbErrorMessage(err))
+		s.renderDisputes(w, r, "Could not resolve: "+s.dbFlash(r, err))
 		return
 	}
 	refresh(w)

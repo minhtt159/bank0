@@ -7,11 +7,11 @@
 > error mapping), the main endpoints, the hardest problem, an S/M/L/XL effort
 > estimate, and recommended sequencing.
 >
-> **This doc is the index for `docs/specs/`.** The line-level specs split into two
-> sets: the **open backlog** still in this directory, and the **shipped** specs moved
-> to [`../archive/`](../archive/) once implemented (each carries an IMPLEMENTED banner;
-> as-built behavior lives in [`../06-client-api.md`](../06-client-api.md) /
-> [`../05-admin-ui.md`](../05-admin-ui.md), so the archived files are design rationale only).
+> **This doc is the index for `docs/specs/`.** Only the **open backlog** lives here as
+> line-level specs. Once a feature ships, its as-built behaviour becomes the source of
+> truth — [`../06-client-api.md`](../06-client-api.md) / [`../05-admin-ui.md`](../05-admin-ui.md)
+> for the surfaces and `db/migrations/` for the schema + PL/pgSQL — and the planning spec
+> is retired rather than kept as a separate file.
 >
 > **Open backlog** (`docs/specs/`):
 >
@@ -23,20 +23,17 @@
 > | [`spec-notifications-events.md`](spec-notifications-events.md) | `GET /me/events` feed | §5 (schedule ran/failed), §7 (request received) |
 > | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (idempotency HTTP contract, server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
 >
-> **Shipped** (`docs/archive/`):
->
-> | Spec | Covers | Relates to P3 § |
-> |------|--------|-----------------|
-> | [`spec-self-service-profile.md`](../archive/spec-self-service-profile.md) | `PATCH /me` profile edit | §1 (users lifecycle) |
-> | [`spec-change-password.md`](../archive/spec-change-password.md) | `POST /me/password` | §1 |
-> | [`spec-sessions-devices.md`](../archive/spec-sessions-devices.md) | `GET`/`DELETE /me/sessions` | §1 |
-> | [`spec-ledger-pagination-and-filters.md`](../archive/spec-ledger-pagination-and-filters.md) | keyset cursor + server-side ledger filters | §4 (insights aggregates) |
-> | [`spec-list-my-transfers.md`](../archive/spec-list-my-transfers.md) | `GET /transfers` across accounts | §4, §7 |
-> | [`spec-disputes.md`](../archive/spec-disputes.md) | "I don't recognise this" → dispute claim | §3 (card chargebacks build on it) |
-> | [`spec-guided-transfer-suggestion.md`](../archive/spec-guided-transfer-suggestion.md) | `GET /transfers/suggestion` | (fraudbank UX) |
+> **Already shipped** (no longer tracked here; as-built in the reference docs):
+> self-service profile (`PATCH /me`), password change (`POST /me/password`),
+> sessions/devices (`GET`/`DELETE /me/sessions`), keyset ledger pagination + filters,
+> list-my-transfers (`GET /transfers`), disputes, guided-transfer v1
+> (`GET /transfers/suggestion` — the v2 "mule menu" in
+> [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) §5 supersedes it),
+> and the e2e harness (Go split-mode, Worker proxy, Playwright PWA). See
+> [`../06-client-api.md`](../06-client-api.md) / [`../05-admin-ui.md`](../05-admin-ui.md).
 >
 > The gap backlog and BFF decision are in
-> [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md); the auth/MFA design in
+> [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md); the auth/MFA design in
 > [`../06-client-api.md`](../06-client-api.md) §6; the ledger invariants in
 > [`../03-ledger-lifecycle-idempotency.md`](../03-ledger-lifecycle-idempotency.md).
 
@@ -198,7 +195,7 @@ trivial; pots across currencies inherit §6's hard problems.
 
 ## 3. Cards
 
-**Today:** no card domain at all. [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md)
+**Today:** no card domain at all. [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md)
 marks cards **out of scope long-term, revisit only with a card-processor integration
 story.** threatbank had card UI; bank0 has no card entity.
 
@@ -460,7 +457,7 @@ conservative** (round so the bank never loses fractions; the spread covers it) a
 rounding residue must land in a GL account so `reconcile` stays exact *per currency*.
 Rate **staleness/quote expiry** (a quote must be honored or rejected, never silently
 re-priced) and rate-source trust are operational risks. And the migration itself is
-delicate: relaxing a CHECK that the whole ledger has assumed since `00003`.
+delicate: relaxing a CHECK that the whole ledger has assumed since `00005_transfers.sql`.
 
 ### Effort
 
@@ -482,7 +479,7 @@ against `reconcile` before any customer touches it.
 ## 7. P2P-by-handle, request-money, bill-splitting
 
 **Today:** transfers are by `credit_account_id` (a UUID); beneficiaries
-(`00016_beneficiaries.sql`) save payees by IBAN with confirmation-of-payee masking.
+(the `beneficiaries` table in `00008_features.sql`) save payees by IBAN with confirmation-of-payee masking.
 There are no handles/aliases and no "request money" direction.
 
 **Rationale.** Consumer P2P (Venmo/Twint/Revolut) is: pay a **handle** (@alice) not an

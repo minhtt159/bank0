@@ -4,7 +4,7 @@
 > **Completes** the design sketched in [`06-client-api.md`](../06-client-api.md)
 > §6.1 (TOTP MFA) and §6.2 (step-up) — read those first; this fills in tables,
 > SQLSTATEs, the TOTP math, JWT claims, and the exact step-up gate. Backlog
-> reference: [`09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md) P2
+> reference: [`09-fraudbank-integration.md`](../09-fraudbank-integration.md) P2
 > ("Step-up auth + TOTP MFA … implement 06 §6.1/6.2 as written, don't redesign").
 
 ---
@@ -170,10 +170,13 @@ client keys on:
 
 ## 3. Data model & migration
 
-`db/migrations/00018_mfa.sql` (the number reserved by
-[`06-client-api.md`](../06-client-api.md) §6 — "Tables land in `00018_mfa.sql`").
-Note `spec-change-password.md` also eyes `00018`; **this file takes `00018`**, the
-password spec falls to `00019`. Coordinate at implement time.
+`db/migrations/00018_mfa.sql` (the MFA tables flagged by
+[`06-client-api.md`](../06-client-api.md) §6 — "Tables land in a new migration").
+Migrations are now a 9-file domain baseline (`00001_foundation.sql` …
+`00009_system_seed.sql`), so take the next free number (`00010`) after
+it at implement time (`00018` is illustrative). Note `spec-change-password.md` also
+adds a migration; **whichever lands first takes the next free number**, the other falls
+to the one after. Coordinate at implement time.
 
 ```sql
 -- +goose Up

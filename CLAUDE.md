@@ -44,7 +44,9 @@ route that collides with the client's `/transfers/{id}` — `GET /transfers/pend
 
 ```
 api/openapi.yaml            HTTP contract (client+admin tags) -> genclient/genadmin
-db/migrations/*.sql         goose migrations (schema + ALL PL/pgSQL functions)
+db/migrations/*.sql         goose migrations — 9 domain files: foundation, iban,
+                            users, accounts, transfers, maker_checker, maintenance,
+                            features, system_seed (schema + ALL PL/pgSQL)
 db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.gen.go
 internal/db/bank.go         hand-written pgx for set-returning fns sqlc can't expand
 internal/db/auth.go         sessions + refresh-token DB calls (hand-written pgx)
@@ -87,7 +89,7 @@ The integration tests (DB + HTTP) are **DSN-gated**: they skip unless
 `TEST_DATABASE_DSN` is set, and `TestMain` migrates the target DB fresh. **Postgres
 18 is the default** everywhere (local dev + CI). Postgres 17 (the Supabase deploy
 target) is supported as an **opt-in** via the `uuidv7()` polyfill in migration
-`00001` (a no-op on PG18+, where the built-in wins). Don't go below 17.
+`00001_foundation.sql` (a no-op on PG18+, where the built-in wins). Don't go below 17.
 
 ```bash
 # preferred: Taskfile (deploy/docker-compose.dev.yml, postgres:18)

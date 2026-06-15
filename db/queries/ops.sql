@@ -3,6 +3,3 @@
 
 -- name: ExpireHolds :one
 SELECT expire_holds() AS expired_count;
-
--- name: CleanupIdempotencyKeys :one
-SELECT cleanup_idempotency_keys() AS deleted_count;

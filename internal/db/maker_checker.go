@@ -21,8 +21,8 @@ type MakerCheckerRequest struct {
 
 // RequestMoneyWithApproval stages an above-threshold console credit/withdrawal for
 // maker-checker ATOMICALLY (MAKER-CHECKER-ATOMICITY): one DB function creates the
-// PENDING transfer + hold (the same request_transfer path request_deposit/
-// request_withdrawal use) AND inserts the 4-eyes approval row, in one transaction.
+// PENDING transfer + hold (via the same request_transfer path) AND inserts the
+// 4-eyes approval row, in one transaction.
 // Either both commit or neither does — no orphaned hold without a queue row.
 //
 // kind is the transfer_kind direction: TransferKindDeposit (money in, external ->

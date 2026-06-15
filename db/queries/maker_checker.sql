@@ -1,18 +1,3 @@
--- name: RequestDeposit :one
-SELECT request_deposit(
-    sqlc.arg(idempotency_key)::text,
-    sqlc.arg(account_id)::uuid,
-    sqlc.arg(amount_minor)::bigint,
-    sqlc.arg(description)::text
-) AS transfer_id;
-
--- name: CreateApprovalRequest :one
-SELECT create_approval_request(
-    sqlc.arg(maker)::uuid,
-    sqlc.arg(transfer_id)::uuid,
-    sqlc.arg(detail)::jsonb
-) AS id;
-
 -- name: ApproveRequest :one
 SELECT approve_request(sqlc.arg(request_id)::uuid, sqlc.arg(approver)::uuid) AS transfer_id;
 
@@ -41,11 +26,3 @@ WHERE aa.action = 'approval_request' AND aa.approved_by IS NULL AND t.status = '
        OR (aa.created_at, aa.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
 ORDER BY aa.created_at DESC, aa.id DESC
 LIMIT sqlc.arg(page_limit)::int;
-
--- name: RequestWithdrawal :one
-SELECT request_withdrawal(
-    sqlc.arg(idempotency_key)::text,
-    sqlc.arg(account_id)::uuid,
-    sqlc.arg(amount_minor)::bigint,
-    sqlc.arg(description)::text
-) AS transfer_id;

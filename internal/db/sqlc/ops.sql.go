@@ -9,17 +9,6 @@ import (
 	"context"
 )
 
-const cleanupIdempotencyKeys = `-- name: CleanupIdempotencyKeys :one
-SELECT cleanup_idempotency_keys() AS deleted_count
-`
-
-func (q *Queries) CleanupIdempotencyKeys(ctx context.Context) (int32, error) {
-	row := q.db.QueryRow(ctx, cleanupIdempotencyKeys)
-	var deleted_count int32
-	err := row.Scan(&deleted_count)
-	return deleted_count, err
-}
-
 const expireHolds = `-- name: ExpireHolds :one
 
 SELECT expire_holds() AS expired_count

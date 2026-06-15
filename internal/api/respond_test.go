@@ -1,8 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -12,7 +16,7 @@ import (
 )
 
 // A list endpoint must emit `[]` not `null` even when the DB returns a nil slice;
-// non-slice values are untouched. (docs/09-fraudbank-bff-plan.md §0.2)
+// non-slice values are untouched. (docs/09-fraudbank-integration.md §0.2)
 func TestWriteJSONNilSliceIsEmptyArray(t *testing.T) {
 	cases := []struct {
 		name string
@@ -77,8 +81,10 @@ func TestMapDBError(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			rec := httptest.NewRecorder()
-			mapDBError(rec, c.err)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			s.mapDBError(rec, req, c.err)
 			if rec.Code != c.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, c.wantStatus)
 			}
@@ -92,6 +98,40 @@ func TestMapDBError(t *testing.T) {
 				t.Errorf("error code = %q, want %q", body.Error, c.wantCode)
 			}
 		})
+	}
+}
+
+// The catch-all 500 branch MUST log the full underlying error server-side (so
+// operators aren't blind to genuine internal faults) while the client body stays
+// curated and leak-free. The mapped business branches must NOT log.
+func TestMapDBErrorLogsUnmapped500(t *testing.T) {
+	var logBuf bytes.Buffer
+	s := &Server{log: slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelError}))}
+
+	// Unmapped error -> 500: the raw error must reach the log, not the client.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	s.mapDBError(rec, req, errors.New("function does_not_exist() does not exist"))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "does_not_exist") {
+		t.Errorf("client body leaked the raw error: %q", rec.Body.String())
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "unmapped db error -> 500") {
+		t.Errorf("500 path did not log the error; log = %q", logged)
+	}
+	if !strings.Contains(logged, "does_not_exist") {
+		t.Errorf("500 log did not carry the underlying error; log = %q", logged)
+	}
+
+	// A mapped business branch (here 23505 -> 409) must not log.
+	logBuf.Reset()
+	rec = httptest.NewRecorder()
+	s.mapDBError(rec, req, pgErr("23505", "dup"))
+	if logBuf.Len() != 0 {
+		t.Errorf("mapped business branch should not log; got %q", logBuf.String())
 	}
 }
 

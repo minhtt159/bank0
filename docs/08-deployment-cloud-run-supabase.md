@@ -1,12 +1,10 @@
 # bank0 — Deployment & CI/CD (Supabase · Cloud Run · Cloudflare)
 
 > The **managed/serverless** deployment path: Supabase for Postgres, Google Cloud
-> Run for the two Go surfaces, and a Cloudflare Worker for the PWA. This replaces
-> the self-managed Postgres + Kubernetes/Helm path in [`04-deployment.md`](04-deployment.md)
-> (which remains a supported alternative). The **application code is identical** —
+> Run for the two Go surfaces, and a Cloudflare Worker for the PWA. This is an
+> alternative to the self-managed Postgres + Kubernetes/Helm path in
+> [`04-deployment.md`](04-deployment.md). The **application code is identical** —
 > same image, same run modes, same migrations; only the hosting substrate changes.
->
-> Status: **design** (this document) — no infra is provisioned yet.
 
 ---
 
@@ -43,17 +41,13 @@ Storage. bank0 keeps its own JWT + cookie-session layer.
 
 ## 1. Database — Supabase (Postgres 17)
 
-### 1.1 The one blocker: `uuidv7()` is PG18-only, Supabase is PG17
+### 1.1 `uuidv7()` is PG18-only; Supabase runs PG17
 
-The schema uses native **`uuidv7()`** in 10 places ([`00003`](../db/migrations/00003_init_tables.sql),
-[`00016`](../db/migrations/00016_beneficiaries.sql), [`00017`](../db/migrations/00017_refresh_tokens.sql),
-[`00019`](../db/migrations/00019_guided_scenarios.sql), [`00020`](../db/migrations/00020_disputes.sql)),
-which only exists in Postgres 18. The live Supabase project is `17.6.1.127`, so
-these migrations fail as written.
-
-**Fix (chosen): a version-gated polyfill** in [`00001_init_extensions.sql`](../db/migrations/00001_init_extensions.sql).
-Define a pure-SQL `uuidv7()` **only when the server is < PG18**, so it is a no-op
-once Supabase ships 18 (the built-in wins and we drop the polyfill):
+The schema defaults every PK to native **`uuidv7()`**, which only exists in
+Postgres 18, while Supabase runs Postgres 17. A **version-gated polyfill** in
+[`00001_foundation.sql`](../db/migrations/00001_foundation.sql) bridges the gap:
+it defines a pure-SQL `uuidv7()` **only when the server is < PG18**, so it is a
+no-op once Supabase ships 18 (the built-in wins, and the polyfill can be dropped):
 
 ```sql
 -- +goose Up
@@ -73,9 +67,9 @@ begin
 end $$;
 ```
 
-> `gen_random_uuid()` is built into Postgres ≥ 13, so no `pgcrypto` needed. This
-> produces a spec-shaped, time-ordered v7 UUID — same monotonic index locality the
-> schema relies on.
+> `gen_random_uuid()` is built into Postgres ≥ 13, so no `pgcrypto` is needed. This
+> produces a spec-shaped, time-ordered v7 UUID — the same monotonic index locality
+> the schema relies on.
 
 **Test the same version as prod.** CI's test service defaults to `postgres:18`,
 with **`postgres:17` opt-in** via workflow_dispatch so the polyfill path Supabase
@@ -293,41 +287,41 @@ bring-up; called out so the pipeline can grow into it.
 
 ---
 
-## 5. What changed in the repo (implemented)
+## 5. What the repo provides
 
-The deltas were small and additive — no application logic, handler, or ledger
-changes; the engine is untouched:
+This path needs no application logic, handler, or ledger changes — the engine is
+the same as the self-managed path. The supporting pieces:
 
-1. ✅ **[`db/migrations/00001_init_extensions.sql`](../db/migrations/00001_init_extensions.sql)** —
-   version-gated `uuidv7()` polyfill (§1.1). Verified on PG17: all 31 migrations
-   apply, reverse (`up→reset→up`), and the full DB+HTTP suite passes; the polyfill
-   emits spec-valid, time-ordered v7 UUIDs.
-2. ✅ **[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)** — test service
+1. **[`db/migrations/00001_foundation.sql`](../db/migrations/00001_foundation.sql)** —
+   the version-gated `uuidv7()` polyfill (§1.1). On PG17 all migrations apply,
+   reverse (`up→reset→up`), and emit spec-valid, time-ordered v7 UUIDs.
+2. **[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)** — test service
    defaults to `postgres:18` with `17` opt-in via workflow_dispatch (Supabase
    parity); a dedicated migration-reversibility job (up→reset→up) pinned to
    `postgres:17`; plus the `generate-drift` gate.
-3. ✅ **[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)** —
+3. **[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)** —
    `build-push`, `migrate`, `deploy-api`, `deploy-portal`, `deploy-maintenance`,
    `deploy-pwa`, all behind the `prod` Environment approval gate.
-4. ✅ **[`internal/config/config.go`](../internal/config/config.go)** — bind Cloud
-   Run's `$PORT` (in addition to `APP_SERVER_PORT`). Pool max already honors
-   `APP_DATABASE_MAX_OPEN_CONNS`; the listener already binds `0.0.0.0`.
-5. ✅ **[`deploy/cloudrun/README.md`](../deploy/cloudrun/README.md)** — one-time
+4. **[`internal/config/config.go`](../internal/config/config.go)** — binds Cloud
+   Run's `$PORT` (in addition to `APP_SERVER_PORT`); the pool max honors
+   `APP_DATABASE_MAX_OPEN_CONNS` and the listener binds `0.0.0.0`.
+5. **[`deploy/cloudrun/README.md`](../deploy/cloudrun/README.md)** — one-time
    provisioning (APIs, Artifact Registry, WIF, Secret Manager, Scheduler, domains).
 
-**Still operator-driven (not code):** create the GCP project + run the provisioning
-in the README, set the GitHub `prod` reviewers + variables/secrets, choose §3.2
-option (1) or (2) for `api.*`/`portal.*`, and point the Worker's `API_ORIGIN`
-([`worker/wrangler.toml`](../worker/wrangler.toml)) at the api service URL.
+**Operator-driven setup (not code):** create the GCP project and run the
+provisioning in the README, set the GitHub `prod` reviewers + variables/secrets,
+choose §3.2 option (1) or (2) for `api.*`/`portal.*`, and point the Worker's
+`API_ORIGIN` ([`worker/wrangler.toml`](../worker/wrangler.toml)) at the api service
+URL.
 
 ---
 
-## 6. Open decisions / risks
+## 6. Decisions deferred to bring-up
 
-| Item | Status |
+| Item | Approach |
 |---|---|
-| `api.*` / `portal.*` fronting — domain mapping vs LB+NEG (§3.2) | **decide at implementation** |
+| `api.*` / `portal.*` fronting — domain mapping vs LB+NEG (§3.2) | decide at provisioning time |
 | Supabase connection ceiling vs Cloud Run `max-instances` × pool (§1.2) | sized conservatively; revisit under load |
-| Cold-start latency on `api` | accept; or `--min-instances=1` if needed |
-| PG18 arrival on Supabase | polyfill becomes a no-op; drop it later |
+| Cold-start latency on `api` | accept; or `--min-instances=1` if steady latency is needed |
+| PG18 arrival on Supabase | the polyfill becomes a no-op; drop it then |
 | Cost | idles ~$0 (scale-to-zero); pay-per-use on traffic; Supabase free/pro tier; Cloudflare Worker free tier |

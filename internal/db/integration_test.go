@@ -256,16 +256,16 @@ func TestMakerCheckerFourEyes(t *testing.T) {
 	checker := mkCustomer(t, pg)
 	acct := mkAccount(t, pg, mkCustomer(t, pg))
 
-	var tid uuid.UUID
-	if err := pg.Pool.QueryRow(ctx,
-		`SELECT request_deposit($1,$2,$3,$4)`, uuid.NewString(), acct, int64(2_000_000), "big credit").Scan(&tid); err != nil {
-		t.Fatalf("request_deposit: %v", err)
+	// Stage the above-threshold deposit + the approval-queue row atomically via the
+	// single maker-checker entrypoint (request_money_with_approval). It runs
+	// request_transfer (PENDING transfer + hold) and inserts the admin_actions row in
+	// one txn — the old request_deposit + create_approval_request pair is gone.
+	mc, err := pg.RequestMoneyWithApproval(ctx, maker, uuid.NewString(), acct, 2_000_000,
+		sqlc.TransferKindDeposit, "big credit", nil)
+	if err != nil {
+		t.Fatalf("request_money_with_approval: %v", err)
 	}
-	var reqID uuid.UUID
-	if err := pg.Pool.QueryRow(ctx,
-		`SELECT create_approval_request($1,$2,$3)`, maker, tid, []byte(`{}`)).Scan(&reqID); err != nil {
-		t.Fatalf("create_approval_request: %v", err)
-	}
+	tid, reqID := mc.TransferID, mc.RequestID
 
 	// maker approving their own request must be refused (4-eyes)
 	if _, err := pg.Pool.Exec(ctx, `SELECT approve_request($1,$2)`, reqID, maker); err == nil {
@@ -373,25 +373,22 @@ func TestWithdrawAndMakerCheckerWithdrawal(t *testing.T) {
 	}
 	reconcileClean(t, pg)
 
-	// Large withdrawal staged PENDING: the hold reserves funds, ledger unchanged.
-	tid, err := pg.Queries.RequestWithdrawal(ctx, sqlc.RequestWithdrawalParams{
-		IdempotencyKey: uuid.NewString(), AccountID: acct, AmountMinor: 5_000, Description: "big wd",
-	})
+	// Large withdrawal staged PENDING via the maker-checker entrypoint
+	// (request_money_with_approval): it stages the PENDING transfer + hold AND the
+	// approval-queue row in one txn. The hold reserves funds; the ledger is unchanged.
+	maker := mkCustomer(t, pg)
+	checker := mkCustomer(t, pg)
+	mc, err := pg.RequestMoneyWithApproval(ctx, maker, uuid.NewString(), acct, 5_000,
+		sqlc.TransferKindWithdrawal, "big wd", nil)
 	if err != nil {
-		t.Fatalf("request_withdrawal: %v", err)
+		t.Fatalf("request_money_with_approval: %v", err)
 	}
 	if led, avail := balance(t, pg, acct); led != 7_000 || avail != 2_000 {
 		t.Errorf("pending withdrawal: ledger=%d available=%d, want 7000/2000", led, avail)
 	}
 
 	// A different admin approves -> the withdrawal posts; balance drops.
-	maker := mkCustomer(t, pg)
-	checker := mkCustomer(t, pg)
-	var reqID uuid.UUID
-	if err := pg.Pool.QueryRow(ctx, `SELECT create_approval_request($1,$2,$3)`, maker, tid, []byte(`{}`)).Scan(&reqID); err != nil {
-		t.Fatalf("create_approval_request: %v", err)
-	}
-	if _, err := pg.Pool.Exec(ctx, `SELECT approve_request($1,$2)`, reqID, checker); err != nil {
+	if _, err := pg.Pool.Exec(ctx, `SELECT approve_request($1,$2)`, mc.RequestID, checker); err != nil {
 		t.Fatalf("approve withdrawal: %v", err)
 	}
 	if lb, _ := balance(t, pg, acct); lb != 2_000 {

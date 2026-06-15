@@ -153,7 +153,7 @@ tasks:
       - go vet ./...
 
   dev:docker:
-    desc: Start Postgres (18 by default; PG=17 for Supabase parity) + app with hot-reload
+    desc: Start Postgres + migrate + admin (:8080) + client (:8090) — migrated but UNSEEDED; load data with `task seed` (or `task dev:reset` for a fresh seeded stack)
     env:
       PG_VERSION: '{{.PG | default "18"}}'
     cmds:
@@ -162,6 +162,17 @@ tasks:
   dev:docker:down:
     cmds:
       - docker compose -f deploy/docker-compose.dev.yml down
+
+  dev:reset:
+    desc: Fresh dev stack — drop the DB volume, rebuild, migrate, then load the default seed
+    env:
+      PG_VERSION: '{{.PG | default "18"}}'
+    cmds:
+      - docker compose -f deploy/docker-compose.dev.yml down -v --remove-orphans
+      # up -d blocks until the one-shot migrate completes (admin/client depend on it),
+      # so the schema exists before we seed.
+      - docker compose -f deploy/docker-compose.dev.yml up --build -d
+      - task: seed
 
   migrate:up:
     desc: Apply all pending migrations (reads GOOSE_* from .env)
@@ -181,9 +192,16 @@ tasks:
     cmds:
       - goose -dir db/migrations create {{.CLI_ARGS}} sql
 
-  seed:demo:
-    desc: Load the large IBAN-backed demo seed (db/seed_demo.sql) into the dev `bank0` db (run after migrations)
+  seed:
+    desc: Load the default dev seed (db/seed.sql, idempotent) into the running `bank0` db (run after migrations)
     cmds:
+      - docker compose -f deploy/docker-compose.dev.yml up -d --wait db
+      - docker compose -f deploy/docker-compose.dev.yml exec -T db psql -U admin -d bank0 -v ON_ERROR_STOP=1 < db/seed.sql
+
+  seed:demo:
+    desc: Generate a FRESH random demo seed (db/seed_demo.sql is gitignored — built on the fly) and load it into the dev `bank0` db
+    cmds:
+      - task: seed:demo:gen
       - docker compose -f deploy/docker-compose.dev.yml up -d --wait db
       - docker compose -f deploy/docker-compose.dev.yml exec -T db psql -U admin -d bank0 -v ON_ERROR_STOP=1 < db/seed_demo.sql
 
