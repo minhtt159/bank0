@@ -37,7 +37,7 @@ JWT subject.
 | Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
-| Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer demo: suggests a destination (scenario mule, else own account); `204` if none. Read-only |
+| Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
 | Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
 | Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |

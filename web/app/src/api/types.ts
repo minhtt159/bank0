@@ -122,7 +122,10 @@ export interface Session {
   current?: boolean;
 }
 
-// Guided-transfer demo suggestion. Read-only; never moves money.
+// Guided-transfer demo "mule menu" candidate. Read-only; never moves money. The
+// endpoint returns { options: TransferSuggestion[] } (up to 3 third-party mule
+// accounts). The backend always emits source "scenario"; "own_account" is
+// synthesised client-side as the fallback when options is empty.
 export interface TransferSuggestion {
   account_id: string;
   iban: string;

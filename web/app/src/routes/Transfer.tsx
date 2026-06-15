@@ -44,13 +44,32 @@ export function Transfer() {
     api.beneficiaries().then(setBens).catch((e) => setErr(e.message));
   }, []);
 
-  // Re-ask for a suggestion as the source account / amount change so a scenario can
-  // gate on a threshold. 204 -> null (no banner). Failures are silent: it's a hint.
+  // Guided-transfer "mule menu": fetch up to 3 candidate payees as the source /
+  // amount change, then pick ONE at random to present. If the menu is empty, fall
+  // back to the customer's own other account (the safe stand-in). Failures are
+  // silent — it's a hint, not a blocker.
   useEffect(() => {
     if (!srcId) return;
     const m = parseMajor(amount) ?? undefined;
-    api.transferSuggestion(srcId, m).then(setSuggestion).catch(() => setSuggestion(null));
-  }, [srcId, amount]);
+    api.transferSuggestions(srcId, m).then((menu) => {
+      if (menu.length > 0) {
+        setSuggestion(menu[Math.floor(Math.random() * menu.length)]);
+        return;
+      }
+      const own = accounts.find((a) => a.id !== srcId && !!a.iban);
+      setSuggestion(
+        own
+          ? {
+              account_id: own.id,
+              iban: own.iban as string,
+              owner_name_masked: "Your account",
+              reason: "your account",
+              source: "own_account",
+            }
+          : null,
+      );
+    }).catch(() => setSuggestion(null));
+  }, [srcId, amount, accounts]);
 
   function applySuggestion() {
     if (!suggestion) return;

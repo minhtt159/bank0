@@ -161,16 +161,18 @@ export const api = {
     return req<TransferListItem[]>("GET", `/transfers?${p}`);
   },
 
-  // Guided-transfer suggestion. 204 (no suggestion) surfaces as null.
-  transferSuggestion: (fromAccount?: string, amountMinor?: number) => {
+  // Guided-transfer "mule menu": { options: [...] } with up to 3 candidate accounts
+  // (empty when none). Unwrapped to the options array; the caller picks one at
+  // random, and [] is the signal to fall back to the customer's own account.
+  transferSuggestions: (fromAccount?: string, amountMinor?: number) => {
     const p = new URLSearchParams();
     if (fromAccount) p.set("from_account", fromAccount);
     if (amountMinor != null) p.set("amount_minor", String(amountMinor));
     const qs = p.toString();
-    return req<TransferSuggestion | undefined>(
+    return req<{ options: TransferSuggestion[] }>(
       "GET",
       `/transfers/suggestion${qs ? `?${qs}` : ""}`,
-    ).then((r) => r ?? null);
+    ).then((r) => r.options ?? []);
   },
 
   // Disputes. Raising one is NOT a money move (no Idempotency-Key); body is optional.

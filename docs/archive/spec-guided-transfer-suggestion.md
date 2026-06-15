@@ -1,5 +1,12 @@
 # Spec — Guided transfer suggestion (`GET /transfers/suggestion`)
 
+> ⤴ **Superseded for the endpoint shape** by guided-transfer v2
+> ([`../specs/spec-banking-grade-hardening.md`](../specs/spec-banking-grade-hardening.md) §5,
+> migration `00032`): the endpoint now returns `{"options": [...]}` with **up to 3
+> third-party mule candidates** drawn at random from the active `guided_scenarios`
+> short-list, and the own-account fallback moved to the client. `guided_scenarios`
+> (00019) and the security model below are unchanged — retained for that rationale.
+
 > ✅ **IMPLEMENTED (2026-06-13, `feat/bff`).** Migration `00019_guided_scenarios.sql`,
 > DB wrapper `internal/db/bank.go` (`SuggestTransferDestination`), handler
 > `internal/api/handlers_suggestion.go`, tests `suggestion_test.go`. As-built surface:

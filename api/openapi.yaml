@@ -516,30 +516,30 @@ paths:
 
   /transfers/suggestion:
     get:
-      operationId: suggestTransferDestination
+      operationId: suggestTransferDestinations
       tags: [client]
       summary: >-
-        Guided-transfer demo: suggest a destination account for the caller.
-        Scenario-driven (simulated mule) when an active guided_scenario applies,
-        else the caller's own other active account. Read-only; never moves money.
+        Guided-transfer demo: up to 3 candidate destination accounts (other users',
+        randomly sampled + shuffled, optionally including a short-listed mule). The
+        client picks one at random; an empty array means "no candidate — fall back to
+        the caller's own account". Read-only; never moves money.
       parameters:
         - name: from_account
           in: query
           required: false
-          description: Intended debit account (must be owned by the caller). Excluded from the suggestion.
+          description: Intended debit account (must be owned by the caller). Excluded from the menu.
           schema: { type: string, format: uuid }
         - name: amount_minor
           in: query
           required: false
-          description: Intended amount in minor units; lets a scenario gate on a threshold.
+          description: Intended amount in minor units; lets a scenario gate its mule on a threshold.
           schema: { type: integer, format: int64 }
       responses:
         "200":
-          description: a suggested destination
+          description: up to 3 candidate destinations (options may be empty)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/TransferSuggestion" }
-        "204": { description: no suggestion available (client falls back to manual) }
+              schema: { $ref: "#/components/schemas/GuidedSuggestions" }
         "403": { $ref: "#/components/responses/Error" }
 
   /transfers/{id}:
@@ -865,8 +865,16 @@ components:
         iban:              { type: string }
         owner_name_masked: { type: string, description: "Masked, exactly as /beneficiaries/resolve. Never the full name." }
         reason:            { type: string, description: "Human-facing label shown in the guided banner." }
-        scenario:          { type: string, description: "Active scenario name; omitted for the safe-default own-account suggestion." }
-        source:            { type: string, enum: [scenario, own_account] }
+        scenario:          { type: string, description: "Active scenario name for the short-listed mule." }
+        source:            { type: string, enum: [scenario], description: "Always 'scenario' from the backend; the client synthesises 'own_account' for its empty-menu fallback." }
+    GuidedSuggestions:
+      type: object
+      description: "Guided-transfer mule menu — up to 3 third-party candidates; the client picks one at random, or falls back to the caller's own account when options is empty."
+      required: [options]
+      properties:
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/TransferSuggestion" }
     RaiseDisputeRequest:
       type: object
       properties:

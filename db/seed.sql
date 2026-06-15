@@ -176,13 +176,30 @@ BEGIN
         PERFORM deposit('seed-dep-' || v_iban, v_mule_acct, 50000, 'Opening deposit');
     END IF;
 
-    -- Global scenario (target_user_id NULL => any caller). The own-account fallback
-    -- has no scenario row, so this always wins. Never returned to the mule's own
-    -- logins (the resolver excludes the debit account; fraudbank also guards
-    -- against any own-account suggestion).
+    -- Guided-transfer v2 "mule menu" (spec-banking-grade-hardening.md §5): the
+    -- resolver draws up to 3 random THIRD-PARTY targets from the ACTIVE
+    -- guided_scenarios short-list below (never the caller's own — the own-account
+    -- path is the client's fallback). Global rows (target_user_id NULL) match any
+    -- caller; the resolver excludes the caller's own + the debit account.
     INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
     SELECT 'app-scam-demo', v_mule_acct, 'Recommended payee', NULL, 0, 100, TRUE
      WHERE NOT EXISTS (SELECT 1 FROM guided_scenarios WHERE name = 'app-scam-demo');
+
+    -- Two more global decoy mules (existing seed customers) so a full 3-option draw
+    -- is possible — the dedicated mule camouflaged among plausible strangers.
+    INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
+    SELECT 'app-scam-decoy-1', a.id, 'Trusted merchant', NULL, 0, 50, TRUE
+      FROM accounts a JOIN users u ON u.id = a.user_id
+     WHERE u.username = 'bob'::citext AND a.kind = 'customer'
+     ORDER BY a.created_at LIMIT 1
+    ON CONFLICT (name) DO NOTHING;
+
+    INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
+    SELECT 'app-scam-decoy-2', a.id, 'Verified payee', NULL, 0, 50, TRUE
+      FROM accounts a JOIN users u ON u.id = a.user_id
+     WHERE u.username = 'carol'::citext AND a.kind = 'customer'
+     ORDER BY a.created_at LIMIT 1
+    ON CONFLICT (name) DO NOTHING;
 END $$;
 
 SELECT 'seed complete: ' ||
