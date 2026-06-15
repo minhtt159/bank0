@@ -44,12 +44,14 @@ JWT subject.
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" — party-only, one open per (transfer, caller) |
 | Disputes | GET | `/disputes` · `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id → 404) |
-| Health | GET | `/health` | public | liveness/version |
+| Health | GET | `/health` | public | DB-blind liveness/version |
+| Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
+| Metrics | GET | `/metrics` | public | RED counters |
 
 Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`,
-`/docs`, `/openapi.yaml`) are registered on the parent router ahead of the
-JWT-guarded subrouter, so they aren't shadowed. `logout-all` needs the subject,
-so it stays behind `requireJWT`.
+`/readyz`, `/metrics`, `/docs`, `/openapi.yaml`) are registered on the parent
+router ahead of the JWT-guarded subrouter, so they aren't shadowed. `logout-all`
+needs the subject, so it stays behind `requireJWT`.
 
 ---
 
@@ -159,8 +161,8 @@ behalf). Verified end-to-end: alice cannot read or debit bob's account.
 ## 6. Planned: MFA & step-up (designed, not built)
 
 The next auth increment hardens login and money moves. Same DB-first discipline;
-the access-token path (`requireJWT`) barely changes. Tables land in
-`00018_mfa.sql`.
+the access-token path (`requireJWT`) barely changes. Tables land in a new
+migration (the next free slot is `00032`).
 
 ### 6.1 TOTP MFA
 

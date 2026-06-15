@@ -154,7 +154,7 @@ BEGIN
         RAISE EXCEPTION 'cannot post transfer in state %', v_t.status;
     END IF;
 
-    -- Write BOTH legs. The AFTER INSERT trigger updates balances + balance_after.
+    -- Write BOTH legs. The BEFORE INSERT trigger updates balances + balance_after.
     INSERT INTO ledger_entries (transfer_id, account_id, direction, amount_minor, currency)
     VALUES (p_transfer_id, v_t.debit_account_id,  'debit',  v_t.amount_minor, v_t.currency),
            (p_transfer_id, v_t.credit_account_id, 'credit', v_t.amount_minor, v_t.currency);

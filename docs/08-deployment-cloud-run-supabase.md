@@ -45,8 +45,9 @@ Storage. bank0 keeps its own JWT + cookie-session layer.
 
 ### 1.1 The one blocker: `uuidv7()` is PG18-only, Supabase is PG17
 
-The schema uses native **`uuidv7()`** in 9 places ([`00003`](../db/migrations/00003_init_tables.sql),
-[`00016`](../db/migrations/00016_beneficiaries.sql), [`00017`](../db/migrations/00017_refresh_tokens.sql)),
+The schema uses native **`uuidv7()`** in 10 places ([`00003`](../db/migrations/00003_init_tables.sql),
+[`00016`](../db/migrations/00016_beneficiaries.sql), [`00017`](../db/migrations/00017_refresh_tokens.sql),
+[`00019`](../db/migrations/00019_guided_scenarios.sql), [`00020`](../db/migrations/00020_disputes.sql)),
 which only exists in Postgres 18. The live Supabase project is `17.6.1.127`, so
 these migrations fail as written.
 
@@ -76,9 +77,10 @@ end $$;
 > produces a spec-shaped, time-ordered v7 UUID — same monotonic index locality the
 > schema relies on.
 
-**Test the same version as prod.** CI's Postgres service container should be
-**`postgres:17`** (not 18) so the polyfill path is what gets exercised — see §4.
-Run `migrate up → down → up` on a throwaway DB to confirm reversibility.
+**Test the same version as prod.** CI's test service defaults to `postgres:18`,
+with **`postgres:17` opt-in** via workflow_dispatch so the polyfill path Supabase
+runs gets exercised; the migration-reversibility job is pinned to `postgres:17` —
+see §4. Run `migrate up → down → up` on a throwaway DB to confirm reversibility.
 
 ### 1.2 Connecting — Supavisor pooler, not a direct socket
 
@@ -241,12 +243,14 @@ graph TD
 |---|---|---|
 | Build / vet | `go build ./... && go vet ./...` | compiles |
 | **Generate-drift gate** | `task generate && git diff --exit-code` | contract-first rule (no stale `gen*`, `*_templ.go`, sqlc) |
-| Test | `go test -race ./...` against **`postgres:17`** service + polyfill | matches prod PG version |
-| Migration reversibility | `migrate up → down → up` on throwaway PG17 | every migration is reversible |
+| Test | `go test -race ./...` against the `postgres:` service (**defaults to `18`**; `17` selectable) + polyfill | default 18; opt-in 17 for prod parity |
+| Migration reversibility | `migrate up → down → up` on a throwaway **`postgres:17`** | every migration is reversible on the prod PG version |
 | OpenAPI lint *(optional)* | `task lint:openapi` | spec hygiene |
 
-> Swapping the CI service container from `postgres:18` → `postgres:17` is the key
-> change so CI tests the **polyfill** path that production actually uses.
+> The test service defaults to **`postgres:18`** (`postgres:${{ github.event.inputs.pg_version || '18' }}`),
+> with **17 opt-in** via **workflow_dispatch** (Actions → CI → Run workflow → `pg_version: 17`)
+> to exercise the **polyfill** path Supabase runs. The separate
+> migration-reversibility job is pinned to `postgres:17`.
 
 ### 4.2 `migrate` (main only, before any deploy)
 
@@ -295,11 +299,13 @@ The deltas were small and additive — no application logic, handler, or ledger
 changes; the engine is untouched:
 
 1. ✅ **[`db/migrations/00001_init_extensions.sql`](../db/migrations/00001_init_extensions.sql)** —
-   version-gated `uuidv7()` polyfill (§1.1). Verified on PG17: all 17 migrations
+   version-gated `uuidv7()` polyfill (§1.1). Verified on PG17: all 31 migrations
    apply, reverse (`up→reset→up`), and the full DB+HTTP suite passes; the polyfill
    emits spec-valid, time-ordered v7 UUIDs.
-2. ✅ **[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)** — `postgres:18`
-   → `postgres:17`; new `generate-drift` gate and `migrations` (up→reset→up) job.
+2. ✅ **[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)** — test service
+   defaults to `postgres:18` with `17` opt-in via workflow_dispatch (Supabase
+   parity); a dedicated migration-reversibility job (up→reset→up) pinned to
+   `postgres:17`; plus the `generate-drift` gate.
 3. ✅ **[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)** —
    `build-push`, `migrate`, `deploy-api`, `deploy-portal`, `deploy-maintenance`,
    `deploy-pwa`, all behind the `prod` Environment approval gate.
