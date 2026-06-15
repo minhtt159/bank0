@@ -1,5 +1,10 @@
--- bank0 dev seed — idempotent (safe to re-run).
--- Uses the DB functions so all invariants/holds/idempotency apply.
+-- bank0 dev seed — genuinely idempotent: safe to re-run on a POPULATED volume (no
+-- `down -v` needed). EVERY object is individually guarded so a re-run tops up
+-- what's missing and skips what exists — staff + the mule/guided scenario by
+-- NOT EXISTS on their natural keys, accounts by IBAN, opening deposits on account
+-- creation, and every transfer by NOT EXISTS on its seed idempotency key (see the
+-- note at the transfers section). Uses the DB functions so all invariants/holds/
+-- idempotency apply.
 -- Run:  psql "$DSN" -f db/seed.sql      (or via the compose `seed` service)
 --
 -- Shape: 30 customers, 1-3 accounts each (72 accounts total) — ~5-10% of the
@@ -57,6 +62,18 @@ BEGIN
         PERFORM create_user('auditor1', 'auditor', 'Aaron Auditor', 'auditor1@bank0.test', '+46700000011', 'auditor');
     END IF;
 
+    -- ── genuine per-operation idempotency ───────────────────────────────────
+    -- Each money movement below is guarded by NOT EXISTS on its seed idempotency
+    -- key, so a re-run tops up only what's missing and NEVER re-invokes a keyed
+    -- function. That matters because request_transfer()/transfer() fingerprint each
+    -- key as sha256(debit|credit|amount|kind) over the account UUIDs — and account
+    -- ids are uuidv7(), assigned at creation, NOT derived from the IBAN. Calling a
+    -- keyed fn again once accounts have been recreated would raise 'idempotency key
+    -- … reused with different parameters' and abort the seed (admin/client
+    -- depend_on it → the whole stack fails to come up). Guarding on key existence
+    -- sidesteps that entirely, so this section is replay-safe the way the staff
+    -- section above is — no all-or-nothing run-once gate needed.
+
     --- customers + accounts + opening deposits -----------------------------
     FOR i IN 1 .. array_length(usernames, 1) LOOP
         SELECT id INTO v_user FROM users WHERE username = usernames[i]::citext;
@@ -71,11 +88,11 @@ BEGIN
             SELECT id INTO v_acct FROM accounts WHERE iban = v_iban::varchar;
             IF v_acct IS NULL THEN
                 v_acct := create_account(v_user, v_iban::varchar, lpad((1000 + seq)::text, 4, '0')::text, 50000::bigint);
+                -- opening deposit (€500): only on a freshly-created account, so a
+                -- re-run never re-fingerprints the 'seed-dep-' key against a new uuid.
+                PERFORM deposit('seed-dep-' || v_iban, v_acct, 50000, 'Opening deposit');
             END IF;
             aids := array_append(aids, v_acct);
-
-            -- opening deposit (€500)
-            PERFORM deposit('seed-dep-' || v_iban, v_acct, 50000, 'Opening deposit');
             seq := seq + 1;
         END LOOP;
     END LOOP;
@@ -84,34 +101,53 @@ BEGIN
     --- from the previous). With the deposit, that's 3 transactions per account.
     n := array_length(aids, 1);
     FOR i IN 1 .. n LOOP
-        PERFORM transfer('seed-ring-' || i, aids[i], aids[(i % n) + 1], 1000,
-                         'Seed transfer #' || i, 'transfer');
+        IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-ring-' || i) THEN
+            PERFORM transfer('seed-ring-' || i, aids[i], aids[(i % n) + 1], 1000,
+                             'Seed transfer #' || i, 'transfer');
+        END IF;
     END LOOP;
 
     --- a few pending transfers for the operator queue ----------------------
-    PERFORM request_transfer('seed-pend-1', aids[1],  aids[4],  2500, 'Deferred: pending demo 1', 'transfer');
-    PERFORM request_transfer('seed-pend-2', aids[5],  aids[2],  1500, 'Deferred: pending demo 2', 'transfer');
-    PERFORM request_transfer('seed-pend-3', aids[7],  aids[10], 3000, 'Deferred: pending demo 3', 'transfer');
-    PERFORM request_transfer('seed-pend-4', aids[20], aids[33], 1800, 'Deferred: pending demo 4', 'transfer');
+    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-1') THEN
+        PERFORM request_transfer('seed-pend-1', aids[1],  aids[4],  2500, 'Deferred: pending demo 1', 'transfer');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-2') THEN
+        PERFORM request_transfer('seed-pend-2', aids[5],  aids[2],  1500, 'Deferred: pending demo 2', 'transfer');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-3') THEN
+        PERFORM request_transfer('seed-pend-3', aids[7],  aids[10], 3000, 'Deferred: pending demo 3', 'transfer');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-4') THEN
+        PERFORM request_transfer('seed-pend-4', aids[20], aids[33], 1800, 'Deferred: pending demo 4', 'transfer');
+    END IF;
 
     --- one canceled + one reversed, so every lifecycle state is present ----
-    SELECT transfer_id INTO v_tid
-      FROM request_transfer('seed-cancel-1', aids[3], aids[15], 2000, 'Canceled demo', 'transfer');
-    PERFORM cancel_transfer(v_tid, 'seed: canceled demo');
+    -- Guarded on the underlying transfer's key: cancel_transfer/reverse aren't
+    -- safe to re-invoke once the transfer is already canceled/reversed, so only
+    -- run them when the transfer is freshly created this run.
+    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-cancel-1') THEN
+        SELECT transfer_id INTO v_tid
+          FROM request_transfer('seed-cancel-1', aids[3], aids[15], 2000, 'Canceled demo', 'transfer');
+        PERFORM cancel_transfer(v_tid, 'seed: canceled demo');
+    END IF;
 
-    SELECT transfer_id INTO v_tid
-      FROM transfer('seed-rev-src', aids[8], aids[22], 1200, 'Reversed demo', 'transfer');
-    PERFORM reverse_transfer(v_tid, 'seed-rev-1', 'seed: reversed demo');
+    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-rev-src') THEN
+        SELECT transfer_id INTO v_tid
+          FROM transfer('seed-rev-src', aids[8], aids[22], 1200, 'Reversed demo', 'transfer');
+        PERFORM reverse_transfer(v_tid, 'seed-rev-1', 'seed: reversed demo');
+    END IF;
 
     --- bulk volume so lists + the first account's statement span pages.
     --- aids[1] is in every bulk transfer (alternating side) -> a long statement.
     FOR i IN 1 .. 90 LOOP
-        IF i % 2 = 0 THEN
-            PERFORM transfer('seed-bulk-' || i, aids[1], aids[(i % (n - 1)) + 2],
-                             100 * (1 + i % 3), 'Bulk #' || i || ' out', 'transfer');
-        ELSE
-            PERFORM transfer('seed-bulk-' || i, aids[(i % (n - 1)) + 2], aids[1],
-                             100 * (1 + i % 3), 'Bulk #' || i || ' in', 'transfer');
+        IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-bulk-' || i) THEN
+            IF i % 2 = 0 THEN
+                PERFORM transfer('seed-bulk-' || i, aids[1], aids[(i % (n - 1)) + 2],
+                                 100 * (1 + i % 3), 'Bulk #' || i || ' out', 'transfer');
+            ELSE
+                PERFORM transfer('seed-bulk-' || i, aids[(i % (n - 1)) + 2], aids[1],
+                                 100 * (1 + i % 3), 'Bulk #' || i || ' in', 'transfer');
+            END IF;
         END IF;
     END LOOP;
 END $$;
