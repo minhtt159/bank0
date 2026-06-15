@@ -50,7 +50,7 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		dur := time.Since(start)
-		s.metrics.observe(rec.status, dur)
+		s.metrics.observe(r.Method, routeTemplate(r), rec.status, dur)
 		l.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,

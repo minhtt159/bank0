@@ -37,7 +37,7 @@ type Server struct {
 	loginLimiter   *rateLimiter // /auth/login per-IP backstop (nil = disabled)
 	refreshLimiter *rateLimiter // /auth/refresh per-IP backstop (nil = disabled)
 
-	metrics metrics // RED counters rendered at /metrics
+	metrics *metrics // Prometheus registry + instruments, served at /metrics
 }
 
 func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
@@ -62,6 +62,15 @@ func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
 	} else {
 		s.jwtSecret = []byte(cfg.Auth.JWTSecret)
 	}
+	// Prometheus registry + instruments. The pool collector samples pgxpool live at
+	// scrape time (guarded so a pg-less test server doesn't panic on /metrics).
+	s.metrics = newMetrics(func() poolStats {
+		if s.pg == nil || s.pg.Pool == nil {
+			return poolStats{}
+		}
+		st := s.pg.Pool.Stat()
+		return poolStats{acquired: st.AcquiredConns(), idle: st.IdleConns(), total: st.TotalConns(), max: st.MaxConns()}
+	})
 	if b, err := os.ReadFile(cfg.Server.OpenAPISpecPath); err == nil {
 		s.spec = b
 	} else {
