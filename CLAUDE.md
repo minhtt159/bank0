@@ -32,11 +32,13 @@ encodes the conventions that keep the code coherent. Deep detail is in
 | `api.bank0.hnimn.art` | client JSON API | Go `mode=api`, JWT + refresh, Cloudflare-fronted | [`docs/06`](docs/06-client-api.md) |
 | `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite), proxies `/api/*` | [`docs/07`](docs/07-client-web-app.md) |
 
-`mode=all` serves both Go surfaces locally. Public client routes
-(`/auth/login,/refresh,/logout,/health,/docs`) are registered on the **parent**
-router ahead of the JWT-guarded subrouter so they aren't shadowed; in `all` mode
-the one admin route that collides with the client's `/transfers/{id}` —
-`GET /transfers/pending` — is registered first behind the session guard.
+`mode=all` serves both Go surfaces locally. Always-public on every surface:
+`/health` (DB-blind liveness), `/readyz` (DB-aware readiness), `/metrics`,
+`/openapi.yaml`, `/docs`. The client public auth routes
+(`/auth/login,/refresh,/logout`) are registered on the **parent** router ahead of
+the JWT-guarded subrouter so they aren't shadowed; in `all` mode the one admin
+route that collides with the client's `/transfers/{id}` — `GET /transfers/pending`
+— is registered first behind the session guard.
 
 ## Where things live
 

@@ -55,7 +55,7 @@ surface. It also positions the Worker as the future **BFF**
 later hold the refresh token in an `httpOnly; Secure; SameSite=Strict` cookie and inject the
 access token server-side, keeping tokens out of browser JS — **without changing the SPA**.
 
-**MVP token handling:** the access token (1h TTL today) lives in the SPA in memory + a
+**MVP token handling:** the access token (15m TTL today) lives in the SPA in memory + a
 `sessionStorage` mirror (survives reload, cleared on tab close). The Worker forwards it as
 `Authorization: Bearer …`. This is the documented "lightweight/JWT" path; the httpOnly-cookie
 BFF upgrade is a Worker-only change later.

@@ -77,12 +77,17 @@ bank0 maintenance      # run expire_holds + cleanup once
 
 | Surface | Mechanism | Public routes |
 |---------|-----------|---------------|
-| `api` (client) | **JWT bearer** (HS256) + rotating **refresh tokens**. `POST /auth/login` issues an access token (`aud=bank0-client`) + refresh token; `requireJWT` validates and ownership-scopes every request to the subject ([`06-client-api.md`](06-client-api.md)). | `/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`, `/docs`, `/openapi.yaml` |
-| `portal` (admin) | **DB-backed cookie session** (`bank0_session`), staff-role check, 30-min sliding idle. | `/login`, `/logout`, `/health`, `/docs`, `/openapi.yaml` |
+| `api` (client) | **JWT bearer** (HS256) + rotating **refresh tokens**. `POST /auth/login` issues an access token (`aud=bank0-client`) + refresh token; `requireJWT` validates and ownership-scopes every request to the subject ([`06-client-api.md`](06-client-api.md)). | `/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`, `/readyz`, `/metrics`, `/docs`, `/openapi.yaml` |
+| `portal` (admin) | **DB-backed cookie session** (`bank0_session`), staff-role check, 30-min sliding idle. | `/login`, `/logout`, `/health`, `/readyz`, `/metrics`, `/docs`, `/openapi.yaml` |
+
+`/health` is a DB-blind liveness probe; `/readyz` is DB-aware readiness; `/metrics`
+exposes Prometheus counters (restrict at the network layer).
 
 Set the JWT key via `APP_AUTH_JWT_SECRET` (Helm: `auth.existingSecret` or
 `auth.jwtSecret`); it must be **shared across all api replicas**. An empty secret
-falls back to an insecure dev value with a startup warning.
+**fails closed** when `app.env != development`: `Config.Validate()` returns an error
+and `cmd/app/main.go` logs `invalid configuration` and exits non-zero. Only in
+`development` does it fall back to an insecure dev value with a startup warning.
 
 > **`all`-mode note:** when one container serves both surfaces (local dev), the
 > client and admin route sets overlap. Shared reads resolve to the client (JWT)
@@ -93,15 +98,26 @@ falls back to an insecure dev value with a startup warning.
 
 ---
 
-## 2. Local: docker-compose (1 postgres + 1 app)
+## 2. Local: docker-compose (postgres + migrate + seed + admin + client)
 
 ```bash
 docker compose -f deploy/docker-compose.dev.yml up --build
 ```
 
-The app runs `mode=all` with `APP_SERVER_AUTO_MIGRATE=true`, so it applies the
-embedded migrations on startup and serves both surfaces on `:8080`. Visit
-`http://localhost:8080/` (console) and `/docs` (API reference).
+The stack is **five services**, mirroring the split-surface production topology
+rather than collapsing into `mode=all`:
+
+| Service | Role | Notes |
+|---------|------|-------|
+| `db` | `postgres:18` (`PG_VERSION=17` for Supabase parity) | exposes `:5432` |
+| `migrate` | one-shot `migrate up`, then exits | runs after `db` is healthy |
+| `seed` | one-shot `psql … db/seed.sql`, then exits | runs after `migrate` succeeds |
+| `admin` | `APP_SERVER_MODE=portal` → `:8080` | console + admin API; auto-migrate **off**, maintenance loop on |
+| `client` | `APP_SERVER_MODE=api` → `:8090` | client JSON API; auto-migrate **off** |
+
+No container runs `mode=all` or `APP_SERVER_AUTO_MIGRATE=true` — migrations are
+applied by the dedicated `migrate` job. Visit `http://localhost:8080/` (console)
+and `http://localhost:8090/docs` (client API reference).
 
 ---
 
@@ -135,9 +151,13 @@ graph TD
 | **HA / scaling** | `bank0-api` is a Deployment behind an HPA (CPU-based, 3–10 replicas). Stateless — all state is in Postgres. |
 | **Routing / two domains** | **Gateway API on Envoy Gateway.** One `Gateway` with a per-host HTTPS listener; two `HTTPRoute`s (api/portal) attach by `parentRef`/`sectionName` and fan out to the two Services. Same image, different `mode`, scaled independently. The chart can create the Gateway (`gateway.create=true`) or attach to a shared one. |
 | **Migrations** | A `pre-install,pre-upgrade` hook Job runs `bank0 migrate up` (embedded migrations) before new pods roll. |
-| **Maintenance** | `expire_holds` + cleanup run **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. |
+| **Maintenance** | `expire_holds` + cleanup **and `reconcile()`** run **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. A non-zero `reconcile()` result (ledger/cache drift) is logged at WARN — page on it. |
 | **DB credentials** | `APP_DATABASE_DSN` from a Secret (`existingSecret` recommended; chart can create one from `database.dsn` for dev). |
-| **Probes** | `/health` readiness + liveness on both deployments. |
+| **Probes** | **liveness → `/health`** (cheap, DB-blind — a DB blip must not kill the pod); **readiness → `/readyz`** (pings Postgres with a 1s deadline, 503 when the pool can't serve, so a pod with a dead/exhausted pool leaves the Service rotation). Both deployments. |
+| **Metrics** | `/metrics` — a real Prometheus **histogram** (`bank0_http_request_duration_seconds`, labelled by method/route-template/status → `histogram_quantile` p50/p95/p99 + rate + error-rate) plus a live pgxpool gauge and the Go/process collectors (`client_golang`). Optional, off by default: a **ServiceMonitor** (`metrics.serviceMonitor.enabled`, needs the Prometheus Operator) and a **Grafana dashboard** ConfigMap auto-discovered by the kube-prometheus-stack sidecar (`metrics.dashboard.enabled`). |
+| **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault`, and `automountServiceAccountToken: false` (values: `podSecurityContext` / `securityContext`). |
+| **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here, both surfaces behind a trusted edge) makes the auth rate limiter key on the real client IP (`CF-Connecting-IP` / `X-Forwarded-For`) instead of `RemoteAddr`. |
+| **JWT secret** | The `api` deployment mounts `APP_AUTH_JWT_SECRET` (Helm `auth.existingSecret`); the `portal` deployment doesn't need one (cookie sessions), and `Config.Validate` only requires it when the served mode includes the api surface. |
 | **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP→HTTPS. |
 
 ### Gateway API objects (rendered)

@@ -48,7 +48,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	newRefresh := newSessionToken()
 	userID, role, uname, err := s.pg.RotateRefreshToken(r.Context(),
 		hashToken(req.RefreshToken), hashToken(newRefresh),
-		int(s.refreshTTL.Seconds()), int(s.refreshAbs.Seconds()), r.UserAgent(), clientIP(r))
+		int(s.refreshTTL.Seconds()), int(s.refreshAbs.Seconds()), r.UserAgent(), s.clientIP(r))
 	if err != nil {
 		mapDBError(w, err)
 		return

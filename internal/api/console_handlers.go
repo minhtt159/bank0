@@ -45,7 +45,9 @@ func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, allow func(
 
 // ---- small helpers ------------------------------------------------------
 
-func (s *Server) html(w http.ResponseWriter) { w.Header().Set("Content-Type", "text/html; charset=utf-8") }
+func (s *Server) html(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+}
 
 // refresh tells the main-panel lists to reload after a rail mutation.
 func refresh(w http.ResponseWriter) { w.Header().Set("HX-Trigger", "bank0:refresh") }
@@ -314,7 +316,7 @@ func (s *Server) consoleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.html(w)
-		_ = template.CreateUserForm("Could not create user: " + dbErrorMessage(err)).Render(r.Context(), w)
+		_ = template.CreateUserForm("Could not create user: "+dbErrorMessage(err)).Render(r.Context(), w)
 		return
 	}
 	refresh(w)
@@ -479,21 +481,30 @@ func (s *Server) consoleAccountContext(w http.ResponseWriter, r *http.Request) (
 
 // consoleMoneyDir bundles the pieces that distinguish a console credit from a
 // withdrawal, so consoleMoveMoney can drive both. post is the below-threshold call
-// that posts immediately; request stages a PENDING transfer for maker-checker.
+// that posts immediately; transferKind/requestDesc drive the above-threshold path,
+// which stages a PENDING transfer + enqueues the approval row in ONE atomic DB
+// call (request_money_with_approval) — see MAKER-CHECKER-ATOMICITY.
 type consoleMoneyDir struct {
-	kind           string // "credit" / "withdraw" (also the approval-detail tag + error verb)
-	noun           string // "Credit" / "Withdrawal" (threshold message)
-	postedVerb     string // "Credited" / "Withdrew" (success message)
-	auditPosted    string // audit action when posted directly
-	auditRequested string // audit action when routed to approvals
+	kind           string            // "credit" / "withdraw" (also the approval-detail tag + error verb)
+	noun           string            // "Credit" / "Withdrawal" (threshold message)
+	postedVerb     string            // "Credited" / "Withdrew" (success message)
+	auditPosted    string            // audit action when posted directly
+	auditRequested string            // audit action when routed to approvals
+	transferKind   sqlc.TransferKind // 'deposit' / 'withdrawal' for the staged maker-checker transfer
+	requestDesc    string            // description on the staged (awaiting-approval) transfer
 	post           func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error)
-	request        func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error)
 }
 
 // consoleMoveMoney is the shared body for consoleCredit/consoleWithdraw: gate +
 // resolve owner, parse the amount + idempotency key, then either post directly or
 // (above the maker-checker threshold) stage a PENDING request and enqueue it for a
 // second admin. Only the per-direction DB calls and user-facing strings vary.
+//
+// Above the threshold we make a SINGLE DB call: request_money_with_approval stages
+// the PENDING transfer + hold AND inserts the 4-eyes approval row in one
+// transaction (rule 1). The previous two-call sequence (request_* then
+// CreateApprovalRequest) could orphan a hold with no queue row if the second call
+// failed mid-way (MAKER-CHECKER-ATOMICITY).
 func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir consoleMoneyDir) {
 	actor, acctID, owner, ok := s.consoleAccountContext(w, r)
 	if !ok {
@@ -516,20 +527,14 @@ func (s *Server) consoleMoveMoney(w http.ResponseWriter, r *http.Request, dir co
 		return
 	}
 	if ra.Required {
-		tid, err := dir.request(key, acctID, amount)
-		if err != nil {
-			s.renderUserDetail(w, r, owner, "Could not submit: "+dbErrorMessage(err))
-			return
-		}
 		detail, _ := json.Marshal(map[string]any{"amount_minor": amount, "kind": dir.kind, "account_id": acctID.String()})
-		if _, err := s.pg.Queries.CreateApprovalRequest(ctx, sqlc.CreateApprovalRequestParams{
-			Maker: actor.UserID, TransferID: tid, Detail: detail,
-		}); err != nil {
+		mc, err := s.pg.RequestMoneyWithApproval(ctx, actor.UserID, key, acctID, amount, dir.transferKind, dir.requestDesc, detail)
+		if err != nil {
 			s.renderUserDetail(w, r, owner, "Could not submit for approval: "+dbErrorMessage(err))
 			return
 		}
 		refresh(w)
-		s.audit(ctx, actor, dir.auditRequested, &acctID, map[string]any{"amount_minor": amount, "transfer_id": tid.String()})
+		s.audit(ctx, actor, dir.auditRequested, &acctID, map[string]any{"amount_minor": amount, "transfer_id": mc.TransferID.String()})
 		s.renderUserDetail(w, r, owner, dir.noun+" of "+money.FormatMinor(amount)+" exceeds the "+
 			money.FormatMinor(ra.ThresholdMinor)+" threshold — sent to Approvals for a second admin.")
 		return
@@ -548,14 +553,10 @@ func (s *Server) consoleCredit(w http.ResponseWriter, r *http.Request) {
 	s.consoleMoveMoney(w, r, consoleMoneyDir{
 		kind: "credit", noun: "Credit", postedVerb: "Credited",
 		auditPosted: "credit", auditRequested: "credit_requested",
+		transferKind: sqlc.TransferKindDeposit, requestDesc: "Console credit (awaiting approval)",
 		post: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
 			return s.pg.Queries.Deposit(r.Context(), sqlc.DepositParams{
 				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console credit",
-			})
-		},
-		request: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
-			return s.pg.Queries.RequestDeposit(r.Context(), sqlc.RequestDepositParams{
-				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console credit (awaiting approval)",
 			})
 		},
 	})
@@ -565,14 +566,10 @@ func (s *Server) consoleWithdraw(w http.ResponseWriter, r *http.Request) {
 	s.consoleMoveMoney(w, r, consoleMoneyDir{
 		kind: "withdraw", noun: "Withdrawal", postedVerb: "Withdrew",
 		auditPosted: "withdraw", auditRequested: "withdraw_requested",
+		transferKind: sqlc.TransferKindWithdrawal, requestDesc: "Console withdrawal (awaiting approval)",
 		post: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
 			return s.pg.Queries.Withdraw(r.Context(), sqlc.WithdrawParams{
 				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console withdrawal",
-			})
-		},
-		request: func(key string, acct uuid.UUID, amount int64) (uuid.UUID, error) {
-			return s.pg.Queries.RequestWithdrawal(r.Context(), sqlc.RequestWithdrawalParams{
-				IdempotencyKey: key, AccountID: acct, AmountMinor: amount, Description: "Console withdrawal (awaiting approval)",
 			})
 		},
 	})

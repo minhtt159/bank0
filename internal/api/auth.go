@@ -45,9 +45,21 @@ func (s *Server) idleSeconds() int {
 	return secs
 }
 
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
+// clientIP returns the client IP used for the per-IP rate-limit key (and audit).
+// Forwarded headers are trusted ONLY when cfg.Server.TrustProxyHeaders is set —
+// i.e. the app is fronted by an edge (Cloudflare) that overwrites them. Otherwise
+// a caller could spoof X-Forwarded-For to get a fresh limiter bucket per request
+// and defeat the credential-brute-force backstop, so we key on RemoteAddr. When
+// trusted, Cloudflare's single edge-set CF-Connecting-IP is preferred over the
+// client-controllable multi-hop X-Forwarded-For. See docs/10.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.cfg.Server.TrustProxyHeaders {
+		if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" {
+			return cf
+		}
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -134,7 +146,7 @@ func (s *Server) consoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	password := r.PostFormValue("password")
 	token := newSessionToken()
 	su, err := s.pg.CreateStaffSession(r.Context(), username, password, hashToken(token),
-		s.idleSeconds(), r.UserAgent(), clientIP(r))
+		s.idleSeconds(), r.UserAgent(), s.clientIP(r))
 	if errors.Is(err, db.ErrLoginDenied) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)

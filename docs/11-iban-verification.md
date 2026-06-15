@@ -212,10 +212,10 @@ Validate at every layer with a clear **authority split**: the client is convenie
 | Layer | File(s) | Role | What it does |
 |---|---|---|---|
 | Client (Preact/TS) | `web/app/src/routes/Transfer.tsx` | UX only — *never* authority | Instant inline "invalid IBAN" hint; gate the Look-up / Save buttons |
-| Go server | `internal/api/handlers_beneficiaries.go`, `handlers_accounts.go` | **Authority #1** — fail fast, clean `400` | Reject bad checksum before touching the DB, with a precise message via `writeError` |
+| Go server | `internal/api/handlers_beneficiaries.go`, `handlers_accounts.go` | **Authority #1** — fail fast, clean `422` | Reject bad checksum before touching the DB, with a precise message via `writeError` |
 | PostgreSQL 18 | `db/migrations/NNNN_*.sql` | **Authority #2** — non-bypassable backstop | `IMMUTABLE` plpgsql MOD-97 in a `CHECK`/`DOMAIN`; protects admin console, seeds, migrations, any future writer |
 
-**As built.** Both authorities enforce the checksum: `internal/iban` (Go, fail-fast `400`) and the `iban_is_valid()` MOD-97 validator behind `CHECK`s on `accounts.iban` and `beneficiaries.iban` (Postgres backstop, `23514` → `422`). `web/app/src/lib/iban.ts` is the convenience-only client check. See §6 for the migration breakdown.
+**As built.** Both authorities enforce the checksum: `internal/iban` (Go, fail-fast `422 invalid_iban`) and the `iban_is_valid()` MOD-97 validator behind `CHECK`s on `accounts.iban` and `beneficiaries.iban` (Postgres backstop, `23514` → `422`). `web/app/src/lib/iban.ts` is the convenience-only client check. See §6 for the migration breakdown.
 
 **The split, resolved.** A format regex is **necessary but not sufficient** (it cannot catch a transposed digit). The checksum must live in at least one *authority*. For a core-banking ledger the best answer is **both**: Go (fail-fast, good errors) **and** Postgres (last line of defense). This is defense in depth with the DB as the non-bypassable backstop — directly honoring bank0 **rule #1** ("logic lives in the database") and **rule #2** ("the ledger/DB is the source of truth"). A `23514` check-violation already flows cleanly through `mapDBError` in `internal/api/respond.go` (→ `422`).
 

@@ -186,8 +186,9 @@ auto-freeze).
 3. **Optimistic disable**: action buttons disable on click (`hx-disabled-elt`),
    re-enable on response — kills the double-submit instinct even before the key
    does.
-4. **Maker-checker threshold**: deposits/withdrawals/reversals strictly above a
-   configurable amount (**€10,000** by default, `admin.maker_checker_threshold_minor`)
+4. **Maker-checker threshold**: deposits/withdrawals strictly above a
+   configurable amount (**€10,000** by default,
+   `bank_settings.maker_checker_threshold_minor` — DB-resident, console-editable)
    require a second admin via the Approvals queue. Smaller ops stay one-click.
 5. **No raw balance field anywhere.** "Credit/Debit" always means a ledger
    `deposit`/`withdraw`; there is no input that writes `balance_minor`. The
@@ -244,8 +245,7 @@ with the "logic in the DB" principle:
   programmatic callers get `401`. `/health`, `/docs`, `/openapi.yaml`, `/login`
   stay public.
 
-Still to add: route→minimum-role enforcement on mutating actions, login-attempt /
-denied-action audit log, and per-IP rate limiting.
+Still to add: login-attempt / denied-action audit log, and per-IP rate limiting.
 
 ---
 
@@ -264,7 +264,7 @@ denied-action audit log, and per-IP rate limiting.
    ✅ **Maker-checker** — console credits **strictly above €10,000** become a PENDING
    deposit + an `approval_request`; the **Approvals** screen lets a *different* admin
    Approve (posts) or Reject (cancels). `approve_request` enforces approver ≠ maker
-   (`approved_by` recorded); nav shows a pending-count badge. Reverse still ⬜.
+   (`approved_by` recorded); nav shows a pending-count badge. Reverse ✅.
 6. 🟡 **Fuzzy search** ✅ (users/accounts/transfers via pg_trgm). **Transfers** = full
    history (status pills, pending rows actionable). ✅ **Drill-down**: account →
    **Statement** (ledger w/ running balance, in main panel) and **Transfer detail**
@@ -282,8 +282,9 @@ denied-action audit log, and per-IP rate limiting.
 
 ## 9. Decisions (resolved 2026-06-05)
 
-1. **Maker-checker threshold** (§5.4): **€10,000** (`admin.maker_checker_threshold_minor = 1000000`).
-   Money moves strictly above this route to the Approvals queue for a second approver.
+1. **Maker-checker threshold** (§5.4): **€10,000** (`bank_settings.maker_checker_threshold_minor = 1000000`
+   — DB-resident, console-editable). Money moves strictly above this route to the
+   Approvals queue for a second approver.
 2. **Idle session timeout** (§7): **30 min** (`admin.session_idle_timeout = 30m`).
 3. **Auto-post default**: **yes** — `POST /transfers` and the console "send" settle
    immediately. The pending queue still exists for deferred/maker-checker cases.

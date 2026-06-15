@@ -1,7 +1,7 @@
 # bank0 — Overview & Design
 
 > A core-banking backend proof of concept.
-> Status: **design** · Stack: Go 1.26 · PostgreSQL 18 · Templ + HTMX
+> Status: **implemented** · Stack: Go 1.26 · PostgreSQL 18 · Templ + HTMX
 
 ---
 
@@ -109,7 +109,7 @@ graph LR
     H -->|one call each| FN[PL/pgSQL functions]
     FN --> L[(ledger_entries\nappend-only)]
     FN --> A[(accounts / holds / transfers)]
-    L -. AFTER INSERT trigger .-> A
+    L -. BEFORE INSERT trigger .-> A
     FN --> IK[(idempotency_keys)]
 ```
 
@@ -143,7 +143,7 @@ sequenceDiagram
     C->>H: POST /transfers/{id}/post  (or auto, see config)
     H->>TR: SELECT post_transfer($id)
     TR->>DB: INSERT 2 ledger_entries (debit/credit)
-    DB-->>DB: AFTER INSERT trigger updates balances + balance_after
+    DB-->>DB: BEFORE INSERT trigger updates balances + balance_after
     TR->>DB: hold -> captured, transfer -> posted
     TR-->>H: {status: posted}
     H-->>C: 200 {status: posted}
@@ -181,7 +181,9 @@ Resolved (2026-06-05):
    advisory lock so it's safe across N replicas (runs on portal pods). A
    `bank0 maintenance` subcommand exists for a CronJob alternative. See
    [`04-deployment.md`](04-deployment.md).
-4. **Maker-checker threshold.** ✅ **€10,000** (`admin.maker_checker_threshold_minor`).
+4. **Maker-checker threshold.** ✅ **€10,000** — lives in the DB as
+   `bank_settings.maker_checker_threshold_minor` (operator-editable from the console
+   Settings panel), not in app config.
 
 Still deferred:
 

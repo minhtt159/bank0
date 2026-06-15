@@ -71,6 +71,17 @@ type ServerConfig struct {
 	// AutoMigrate runs embedded migrations on startup. Handy for local
 	// docker-compose (1 replica); leave false in K8s and use the migrate Job.
 	AutoMigrate bool `mapstructure:"auto_migrate"`
+	// TrustProxyHeaders controls whether forwarded client-IP headers
+	// (CF-Connecting-IP / X-Forwarded-For) are trusted for the per-IP rate-limit
+	// key. FALSE (the default) keys on RemoteAddr — safe when the app is directly
+	// reachable, since a client-supplied X-Forwarded-For can otherwise be rotated
+	// to defeat the limiter. Set TRUE only when fronted by a trusted edge
+	// (Cloudflare) that overwrites these headers. See docs/10.
+	TrustProxyHeaders bool `mapstructure:"trust_proxy_headers"`
+	// RequestTimeout bounds how long a single request may run before its context
+	// is canceled (releasing the in-flight DB query + its pool connection). 0 or
+	// negative disables it. Default 15s.
+	RequestTimeout time.Duration `mapstructure:"request_timeout"`
 }
 
 // AdminConfig holds operator-console infra knobs. Business policy that operators
@@ -109,6 +120,8 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("server.auto_migrate", false)
 	v.SetDefault("server.cors_origins", []string{}) // opt-in; empty = no CORS headers
 	v.SetDefault("server.rate_limit_per_min", 60)   // /auth/* per IP; 0 disables
+	v.SetDefault("server.trust_proxy_headers", false) // key rate limits on RemoteAddr unless behind a trusted edge
+	v.SetDefault("server.request_timeout", "15s")     // per-request deadline; 0 disables
 
 	v.SetDefault("admin.session_idle_timeout", "30m")
 	v.SetDefault("admin.maintenance_interval", "60s")
@@ -143,4 +156,21 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
 	return cfg, nil
+}
+
+// Validate enforces production-safety invariants that the zero-config defaults
+// can't express. It is called once at startup (cmd/app) so a misconfigured
+// deployment fails closed (non-zero exit) instead of silently running insecurely.
+func (c Config) Validate() error {
+	// A real deployment MUST set its own JWT secret. An empty secret falls back to
+	// a public, hardcoded dev constant (internal/api/jwt.go) — fine for local dev,
+	// catastrophic in production (anyone could mint valid client tokens). Only the
+	// development env is allowed to run without one — AND only the api surface
+	// issues/verifies JWTs, so a portal-only deployment (cookie sessions) doesn't
+	// need a secret. mode defaults to "all".
+	servesAPI := c.Server.Mode == "" || c.Server.Mode == "api" || c.Server.Mode == "all"
+	if servesAPI && c.App.Env != "development" && c.Auth.JWTSecret == "" {
+		return fmt.Errorf("auth.jwt_secret (APP_AUTH_JWT_SECRET) must be set when app.env=%q and server.mode=%q serves the client API", c.App.Env, c.Server.Mode)
+	}
+	return nil
 }

@@ -37,19 +37,21 @@ JWT subject.
 | Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
-| Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer demo: suggests a destination (scenario mule, else own account); `204` if none. Read-only |
+| Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
 | Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
 | Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" — party-only, one open per (transfer, caller) |
 | Disputes | GET | `/disputes` · `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id → 404) |
-| Health | GET | `/health` | public | liveness/version |
+| Health | GET | `/health` | public | DB-blind liveness/version |
+| Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
+| Metrics | GET | `/metrics` | public | RED counters |
 
 Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`,
-`/docs`, `/openapi.yaml`) are registered on the parent router ahead of the
-JWT-guarded subrouter, so they aren't shadowed. `logout-all` needs the subject,
-so it stays behind `requireJWT`.
+`/readyz`, `/metrics`, `/docs`, `/openapi.yaml`) are registered on the parent
+router ahead of the JWT-guarded subrouter, so they aren't shadowed. `logout-all`
+needs the subject, so it stays behind `requireJWT`.
 
 ---
 
@@ -159,8 +161,8 @@ behalf). Verified end-to-end: alice cannot read or debit bob's account.
 ## 6. Planned: MFA & step-up (designed, not built)
 
 The next auth increment hardens login and money moves. Same DB-first discipline;
-the access-token path (`requireJWT`) barely changes. Tables land in
-`00018_mfa.sql`.
+the access-token path (`requireJWT`) barely changes. Tables land in a new
+migration (the next free slot is `00032`).
 
 ### 6.1 TOTP MFA
 

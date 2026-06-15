@@ -110,10 +110,11 @@ func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string) (Resol
 	return a, err
 }
 
-// TransferSuggestion mirrors suggest_transfer_destination()'s RETURNS TABLE. Demo
-// guided-transfer endpoint: read-only, never exposes a full name or balance
-// (mask_name, same masking as confirmation-of-payee). scenario is NULL for the
-// safe-default own-account suggestion.
+// TransferSuggestion mirrors one row of suggest_transfer_destinations()'s RETURNS
+// TABLE — a guided-transfer menu candidate (a third-party "mule"). Read-only; never
+// exposes a full name or balance (mask_name, same masking as confirmation-of-payee).
+// Source is always "scenario" from the backend (the operator-controlled mule
+// short-list); Scenario is the matching scenario name.
 type TransferSuggestion struct {
 	AccountID       uuid.UUID `json:"account_id"`
 	Iban            string    `json:"iban"`
@@ -123,19 +124,32 @@ type TransferSuggestion struct {
 	Source          string    `json:"source"`
 }
 
-// SuggestTransferDestination resolves one suggested credit account for the caller.
-// The function returns ZERO rows when nothing is eligible, so a QueryRow scan
-// surfaces that as pgx.ErrNoRows (the handler maps it to 204). from may be nil
-// (the resolver substitutes the caller's default account as the exclusion).
-func (p *Postgres) SuggestTransferDestination(
+// SuggestTransferDestinations resolves up to 3 candidate credit accounts for the
+// guided-transfer menu: third-party accounts drawn at RANDOM from the ACTIVE
+// guided_scenarios short-list (the mule targets — operator/seed-controlled, never
+// arbitrary peers) that match the caller + amount and aren't the caller's own or the
+// debit account. Returns an EMPTY slice when no mule is eligible — the client then
+// falls back to the caller's own account. from may be nil (the resolver substitutes
+// the caller's default account as the exclusion).
+func (p *Postgres) SuggestTransferDestinations(
 	ctx context.Context, caller uuid.UUID, from *uuid.UUID, amountMinor int64,
-) (TransferSuggestion, error) {
+) ([]TransferSuggestion, error) {
 	const q = `SELECT account_id, iban, owner_name_masked, reason, scenario, source
-	           FROM suggest_transfer_destination($1::uuid, $2::uuid, $3::bigint)`
-	var sg TransferSuggestion
-	err := p.Pool.QueryRow(ctx, q, caller, from, amountMinor).
-		Scan(&sg.AccountID, &sg.Iban, &sg.OwnerNameMasked, &sg.Reason, &sg.Scenario, &sg.Source)
-	return sg, err
+	           FROM suggest_transfer_destinations($1::uuid, $2::uuid, $3::bigint)`
+	rows, err := p.Pool.Query(ctx, q, caller, from, amountMinor)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TransferSuggestion
+	for rows.Next() {
+		var sg TransferSuggestion
+		if err := rows.Scan(&sg.AccountID, &sg.Iban, &sg.OwnerNameMasked, &sg.Reason, &sg.Scenario, &sg.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, sg)
+	}
+	return out, rows.Err()
 }
 
 // maintenanceLockKey is the advisory-lock key guarding periodic maintenance so
@@ -145,36 +159,44 @@ const maintenanceLockKey int64 = 912000001
 // RunMaintenance runs expire_holds + cleanup, but only if it can grab the
 // transaction-scoped advisory lock. ran=false means another replica is handling
 // it this tick (not an error).
-func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessions int32, ran bool, err error) {
+func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessions, reconcileIssues int32, ran bool, err error) {
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	defer tx.Rollback(ctx)
 
 	if err = tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", maintenanceLockKey).Scan(&ran); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	if !ran {
-		return 0, 0, 0, false, nil
+		return 0, 0, 0, 0, false, nil
 	}
 	if err = tx.QueryRow(ctx, "SELECT expire_holds()").Scan(&expired); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	if err = tx.QueryRow(ctx, "SELECT cleanup_idempotency_keys()").Scan(&cleaned); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	if err = tx.QueryRow(ctx, "SELECT cleanup_sessions()").Scan(&sessions); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
 	var refreshCleaned int32
 	if err = tx.QueryRow(ctx, "SELECT cleanup_refresh_tokens()").Scan(&refreshCleaned); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
+	}
+	// Continuously assert the ledger/cache invariants (I1–I4): reconcile() returns
+	// one row per drift. Running it on the maintenance tick turns the correctness
+	// oracle from a manual spot-check into an automatic alarm, so a balance_minor /
+	// held_minor cache divergence is caught without waiting for an operator to open
+	// the Reconciliation panel. Read-only; shares the advisory lock + snapshot.
+	if err = tx.QueryRow(ctx, "SELECT count(*)::int FROM reconcile()").Scan(&reconcileIssues); err != nil {
+		return 0, 0, 0, 0, false, err
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return 0, 0, 0, false, err
+		return 0, 0, 0, 0, false, err
 	}
-	return expired, cleaned, sessions, true, nil
+	return expired, cleaned, sessions, reconcileIssues, true, nil
 }
 
 // ReconcileRow is one failing invariant from reconcile(). No rows => books balanced.

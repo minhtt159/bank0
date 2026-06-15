@@ -132,8 +132,8 @@ erDiagram
 ## 3. Tables in detail
 
 > The DDL below is a **design sketch** to communicate intent. The canonical
-> definitions live in `db/migrations/` once implementation starts. Enum names and
-> column names here are the contract.
+> definitions live in `db/migrations/`. Enum names and column names here are the
+> contract.
 
 ### 3.1 `users`
 
@@ -419,7 +419,7 @@ check the `reconcile()` function and the admin dashboard run.
 | `ledger_entries (transfer_id)` | fetch both legs of a transfer |
 | `holds (account_id) WHERE status='active'` | fast `available` computation |
 | `holds (expires_at) WHERE status='active'` | `expire_holds()` batch scan |
-| `transfers (status) WHERE status='pending'` | operator "pending queue" |
+| `transfers (requested_at) WHERE status='pending'` | operator "pending queue" |
 | `transfers (debit_account_id, created_at DESC)` / `(credit_account_id, created_at DESC)` | per-account transfer history (the tf-backend `UNION ALL` pattern still applies) |
 | `idempotency_keys (expires_at)` | TTL cleanup job |
 | `users (lower(username))`, `accounts (lower(iban))` | search (the search-feature TODO), or `pg_trgm` GIN later |

@@ -297,59 +297,12 @@ func TestAddBeneficiaryRejectsOwnAndDuplicate(t *testing.T) {
 	}
 }
 
-// ─── guided suggestion (00019) ───────────────────────────────────────────────
-
-// With two active accounts and no scenario, suggest_transfer_destination falls
-// back to the caller's OTHER active account. With a single account (and the only
-// account passed as the debit side), nothing is eligible -> zero rows.
-func TestSuggestTransferDestinationFallback(t *testing.T) {
-	pg := newTestPG(t)
-	ctx := context.Background()
-
-	// Two-account customer: passing one account as the debit side, the resolver's
-	// safe default returns the OTHER active account.
-	twoAcctUser := mkCustomer(t, pg)
-	from := mkAccount(t, pg, twoAcctUser)
-	otherOwn := mkAccount(t, pg, twoAcctUser)
-
-	var gotAcct uuid.UUID
-	var iban, masked, reason, source string
-	var scenario *string
-	if err := pg.Pool.QueryRow(ctx,
-		`SELECT account_id, iban, owner_name_masked, reason, scenario, source
-		   FROM suggest_transfer_destination($1,$2,$3)`,
-		twoAcctUser, from, int64(1_000)).Scan(&gotAcct, &iban, &masked, &reason, &scenario, &source); err != nil {
-		t.Fatalf("suggest (two accounts): %v", err)
-	}
-	if gotAcct != otherOwn {
-		t.Errorf("suggested %s, want the user's other account %s", gotAcct, otherOwn)
-	}
-	if source != "own_account" {
-		t.Errorf("source = %q, want own_account", source)
-	}
-
-	// Single-account customer with no matching scenario: passing that lone account
-	// as the debit side leaves nothing eligible -> zero rows.
-	soloUser := mkCustomer(t, pg)
-	solo := mkAccount(t, pg, soloUser)
-	rows, err := pg.Pool.Query(ctx,
-		`SELECT account_id FROM suggest_transfer_destination($1,$2,$3)`,
-		soloUser, solo, int64(1_000))
-	if err != nil {
-		t.Fatalf("suggest (single account): %v", err)
-	}
-	defer rows.Close()
-	n := 0
-	for rows.Next() {
-		n++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate rows: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("single-account suggestion returned %d rows, want 0", n)
-	}
-}
+// ─── guided suggestion / mule menu (00032) ───────────────────────────────────
+// The v2 resolver suggest_transfer_destinations draws only from the active
+// guided_scenarios short-list, so it's exercised end-to-end in the API suite
+// (internal/api/suggestion_test.go), which owns guided_scenarios writes
+// sequentially. A DB-layer test here would race that suite's TRUNCATE on the
+// shared test database, so the coverage lives there.
 
 // ─── reconcile drift detection (00009) ───────────────────────────────────────
 

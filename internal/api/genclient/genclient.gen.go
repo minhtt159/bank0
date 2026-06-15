@@ -112,15 +112,12 @@ func (e TransferListItemDirection) Valid() bool {
 
 // Defines values for TransferSuggestionSource.
 const (
-	OwnAccount TransferSuggestionSource = "own_account"
-	Scenario   TransferSuggestionSource = "scenario"
+	Scenario TransferSuggestionSource = "scenario"
 )
 
 // Valid indicates whether the value is a known member of the TransferSuggestionSource enum.
 func (e TransferSuggestionSource) Valid() bool {
 	switch e {
-	case OwnAccount:
-		return true
 	case Scenario:
 		return true
 	default:
@@ -292,6 +289,11 @@ type Error struct {
 	Message *string `json:"message,omitempty"`
 }
 
+// GuidedSuggestions Guided-transfer mule menu — up to 3 third-party candidates; the client picks one at random, or falls back to the caller's own account when options is empty.
+type GuidedSuggestions struct {
+	Options []TransferSuggestion `json:"options"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status  *string `json:"status,omitempty"`
@@ -441,12 +443,14 @@ type TransferSuggestion struct {
 	// Reason Human-facing label shown in the guided banner.
 	Reason *string `json:"reason,omitempty"`
 
-	// Scenario Active scenario name; omitted for the safe-default own-account suggestion.
-	Scenario *string                   `json:"scenario,omitempty"`
-	Source   *TransferSuggestionSource `json:"source,omitempty"`
+	// Scenario Active scenario name for the short-listed mule.
+	Scenario *string `json:"scenario,omitempty"`
+
+	// Source Always 'scenario' from the backend; the client synthesises 'own_account' for its empty-menu fallback.
+	Source *TransferSuggestionSource `json:"source,omitempty"`
 }
 
-// TransferSuggestionSource defines model for TransferSuggestion.Source.
+// TransferSuggestionSource Always 'scenario' from the backend; the client synthesises 'own_account' for its empty-menu fallback.
 type TransferSuggestionSource string
 
 // UpdateMeRequest defines model for UpdateMeRequest.
@@ -575,12 +579,12 @@ type CreateTransferParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
 
-// SuggestTransferDestinationParams defines parameters for SuggestTransferDestination.
-type SuggestTransferDestinationParams struct {
-	// FromAccount Intended debit account (must be owned by the caller). Excluded from the suggestion.
+// SuggestTransferDestinationsParams defines parameters for SuggestTransferDestinations.
+type SuggestTransferDestinationsParams struct {
+	// FromAccount Intended debit account (must be owned by the caller). Excluded from the menu.
 	FromAccount *openapi_types.UUID `form:"from_account,omitempty" json:"from_account,omitempty"`
 
-	// AmountMinor Intended amount in minor units; lets a scenario gate on a threshold.
+	// AmountMinor Intended amount in minor units; lets a scenario gate its mule on a threshold.
 	AmountMinor *int64 `form:"amount_minor,omitempty" json:"amount_minor,omitempty"`
 }
 
@@ -673,9 +677,9 @@ type ServerInterface interface {
 	// Create a transfer (auto-posts by default). Idempotent.
 	// (POST /transfers)
 	CreateTransfer(w http.ResponseWriter, r *http.Request, params CreateTransferParams)
-	// Guided-transfer demo: suggest a destination account for the caller. Scenario-driven (simulated mule) when an active guided_scenario applies, else the caller's own other active account. Read-only; never moves money.
+	// Guided-transfer demo: up to 3 candidate destination accounts (other users', randomly sampled + shuffled, optionally including a short-listed mule). The client picks one at random; an empty array means "no candidate — fall back to the caller's own account". Read-only; never moves money.
 	// (GET /transfers/suggestion)
-	SuggestTransferDestination(w http.ResponseWriter, r *http.Request, params SuggestTransferDestinationParams)
+	SuggestTransferDestinations(w http.ResponseWriter, r *http.Request, params SuggestTransferDestinationsParams)
 	// Get a transfer
 	// (GET /transfers/{id})
 	GetTransfer(w http.ResponseWriter, r *http.Request, id Id)
@@ -1394,14 +1398,14 @@ func (siw *ServerInterfaceWrapper) CreateTransfer(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
-// SuggestTransferDestination operation middleware
-func (siw *ServerInterfaceWrapper) SuggestTransferDestination(w http.ResponseWriter, r *http.Request) {
+// SuggestTransferDestinations operation middleware
+func (siw *ServerInterfaceWrapper) SuggestTransferDestinations(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params SuggestTransferDestinationParams
+	var params SuggestTransferDestinationsParams
 
 	// ------------- Optional query parameter "from_account" -------------
 
@@ -1430,7 +1434,7 @@ func (siw *ServerInterfaceWrapper) SuggestTransferDestination(w http.ResponseWri
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SuggestTransferDestination(w, r, params)
+		siw.Handler.SuggestTransferDestinations(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1723,7 +1727,7 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.CreateTransfer).Methods(http.MethodPost)
 
-	r.HandleFunc(options.BaseURL+"/transfers/suggestion", wrapper.SuggestTransferDestination).Methods(http.MethodGet)
+	r.HandleFunc(options.BaseURL+"/transfers/suggestion", wrapper.SuggestTransferDestinations).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}", wrapper.GetTransfer).Methods(http.MethodGet)
 

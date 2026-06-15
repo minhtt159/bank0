@@ -21,6 +21,7 @@
 > | [`spec-customer-account-opening.md`](spec-customer-account-opening.md) | `POST /me/accounts` + IBAN allocator + limit requests | §2 (pots reuse the allocator) |
 > | [`spec-step-up-mfa.md`](spec-step-up-mfa.md) | TOTP MFA + step-up | §3 (card controls), §6 (FX confirm) |
 > | [`spec-notifications-events.md`](spec-notifications-events.md) | `GET /me/events` feed | §5 (schedule ran/failed), §7 (request received) |
+> | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (idempotency HTTP contract, server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
 >
 > **Shipped** (`docs/archive/`):
 >

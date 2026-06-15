@@ -33,13 +33,17 @@ func getSuggestion(t *testing.T, ts *httptest.Server, token, query string) (int,
 	return resp.StatusCode, body(t, resp)
 }
 
-func decodeSuggestion(t *testing.T, b string) suggestion {
+// decodeOptions parses the {"options": [...]} wrapper and returns the options. A
+// bare array (or any non-object) fails the unmarshal — pinning the wrapper shape.
+func decodeOptions(t *testing.T, b string) []suggestion {
 	t.Helper()
-	var sg suggestion
-	if err := json.Unmarshal([]byte(b), &sg); err != nil {
-		t.Fatalf("decode suggestion: %v; body=%s", err, b)
+	var wrap struct {
+		Options []suggestion `json:"options"`
 	}
-	return sg
+	if err := json.Unmarshal([]byte(b), &wrap); err != nil {
+		t.Fatalf("decode {options:[...]}: %v; body=%s", err, b)
+	}
+	return wrap.Options
 }
 
 // resetScenarios clears the shared guided_scenarios table so each test is isolated
@@ -62,10 +66,11 @@ func seedScenario(t *testing.T, pg *db.Postgres, name string, target uuid.UUID, 
 	}
 }
 
-// GET /transfers/suggestion: own-account safe default, scenario-driven mule, foreign
-// from_account 403, and the suggested account still flows through POST /transfers.
-// See spec-guided-transfer-suggestion.md.
-func TestHTTPGuidedSuggestion(t *testing.T) {
+// GET /transfers/suggestion (mule menu, v2): {"options":[...]} of up to 3 third-party
+// mule candidates drawn from the active guided_scenarios short-list — never the
+// caller's own; empty when no scenario applies; foreign from_account 403; a chosen
+// candidate still flows through POST /transfers. See spec-banking-grade-hardening.md §5.
+func TestHTTPGuidedMenu(t *testing.T) {
 	ts, pg := newTestServer(t)
 	resetScenarios(t, pg)
 	aliceID, aliceName := mkUser(t, pg, sqlc.UserRoleCustomer)
@@ -73,6 +78,8 @@ func TestHTTPGuidedSuggestion(t *testing.T) {
 	a2 := mkAcct(t, pg, aliceID, 0)
 	bobID, _ := mkUser(t, pg, sqlc.UserRoleCustomer)
 	bobAcct := mkAcct(t, pg, bobID, 0)
+	carolID, _ := mkUser(t, pg, sqlc.UserRoleCustomer)
+	carolAcct := mkAcct(t, pg, carolID, 0)
 	tok := clientToken(t, ts, aliceName, "pw")
 
 	// no bearer -> 401
@@ -80,20 +87,40 @@ func TestHTTPGuidedSuggestion(t *testing.T) {
 		t.Errorf("no-bearer = %d, want 401", code)
 	}
 
-	// own-account safe default (no scenario): from=a1 excludes a1 -> suggests a2
+	// no scenario -> empty menu (the client falls back to its own account)
 	code, b := getSuggestion(t, ts, tok, "?from_account="+a1.String())
 	if code != 200 {
-		t.Fatalf("own-account = %d, want 200; body=%s", code, b)
+		t.Fatalf("empty menu = %d, want 200; body=%s", code, b)
 	}
-	sg := decodeSuggestion(t, b)
-	if sg.Source != "own_account" || sg.AccountID != a2.String() {
-		t.Errorf("own-account: source=%s account=%s, want own_account/%s", sg.Source, sg.AccountID, a2)
+	if opts := decodeOptions(t, b); len(opts) != 0 {
+		t.Errorf("no scenario should give an empty menu, got %d options; body=%s", len(opts), b)
 	}
-	if sg.Scenario != nil {
-		t.Errorf("own-account scenario should be null, got %q", *sg.Scenario)
+
+	// two active global scenarios (mules) -> the menu draws from them, source=scenario
+	seedScenario(t, pg, "mule_"+uhex(6), bobAcct, "Verified payee", 0)
+	seedScenario(t, pg, "mule_"+uhex(6), carolAcct, "Trusted merchant", 0)
+	code, b = getSuggestion(t, ts, tok, "?from_account="+a1.String())
+	if code != 200 {
+		t.Fatalf("menu = %d, want 200; body=%s", code, b)
+	}
+	opts := decodeOptions(t, b)
+	if len(opts) == 0 || len(opts) > 3 {
+		t.Fatalf("menu size = %d, want 1..3; body=%s", len(opts), b)
+	}
+	mules := map[string]bool{bobAcct.String(): true, carolAcct.String(): true}
+	for _, o := range opts {
+		if !mules[o.AccountID] {
+			t.Errorf("option %s is not a seeded mule (never the caller's own, never an arbitrary peer)", o.AccountID)
+		}
+		if o.AccountID == a1.String() || o.AccountID == a2.String() {
+			t.Errorf("menu must never include the caller's own account; got %s", o.AccountID)
+		}
+		if o.Source != "scenario" {
+			t.Errorf("backend option source = %q, want scenario", o.Source)
+		}
 	}
 	if strings.Contains(b, "balance_minor") || strings.Contains(b, "full_name") {
-		t.Errorf("suggestion leaked balance/full_name: %s", b)
+		t.Errorf("menu leaked balance/full_name: %s", b)
 	}
 
 	// foreign from_account (bob's) -> 403, before any resolve
@@ -101,26 +128,8 @@ func TestHTTPGuidedSuggestion(t *testing.T) {
 		t.Errorf("foreign from_account = %d, want 403", code)
 	}
 
-	// scenario: a global active scenario targeting bob (the mule) wins over own-account
-	name := "app_scam_" + uhex(6)
-	seedScenario(t, pg, name, bobAcct, "Verified payee", 0)
-	code, b = getSuggestion(t, ts, tok, "?from_account="+a1.String())
-	if code != 200 {
-		t.Fatalf("scenario = %d, want 200; body=%s", code, b)
-	}
-	sg = decodeSuggestion(t, b)
-	if sg.Source != "scenario" || sg.AccountID != bobAcct.String() {
-		t.Errorf("scenario: source=%s account=%s, want scenario/%s", sg.Source, sg.AccountID, bobAcct)
-	}
-	if sg.Scenario == nil || *sg.Scenario != name {
-		t.Errorf("scenario name = %v, want %q", sg.Scenario, name)
-	}
-	if strings.Contains(b, "balance_minor") || strings.Contains(b, "full_name") {
-		t.Errorf("scenario suggestion leaked fields: %s", b)
-	}
-
-	// the suggested account flows through POST /transfers unchanged (money path intact)
-	tbody := `{"debit_account":"` + a1.String() + `","credit_account":"` + sg.AccountID + `","amount_minor":100}`
+	// a chosen candidate flows through POST /transfers unchanged (money path intact)
+	tbody := `{"debit_account":"` + a1.String() + `","credit_account":"` + opts[0].AccountID + `","amount_minor":100}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/transfers", strings.NewReader(tbody))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Idempotency-Key", uuid.NewString())
@@ -131,12 +140,13 @@ func TestHTTPGuidedSuggestion(t *testing.T) {
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Errorf("transfer to suggested account = %d, want 200", resp.StatusCode)
+		t.Errorf("transfer to a menu candidate = %d, want 200", resp.StatusCode)
 	}
 }
 
-// amount_minor gates a scenario; below the threshold a single-account caller gets 204.
-func TestHTTPGuidedSuggestionAmountGate(t *testing.T) {
+// amount_minor gates pool membership: below a scenario's threshold its mule is not
+// eligible (empty menu); at/above it the mule appears.
+func TestHTTPGuidedMenuAmountGate(t *testing.T) {
 	ts, pg := newTestServer(t)
 	resetScenarios(t, pg)
 	aliceID, aliceName := mkUser(t, pg, sqlc.UserRoleCustomer)
@@ -144,18 +154,24 @@ func TestHTTPGuidedSuggestionAmountGate(t *testing.T) {
 	bobID, _ := mkUser(t, pg, sqlc.UserRoleCustomer)
 	bobAcct := mkAcct(t, pg, bobID, 0)
 	tok := clientToken(t, ts, aliceName, "pw")
-	seedScenario(t, pg, "gate_"+uhex(6), bobAcct, "Verified payee", 10_000) // fires only >= €100
+	seedScenario(t, pg, "gate_"+uhex(6), bobAcct, "Verified payee", 10_000) // eligible only >= €100
 
-	// below threshold: scenario silent; alice has only a1 (excluded) -> 204
-	if code, _ := getSuggestion(t, ts, tok, "?from_account="+a1.String()+"&amount_minor=5000"); code != 204 {
-		t.Errorf("below-gate = %d, want 204", code)
+	// below threshold: the only scenario is gated out -> empty menu
+	code, b := getSuggestion(t, ts, tok, "?from_account="+a1.String()+"&amount_minor=5000")
+	if code != 200 {
+		t.Fatalf("below-gate = %d, want 200; body=%s", code, b)
 	}
-	// at/above threshold: scenario fires -> bob
-	code, b := getSuggestion(t, ts, tok, "?from_account="+a1.String()+"&amount_minor=20000")
+	if opts := decodeOptions(t, b); len(opts) != 0 {
+		t.Errorf("below-gate menu should be empty, got %d", len(opts))
+	}
+
+	// at/above threshold: the mule becomes eligible
+	code, b = getSuggestion(t, ts, tok, "?from_account="+a1.String()+"&amount_minor=20000")
 	if code != 200 {
 		t.Fatalf("above-gate = %d, want 200; body=%s", code, b)
 	}
-	if sg := decodeSuggestion(t, b); sg.Source != "scenario" || sg.AccountID != bobAcct.String() {
-		t.Errorf("above-gate = %+v, want scenario/%s", sg, bobAcct)
+	opts := decodeOptions(t, b)
+	if len(opts) != 1 || opts[0].AccountID != bobAcct.String() || opts[0].Source != "scenario" {
+		t.Errorf("above-gate = %+v, want exactly [bob with source=scenario]", opts)
 	}
 }
