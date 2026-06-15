@@ -1,0 +1,17 @@
+{{- if .Values.metrics.dashboard.enabled }}
+# Grafana dashboard shipped as a ConfigMap. The kube-prometheus-stack Grafana
+# sidecar auto-imports any ConfigMap carrying its discovery label (default
+# `grafana_dashboard: "1"`), so no Grafana Operator is required. Gated off by
+# default. The dashboard JSON lives at dashboards/bank0-overview.json.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboard
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{ .Values.metrics.dashboard.label }}: "1"
+data:
+  bank0-overview.json: |-
+    {{- .Files.Get "dashboards/bank0-overview.json" | nindent 4 }}
+{{- end }}

@@ -21,6 +21,9 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: api
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: app
           image: {{ include "bank0.image" . }}
@@ -31,8 +34,8 @@ spec:
           env:
             - { name: APP_SERVER_MODE, value: "api" }
             - { name: APP_ADMIN_RUN_MAINTENANCE, value: {{ .Values.api.runMaintenance | quote }} }
-            - { name: APP_ADMIN_MAKER_CHECKER_THRESHOLD_MINOR, value: {{ int64 .Values.admin.makerCheckerThresholdMinor | quote }} }
             - { name: APP_ADMIN_SESSION_IDLE_TIMEOUT, value: {{ .Values.admin.sessionIdleTimeout | quote }} }
+            - { name: APP_SERVER_TRUST_PROXY_HEADERS, value: {{ .Values.trustProxyHeaders | quote }} }
             - { name: APP_SERVER_AUTO_MIGRATE, value: "false" }
             - { name: APP_LOGGING_ENCODING, value: "json" }
             - { name: APP_APP_ENV, value: "production" }
@@ -51,3 +54,5 @@ spec:
             periodSeconds: 15
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}

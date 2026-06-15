@@ -18,16 +18,53 @@ service:
   port: 80
 
 admin:
-  makerCheckerThresholdMinor: 1000000   # €10,000.00
+  # NB: the maker-checker threshold + default transfer limit are NOT app config —
+  # they live in the DB (bank_settings, API-8) and are edited from the console
+  # Settings panel. Only the session idle timeout is an app/infra knob.
   sessionIdleTimeout: 30m
 
+# Trust forwarded client-IP headers (CF-Connecting-IP / X-Forwarded-For) for the
+# per-IP auth rate-limit key. TRUE here because both surfaces sit behind a trusted
+# edge (Cloudflare for api, the Gateway for portal) that overwrites them; set FALSE
+# if a surface is ever exposed directly. See docs/10 (RATELIMIT-XFF-SPOOF).
+trustProxyHeaders: true
+
+# Pod- and container-level hardening applied to both deployments. The image is
+# distroless:nonroot (uid 65532) and writes nothing to disk, so a read-only root
+# filesystem + dropped capabilities are safe.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Prometheus + Grafana integration. Both are OFF by default because they require
+# their operators' CRDs to be installed (enabling them otherwise breaks helm
+# install). The /metrics endpoint itself is always served by the app.
+metrics:
+  serviceMonitor:
+    enabled: false          # requires the Prometheus Operator (ServiceMonitor CRD)
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}              # extra labels so your Prometheus's serviceMonitorSelector matches
+  dashboard:
+    enabled: false          # ship the Grafana dashboard as a sidecar-discovered ConfigMap
+    label: grafana_dashboard  # the kube-prometheus-stack Grafana sidecar label key
+
 # JWT bearer auth for the client (api) surface. Must be shared across all api
-# replicas. Prefer an existing secret; the inline value is for dev only.
+# replicas. Prefer an existing secret; the inline value is for dev only. The token
+# TTL is an app default (15m, internal/config); override via APP_AUTH_JWT_TTL if needed.
 auth:
   existingSecret: ""        # secret holding the JWT signing key
   secretKey: jwt-secret
   jwtSecret: ""             # dev only; if set (and no existingSecret) the chart creates a secret
-  jwtTTL: 1h
 
 # Gateway API (Envoy Gateway). HTTPRoutes attach to a Gateway by parentRef.
 # The chart can create the Gateway, or set create=false to attach to a shared one.
