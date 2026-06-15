@@ -1,7 +1,7 @@
 # Spec — Self-registration, onboarding state & contact verification
 
 > Implementation spec. Closes the P1 "Self-registration / onboarding" gap in
-> [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md) and the onboarding
+> [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md) and the onboarding
 > item deferred in [`../06-client-api.md`](../06-client-api.md) §7. The full KYC
 > vision (document capture, sanctions/PEP screening, tiered limits) is the
 > architecture in [`spec-p3-roadmap.md`](spec-p3-roadmap.md) §1; **this spec is the
@@ -27,7 +27,7 @@ least one contact channel is verified, and a new `onboarding_status` column driv
 the client's wizard. No account/IBAN is opened at signup (that is the separate
 "customer account opening" gap); a verified user can be hand-opened by staff or by
 the future `POST /me/accounts`. Verification codes follow the project's
-hash-at-rest + DB-first-state discipline (refresh tokens, `00017`): the DB stores
+hash-at-rest + DB-first-state discipline (refresh tokens, `00003_users.sql`): the DB stores
 only `sha256(code)`, all state transitions are PL/pgSQL, Go maps SQLSTATE → HTTP.
 
 Design stance, consistent with the codebase:
@@ -162,15 +162,16 @@ portal user-detail expose it:
 
 ---
 
-## 3. Data model — migration `00018_self_registration.sql`
+## 3. Data model — migration `00010_self_registration.sql`
 
-Migrations are currently numbered to `00017_refresh_tokens.sql`, so `00018` is the
-next free number. **Several sibling specs in this directory also claim `00018`**
-(`spec-step-up-mfa.md` → `00018_mfa.sql`, `spec-change-password.md` →
-`00018_change_password.sql`, `spec-notifications-events.md` → `00018_events.sql`,
-`spec-disputes.md`). **Coordinate at land time**: whichever lands first takes `00018`;
-renumber the rest sequentially (`00019`, `00020`, …) — goose ordering is what matters,
-not the suffix. Adds: an `onboarding_status` enum + column on `users`, the
+Migrations are now a 9-file domain baseline (`00001_foundation.sql` …
+`00009_system_seed.sql`), so `00010` is the next free number — run `ls db/migrations/`
+and take the actual next free number at land time.
+**Several sibling specs in this directory also add a new migration**
+(`spec-step-up-mfa.md`, `spec-change-password.md`, `spec-notifications-events.md`,
+`spec-disputes.md`). **Coordinate at land time**: whichever lands first takes the next
+free number; renumber the rest sequentially (`00011`, `00012`, …) — goose ordering is
+what matters, not the suffix. Adds: an `onboarding_status` enum + column on `users`, the
 `verification_challenges` table, and the PL/pgSQL functions.
 
 ```sql
@@ -539,7 +540,7 @@ case "53400": // configuration_limit_exceeded -> rate limited
 
 ## 7. Acceptance criteria
 
-- [ ] `00018_self_registration.sql` applies cleanly up and down on a throwaway DB.
+- [ ] `00010_self_registration.sql` applies cleanly up and down on a throwaway DB.
 - [ ] `users.onboarding_status` defaults `active`; existing/admin users unaffected.
 - [ ] `oapi-codegen` regenerates `genclient` with `Register`/`VerifyContact`/
       `ResendCode`; handlers implement the interface (build is green).
@@ -557,7 +558,7 @@ case "53400": // configuration_limit_exceeded -> rate limited
 
 ## 8. Step-by-step implementation order
 
-1. Write `db/migrations/00018_self_registration.sql` (enum + columns + table +
+1. Write `db/migrations/00010_self_registration.sql` (enum + columns + table +
    functions). `goose up`/`down` against a scratch DB; eyeball the schema.
 2. Add `db/queries/registration.sql`; run `sqlc generate`. Hand-write `VerifyContact`
    (RETURNS TABLE) in `internal/db/bank.go` next to `Transfer`/`Reconcile`.
@@ -577,4 +578,4 @@ case "53400": // configuration_limit_exceeded -> rate limited
    green with `TEST_DATABASE_DSN`.
 10. Update [`../06-client-api.md`](../06-client-api.md) §1 surface table + §7 ("Still
     deferred") to mark onboarding **done (v1)**, and the gap table in
-    [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md) P1.
+    [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md) P1.

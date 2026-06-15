@@ -30,7 +30,7 @@ func (s *Server) SuggestTransferDestinations(w http.ResponseWriter, r *http.Requ
 	if params.FromAccount != nil {
 		owner, err := s.pg.Queries.AccountOwner(r.Context(), uuid.UUID(*params.FromAccount))
 		if err != nil {
-			mapDBError(w, err)
+			s.mapDBError(w, r, err)
 			return
 		}
 		if !ownsAccount(subj, owner) {
@@ -46,7 +46,7 @@ func (s *Server) SuggestTransferDestinations(w http.ResponseWriter, r *http.Requ
 	}
 	candidates, err := s.pg.SuggestTransferDestinations(r.Context(), subj, from, amount)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	// Wrap in {"options": [...]} (the spec's deliberate one-time envelope so future

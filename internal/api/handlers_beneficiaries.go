@@ -24,7 +24,7 @@ func (s *Server) ListBeneficiaries(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.pg.Queries.ListBeneficiaries(r.Context(), subj)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows) // writeJSON coerces a nil slice to []
@@ -59,12 +59,12 @@ func (s *Server) AddBeneficiary(w http.ResponseWriter, r *http.Request) {
 		Owner: subj, Label: req.Label, Iban: iban.Normalize(req.Iban),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	b, err := s.pg.Queries.GetBeneficiary(r.Context(), sqlc.GetBeneficiaryParams{ID: id, Owner: subj})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, b)
@@ -87,7 +87,7 @@ func (s *Server) ResolveBeneficiary(w http.ResponseWriter, r *http.Request, para
 	}
 	a, err := s.pg.ResolveAccountByIban(r.Context(), iban.Normalize(params.Iban))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
@@ -103,7 +103,7 @@ func (s *Server) DeleteBeneficiary(w http.ResponseWriter, r *http.Request, id op
 	if err := s.pg.Queries.DeleteBeneficiary(r.Context(), sqlc.DeleteBeneficiaryParams{
 		Owner: subj, ID: uuid.UUID(id),
 	}); err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

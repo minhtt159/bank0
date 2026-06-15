@@ -34,7 +34,7 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.pg.ChangePassword(r.Context(), subj, req.CurrentPassword, req.NewPassword); err != nil {
-		mapDBError(w, err) // 28P01 -> 401, 23514 -> 422
+		s.mapDBError(w, r, err) // 28P01 -> 401, 23514 -> 422
 		return
 	}
 	// Spare the current session's family; revoke the rest. Best-effort: an unknown

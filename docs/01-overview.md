@@ -1,197 +1,176 @@
-# bank0 — Overview & Design
+# bank0 — Overview
 
-> A core-banking backend proof of concept.
-> Status: **implemented** · Stack: Go 1.26 · PostgreSQL 18 · Templ + HTMX
-
----
-
-## 1. What this is (and isn't)
-
-bank0 is a **proof of concept for the engine at the heart of a bank**: the part
+bank0 is a **core-banking backend**: the engine at the heart of a bank — the part
 that holds account balances and moves money between them without ever losing a
-cent, double-spending, or double-posting on a retry.
+cent, double-spending, or double-posting on a retry. Correctness is a property of
+the **database**; the Go services on top are thin transport.
 
-**In scope**
-- Customers, accounts, and a single currency (EUR), stored as integer minor units.
-- A **double-entry ledger** as the single source of truth for money.
-- A **transfer state machine** with authorization holds (pending → posted /
-  failed / reversed).
-- **Database-enforced idempotency** for every money movement.
-- An **operator console** (admin UI) for support/ops staff
-  ([`05-admin-ui.md`](05-admin-ui.md)).
-- A **customer client API** ([`06-client-api.md`](06-client-api.md)) and a
-  **PWA** over it ([`07-client-web-app.md`](07-client-web-app.md)).
-
-**Out of scope (PoC simplifications, called out where they matter)**
-- Multi-currency and FX (single currency keeps double-entry trivially balanced).
-- Real payment rails (SEPA/SWIFT/card networks) — we *model* their lifecycle, we
-  don't connect to them.
-- Interest accrual, statements/PDF generation, KYC/AML workflows.
-- Customer MFA / step-up and onboarding/KYC (designed, not built — see
-  [`06-client-api.md`](06-client-api.md) §6).
-
-These can each be layered on later without reshaping the core; see the "future
-extension" notes in [`02-data-model.md`](02-data-model.md) and
-[`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md).
+Single currency (EUR), amounts as integer minor units. It **models** the payment
+lifecycle (authorization holds, settlement, reversal) rather than connecting to
+real rails (SEPA/SWIFT/cards); interest, statements, and KYC/AML are out of scope
+and can be layered on without reshaping the core.
 
 ---
 
-## 2. Design principles
+## The four invariants
 
-These four principles are the reason every later decision is the way it is. When
-in doubt, re-derive from these.
+Everything below follows from four rules. When a design question comes up, re-derive
+the answer from these.
 
-### P1 — The ledger is the source of truth; balance is a cache
+1. **The ledger is the source of truth; balance is a cache.** `ledger_entries` is an
+   append-only record of every signed posting. `accounts.balance_minor` is a
+   trigger-maintained cache of `SUM(ledger_entries)` — for fast reads, not for truth.
+   The *only* thing that may change a balance is inserting a ledger entry, so the
+   cache can't drift: `reconcile()` asserts `balance_minor == SUM(entries)` on demand
+   and on the operator dashboard.
+2. **Money/auth logic lives in the database.** Every money movement and every
+   auth/session transition is a PL/pgSQL function with explicit row locks. It owns all
+   validation (funds, limits, account status) and all writes (transfer, ledger, holds,
+   balance cache, audit). Triggers enforce the structural invariants. Correctness is a
+   property of the schema, so a second client, a cron job, or a `psql` session all get
+   the same guarantees.
+3. **Idempotency is enforced by the database.** Money moves carry an `Idempotency-Key`;
+   a dedicated table makes the first call do the work and every replay return the
+   *original* result, inside the same transaction that posts. The API never has to
+   reason about "did this already happen?".
+4. **Append-only and auditable.** `ledger_entries` is immutable (a trigger rejects
+   UPDATE/DELETE); corrections are new **reversing entries**. Every operator action is
+   attributed and recorded in `admin_actions`. The ledger *is* the audit trail.
 
-A single append-only table, `ledger_entries`, records every movement of value as
-a signed posting. `accounts.balance_minor` is a **maintained cache** of
-`SUM(ledger_entries.signed_amount)` for that account. It exists for fast reads,
-not for truth.
-
-> **Invariant (reconciliation):** for every account,
-> `balance_minor == SUM(signed_amount of posted ledger_entries)`.
-> A `reconcile()` function asserts this on demand and on the admin dashboard.
-
-The cache cannot drift, because **the only thing in the entire system that may
-change a balance is inserting a ledger entry** (enforced by trigger — see P2).
-There is no `UPDATE accounts SET balance = ...` anywhere in application code.
-
-### P2 — State transitions live in the database
-
-Every money movement is a PL/pgSQL function with explicit row locks
-(`FOR UPDATE`). The functions own all validation (sufficient funds, limits,
-account status, currency match) and all writes (transfer row, ledger entries,
-holds, balance cache, audit). Triggers enforce structural invariants
-(immutability, single-default-account, `updated_at`, balance-follows-ledger).
-
-This is deliberate: it makes correctness a property of the **schema**, not of
-each caller. A second API, a cron job, or a `psql` session all get the same
-guarantees.
-
-### P3 — Idempotency is enforced by the database
-
-Money moves carry a client **idempotency key**. A dedicated table makes the first
-call do the work and every replay return the *original* result — at the database
-level, inside the same transaction that does the posting. The API layer never has
-to reason about "did this already happen?". Natural-key uniqueness
-(username, IBAN, one-default-account) is enforced by unique / partial-unique
-indexes. See [`03-...md`](03-ledger-lifecycle-idempotency.md).
-
-### P4 — Append-only and auditable
-
-`ledger_entries` is immutable: a trigger rejects `UPDATE` and `DELETE`.
-Mistakes are corrected by appending **reversing entries**, never by editing
-history. Every admin action is attributed to a named operator and recorded.
-The audit trail is the ledger itself plus an `admin_actions` log — there is no
-separate, divergeable "audit copy" of transactions (a key simplification over
-tf-backend, which kept both `transactions` and `transaction_audit_log`).
-
-### P5 — The API backend carries no business logic
-
-> "Ensure no business confusion on the API backend."
-
-Handlers parse the request, call exactly one DB function, and map the result (or
-a typed DB error) to an HTTP status. No balance math, no state checks, no
-"is this allowed?" in Go. If you find business logic creeping into a handler,
-it belongs in a DB function.
+The API layer carries **no** business logic: handlers parse the request, call **one**
+DB function, and map the result (or a typed DB error) to an HTTP status.
 
 ---
 
-## 3. Architecture at a glance
+## Architecture — three surfaces, one ledger
+
+Two surfaces are the **same Go binary** in different `server.mode`s (separated *in the
+app*, not just at the edge — an `api` pod doesn't even register the admin routes); the
+third is a Cloudflare Worker. All three read and write the one Postgres ledger.
+
+| Host | Surface | Tech | Auth |
+|------|---------|------|------|
+| `portal.bank0.hnimn.art` | admin API + operator console | Go `mode=portal` (Templ/HTMX) | DB cookie session, staff roles |
+| `api.bank0.hnimn.art` | customer JSON API | Go `mode=api`, behind Cloudflare | JWT bearer + rotating refresh tokens, ownership-scoped |
+| `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite) | proxies `/api/*` to the client API |
 
 ```mermaid
 graph LR
-    Op([Operator]) -->|HTML / HTMX| Web[Operator Console :8080]
-    Client([API client]) -->|JSON| API[REST API :8080]
-    Web --> MW[Middleware: session/role, logging, rate-limit]
+    Op([Operator]) -->|HTML / HTMX| Portal[portal · mode=portal]
+    Cust([Customer]) -->|PWA| CFW[Cloudflare Worker]
+    CFW -->|/api/* proxy| API[api · mode=api]
+    Portal --> MW[thin handlers: one DB call each]
     API --> MW
-    MW --> H[Thin handlers]
-    H -->|one call each| FN[PL/pgSQL functions]
-    FN --> L[(ledger_entries\nappend-only)]
+    MW --> FN[PL/pgSQL functions]
+    FN --> L[(ledger_entries · append-only)]
     FN --> A[(accounts / holds / transfers)]
     L -. BEFORE INSERT trigger .-> A
     FN --> IK[(idempotency_keys)]
 ```
 
-The handler-to-function mapping is intentionally 1:1 for mutations. See
-[`03-...md`](03-ledger-lifecycle-idempotency.md) §"API surface".
+`server.mode=all` serves both Go surfaces in one container for local development.
+The schema is a 9-file domain baseline under `db/migrations/`: `00001_foundation`
+(extensions, `uuidv7()`, enum types), `00002_iban`, `00003_users`, `00004_accounts`,
+`00005_transfers`, `00006_maker_checker`, `00007_maintenance`,
+`00008_features`, `00009_system_seed`.
 
 ---
 
-## 4. Request lifecycle (a money move)
+## Using bank0
+
+### Run it locally
+
+```bash
+docker compose -f deploy/docker-compose.dev.yml up --build -d   # Postgres + migrate + admin (mode=portal :8080) + client (mode=api :8090)
+task seed                                                       # load the dev seed (db/seed.sql); migrate ran above
+open http://localhost:8080/        # operator console (Templ + HTMX)
+open http://localhost:8090/docs    # client API reference (Scalar)
+```
+
+Seeded logins (dev passwords): staff `admin`/`admin`, `operator1`/`operator`,
+`auditor1`/`auditor`; customers `alice`/`password` … (30 named + generated, no console
+access). The default seed (`db/seed.sql`, idempotent) loads 91 customers / 215
+accounts (valid NL IBANs) / 714 transfers, including pending/canceled/reversed for the
+full lifecycle and three dedicated guided-transfer "mule" accounts. `task seed:demo` loads a much
+larger randomized set.
+
+### Scenario — a customer moves money (client API → PWA)
+
+The PWA is same-origin with the API (the Worker proxies `/api/*`), so tokens never
+cross a third origin.
+
+1. `POST /auth/login` → an access JWT (15-min) + a refresh token. The PWA silently
+   rotates via `POST /auth/refresh`.
+2. `GET /me`, `GET /users/{id}/accounts`, `GET /accounts/{id}/ledger` — all
+   ownership-scoped to the token subject (anything else is `404`).
+3. `GET /beneficiaries/resolve?iban=…` confirms a payee (masked owner name), then
+   `POST /beneficiaries` saves it.
+4. `POST /transfers` with an `Idempotency-Key` moves the money. A small amount posts
+   immediately; replays return the original result.
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant H as Handler (thin)
-    participant DB as PostgreSQL
     participant FN as request_transfer()
     participant TR as post_transfer()
-
-    C->>H: POST /transfers  {idempotency_key, debit, credit, amount}
-    H->>FN: SELECT request_transfer($key, $debit, $credit, $amount, $desc)
+    C->>H: POST /transfers {Idempotency-Key, debit, credit, amount}
+    H->>FN: request_transfer(...)
     Note over FN: INSERT idempotency_keys ON CONFLICT DO NOTHING
     alt key already seen
-        FN-->>H: stored result (no double-post)
+        FN-->>H: original stored result (no double-post)
     else first time
-        FN->>DB: lock debit acct, check available balance vs limit
-        FN->>DB: INSERT transfer(status=pending) + hold(active)
-        FN-->>H: {transfer_id, status: pending}
+        FN->>FN: lock debit acct, check available vs limit, place hold
+        FN->>TR: post_transfer() (auto for small amounts)
+        TR->>TR: INSERT 2 ledger_entries; trigger updates balances
+        TR-->>H: {transfer_id, status: posted}
     end
     H-->>C: 200 {transfer_id, status}
-
-    C->>H: POST /transfers/{id}/post  (or auto, see config)
-    H->>TR: SELECT post_transfer($id)
-    TR->>DB: INSERT 2 ledger_entries (debit/credit)
-    DB-->>DB: BEFORE INSERT trigger updates balances + balance_after
-    TR->>DB: hold -> captured, transfer -> posted
-    TR-->>H: {status: posted}
-    H-->>C: 200 {status: posted}
 ```
 
-Two-phase by default (request → post) because you chose the full lifecycle; a
-synchronous convenience that requests-and-posts in one transaction is also
-provided for the common "settle immediately" case. Details in
-[`03-...md`](03-ledger-lifecycle-idempotency.md).
+Above the maker-checker threshold (`bank_settings`, €10k by default) the transfer
+parks as **pending** for a second operator instead of posting. Guided-transfer mode
+(`GET /transfers/suggestion`) returns a short menu of candidate payees for the
+APP-scam demo — see [`06-client-api.md`](06-client-api.md).
+
+### Scenario — an operator runs the bank (console)
+
+From `portal.*`, a staff member (cookie session, role-gated) provisions and supervises:
+
+1. **Provision**: create a customer (`POST /users`), open an account
+   (`POST /accounts`, generated NL IBAN), fund it (`POST /accounts/{id}/deposit`).
+2. **Move money**: credit/withdraw; anything above the threshold routes to the
+   **maker-checker Approvals** queue (the maker can't self-approve).
+3. **Supervise**: search users/accounts/transfers, walk a transfer's lifecycle
+   (post/cancel/reverse — reversals clawback-check the recipient), resolve disputes,
+   and watch `reconcile()` (run continuously on the maintenance tick) confirm the books
+   balance. See [`05-admin-ui.md`](05-admin-ui.md).
+
+### Deploy it
+
+Two supported paths, same image: a **self-managed** Kubernetes/Helm + Gateway API
+setup ([`04-deployment.md`](04-deployment.md)) and a **serverless** Supabase + Cloud
+Run + Cloudflare path ([`08-deployment-cloud-run-supabase.md`](08-deployment-cloud-run-supabase.md)).
+Migrations run as a pre-upgrade job; readiness pings the DB; `/metrics` exposes
+Prometheus RED + pool gauges.
 
 ---
 
-## 5. Documentation map
+## Documentation map
 
-| Read this when you want to… | Doc |
+| To… | Read |
 |---|---|
-| Understand scope and *why* the design is shaped this way | this file |
-| Know the tables, columns, constraints, indexes, ERD | [`02-data-model.md`](02-data-model.md) |
-| Understand the transfer state machine, the DB functions, idempotency, triggers | [`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) |
-| Deploy: topology, Cloudflare edge, Helm/Gateway option, migrations | [`04-deployment.md`](04-deployment.md) |
-| Build or critique the operator console (admin UI) | [`05-admin-ui.md`](05-admin-ui.md) |
-| Use the customer client API: endpoints, JWT + refresh auth, ownership, MFA plan | [`06-client-api.md`](06-client-api.md) |
-| Build/run the customer PWA (Cloudflare Workers) | [`07-client-web-app.md`](07-client-web-app.md) |
+| Know the tables, columns, constraints, indexes | [`02-data-model.md`](02-data-model.md) |
+| Understand the transfer state machine, DB functions, idempotency, triggers | [`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) |
+| Deploy (self-managed Helm / Gateway) | [`04-deployment.md`](04-deployment.md) |
+| Use the operator console | [`05-admin-ui.md`](05-admin-ui.md) |
+| Use the customer client API (auth, ownership, endpoints) | [`06-client-api.md`](06-client-api.md) |
+| Build/run the customer PWA | [`07-client-web-app.md`](07-client-web-app.md) |
+| Deploy (serverless Supabase + Cloud Run) | [`08-deployment-cloud-run-supabase.md`](08-deployment-cloud-run-supabase.md) |
+| Integrate the fraudbank clients | [`09-fraudbank-integration.md`](09-fraudbank-integration.md) |
+| Review the security model | [`10-security-review.md`](10-security-review.md) |
+| Understand IBAN validation/generation | [`11-iban-verification.md`](11-iban-verification.md) |
 
----
-
-## 6. Open questions for the next pass
-
-Resolved (2026-06-05):
-
-1. **Auto-post vs deferred settlement.** ✅ **Auto-post** — `POST /transfers` and the
-   console "send" settle in the same request; the pending queue remains for deferred
-   and maker-checker cases.
-3. **Hold expiry cadence.** ✅ **In-process Go ticker**, guarded by a Postgres
-   advisory lock so it's safe across N replicas (runs on portal pods). A
-   `bank0 maintenance` subcommand exists for a CronJob alternative. See
-   [`04-deployment.md`](04-deployment.md).
-4. **Maker-checker threshold.** ✅ **€10,000** — lives in the DB as
-   `bank_settings.maker_checker_threshold_minor` (operator-editable from the console
-   Settings panel), not in app config.
-
-Still deferred:
-
-2. **Overdraft.** Customer accounts currently `CHECK (balance_minor >= 0)`. Do any
-   account types allow negative balances (credit lines)? (Default: no.)
-
-Resolved since:
-
-5. **Customer-facing surface.** ✅ **Built** — client API
-   ([`06-client-api.md`](06-client-api.md), ownership/IDOR closed, JWT + refresh)
-   and a Cloudflare-hosted PWA ([`07-client-web-app.md`](07-client-web-app.md)).
+The open backlog + product roadmap live in [`specs/`](specs/) (start at
+[`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md)). The as-built behaviour of every
+shipped feature is documented in the reference docs above (`02`–`11`).

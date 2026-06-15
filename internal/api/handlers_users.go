@@ -52,7 +52,7 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 		Role:        sqlc.UserRole(req.Role),
 	})
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
@@ -62,7 +62,7 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) GetUser(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
 	u, err := s.pg.Queries.GetUserByID(r.Context(), uuid.UUID(id))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
@@ -79,7 +79,7 @@ func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
@@ -125,12 +125,12 @@ func (s *Server) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		Password:    nil,                   // escalation guard: never settable here
 		Status:      sqlc.NullUserStatus{}, // escalation guard: never settable here
 	}); err != nil {
-		mapDBError(w, err) // 23505 -> 409 (email/phone taken); 23514 -> 422 (bad email)
+		s.mapDBError(w, r, err) // 23505 -> 409 (email/phone taken); 23514 -> 422 (bad email)
 		return
 	}
 	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
@@ -149,7 +149,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	id, role, uname, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	if !ok {
@@ -159,7 +159,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
 		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), ""); err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	s.writeTokenPair(w, id, role, uname, refresh)

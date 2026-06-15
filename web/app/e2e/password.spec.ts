@@ -4,7 +4,7 @@ import { uiLogin } from "./fixtures";
 // Changing a password is destructive (it persists + signs other devices out), so this
 // test uses a dedicated seeded customer no other spec touches.
 test("customer changes their password", async ({ page, request }) => {
-  const user = "carol";
+  const user = "carol.carlsson"; // a dedicated seeded persona (db/seed.sql); first.last per the seed convention
   const newPass = "n3w-passw0rd-x"; // >= 12 chars (ChangePasswordRequest.new_password minLength)
 
   await uiLogin(page, user);

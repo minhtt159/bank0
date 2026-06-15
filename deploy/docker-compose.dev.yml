@@ -29,28 +29,17 @@ services:
     environment:
       APP_DATABASE_DSN: postgres://admin:admin@db:5432/bank0?sslmode=disable
 
-  # One-shot: load dev seed data (idempotent), then exit.
-  seed:
-    image: postgres:${PG_VERSION:-18}   # default 18; PG_VERSION=17 for Supabase parity
-    restart: "no"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    volumes:
-      - ../db/seed.sql:/seed.sql:ro
-    entrypoint:
-      - sh
-      - -c
-      - psql 'postgres://admin:admin@db:5432/bank0?sslmode=disable' -v ON_ERROR_STOP=1 -f /seed.sql
-
   # Admin portal + operator console -> http://localhost:8080
+  # Gated on migrate (NOT seed): the app must start against a migrated DB regardless
+  # of demo data, mirroring prod where there is no seed. The dev seed is loaded
+  # separately once the stack is up — `task seed` (or `task dev:reset` for a fresh one).
   admin:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
     image: bank0:dev
     depends_on:
-      seed:
+      migrate:
         condition: service_completed_successfully
     environment:
       APP_DATABASE_DSN: postgres://admin:admin@db:5432/bank0?sslmode=disable

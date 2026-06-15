@@ -13,3 +13,6 @@ node_modules/
 web/app/dist/
 worker/dist/
 .wrangler/
+
+# demo/pentest seed — generated on the fly by `task seed:demo` (db/seedgen), not committed
+/db/seed_demo.sql

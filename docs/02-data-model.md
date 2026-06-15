@@ -6,19 +6,20 @@
 
 ---
 
-## 1. What changed vs tf-backend (the consolidation)
+## 1. The shape of the data
 
-tf-backend stored money in three overlapping places that could drift:
+Money lives in exactly one place that is authoritative: the ledger.
 
-| tf-backend | Problem | bank0 |
-|---|---|---|
-| `accounts.balance` (mutable, written directly) | could be set by `update_account_info`, bypassing the ledger | `accounts.balance_minor` is a **cache**, writable only by the ledger trigger |
-| `transactions` (2 rows/transfer) | the real ledger, but not authoritative | **`ledger_entries`** — append-only, authoritative |
-| `transaction_audit_log` (1 row/transfer, denormalized) | a *second copy* that could diverge | **removed.** Replaced by the `transfers` row + a read-only enriched view |
+- **`accounts.balance_minor` is a cache**, writable only by the ledger trigger —
+  never by application code.
+- **`ledger_entries`** is the append-only, authoritative record of every money
+  movement.
+- **`transfers`** is the one operation table — one row per requested money
+  movement, carrying its lifecycle state. Supporting tables cover holds and
+  idempotency. The `enriched_ledger` view supplies human-readable joins for reads.
 
-Net: **one** ledger, **one** operation table (`transfers`), plus supporting
-tables for holds and idempotency. The `enriched_ledger` view supplies the
-human-readable joins the old `enriched_transaction_audit_log` view did.
+The result is one ledger, one operation table, no denormalized second copy of the
+truth that could drift.
 
 ---
 
@@ -131,9 +132,12 @@ erDiagram
 
 ## 3. Tables in detail
 
-> The DDL below is a **design sketch** to communicate intent. The canonical
-> definitions live in `db/migrations/`. Enum names and column names here are the
-> contract.
+> The DDL below communicates intent. The canonical definitions live in
+> `db/migrations/` — types and enums in [`00001_foundation.sql`](../db/migrations/00001_foundation.sql),
+> `users`/sessions in [`00003_users.sql`](../db/migrations/00003_users.sql), the
+> ledger core in [`00005_transfers.sql`](../db/migrations/00005_transfers.sql) (accounts/holds live in [`00004_accounts.sql`](../db/migrations/00004_accounts.sql)),
+> and feature tables in [`00008_features.sql`](../db/migrations/00008_features.sql).
+> Enum names and column names here are the contract.
 
 ### 3.1 `users`
 
@@ -156,12 +160,11 @@ CREATE TABLE users (
 );
 ```
 
-Changes from tf-backend: `password` → `password_hash` (bcrypt, never plaintext);
-added `role` (drives the operator console) and `status` (lock/close without
-deleting — banks don't hard-delete people); `CITEXT` so `Alice` == `alice` for
-login and email. Optional `email`/`phone` are genuinely `NULL` (not `''`), so the
-unique constraints behave (the NULL-vs-empty fix from tf-backend's migration 8 is
-correct by construction here).
+`password_hash` holds a bcrypt hash, never plaintext. `role` drives the operator
+console; `status` locks or closes an account without deleting it — banks don't
+hard-delete people. `CITEXT` makes `Alice` == `alice` for login and email.
+Optional `email`/`phone` are genuinely `NULL` (not `''`), so the unique
+constraints behave: distinct NULLs never collide.
 
 ### 3.2 `accounts`
 
@@ -211,8 +214,7 @@ Key points:
   `cash`, `fees`. They have no `user_id`/`iban` and **may** go negative — that's
   how a deposit works without minting money (§4 in `03-...md`).
 - **One default account** is enforced by a partial unique index, not a trigger —
-  cheaper, race-free, and declarative (replaces tf-backend's
-  `enforce_single_default_account` trigger + `FOR UPDATE` dance).
+  cheaper, race-free, and declarative.
 
 ### 3.3 `transfers` — the operation/intent
 
@@ -316,7 +318,7 @@ CREATE INDEX idx_holds_expiry
 ```
 
 A hold reserves funds on the debit account **without** moving the ledger balance.
-The defining concept of the lifecycle you chose:
+The defining concept of the two-phase lifecycle:
 
 > **`available_minor = balance_minor − SUM(holds.amount_minor WHERE status='active')`**
 
@@ -341,12 +343,12 @@ CREATE TABLE idempotency_keys (
 );
 ```
 
-How it guarantees no double-post and "no business confusion on the API" is the
+How this guarantees no double-post and keeps business logic out of the API is the
 subject of [`03-...md`](03-ledger-lifecycle-idempotency.md) §3. In short: the DB
 function does `INSERT ... ON CONFLICT (key) DO NOTHING`; a conflict means "seen
 before" → return the stored result; a conflict with a *different* `request_hash`
-→ raise (the client reused a key for a different request — a bug we surface
-loudly rather than silently mis-handling).
+raises (the client reused a key for a different request — surfaced loudly rather
+than silently mis-handled).
 
 ### 3.7 `admin_actions` — operator audit
 
@@ -366,23 +368,25 @@ Note this logs the *act of an operator deciding something*. The financial effect
 is still the ledger. Together they answer both "what moved?" (ledger) and "who
 authorized it and why?" (admin_actions).
 
-### 3.8 `guided_scenarios` — fraudbank "Guided transaction" demo config
+### 3.8 `guided_scenarios` — "Guided transaction" demo config
 
-Demo/config only — **no money state** (migration `00019`). One row maps an active named
-scenario to a target ("mule") `accounts(id)` that `GET /transfers/suggestion` suggests:
-optionally per-user (`target_user_id`), gated by `min_amount_minor`, ordered by
-`priority`. Empty by default, so the resolver (`suggest_transfer_destination()`) falls
-back to the caller's own other active account. The response never exposes more than
-confirmation-of-payee (masked owner name + iban via `mask_name()`).
+Demo/config only — **no money state** (table and functions in
+[`00008_features.sql`](../db/migrations/00008_features.sql)). One row maps an active
+named scenario to a target ("mule") `accounts(id)` that `GET /transfers/suggestion`
+suggests: optionally per-user (`target_user_id`), gated by `min_amount_minor`, ordered
+by `priority`. Empty by default, so the resolver (`suggest_transfer_destination()`)
+falls back to the caller's own other active account. The response never exposes more
+than confirmation-of-payee (masked owner name + iban via `mask_name()`).
 
 ### 3.9 `disputes` — customer "I don't recognise this" cases
 
-A dispute against a `transfers(id)` the raiser is a party to (migration `00020`). **Not
-money state** — the ledger stays append-only; remedy is the operator's existing
-`reverse_transfer`. Only this row's `status` (`open` / `under_review` / `resolved` /
-`rejected`) + `resolution_note` / `resolver_user_id` mutate (state machine in
-`resolve_dispute`). A partial unique index on `(transfer_id, raised_by_user_id) WHERE
-status IN ('open','under_review')` enforces one open dispute per raiser (→ 409). Raising
+A dispute against a `transfers(id)` the raiser is a party to (table and functions in
+[`00008_features.sql`](../db/migrations/00008_features.sql)). **Not money state** — the
+ledger stays append-only; the remedy is the operator's `reverse_transfer`. Only this
+row's `status` (`open` / `under_review` / `resolved` / `rejected`) +
+`resolution_note` / `resolver_user_id` mutate (state machine in `resolve_dispute`). A
+partial unique index on `(transfer_id, raised_by_user_id) WHERE status IN
+('open','under_review')` enforces one open dispute per raiser (→ 409). Raising
 (`raise_dispute`) emits an `admin_actions` `dispute_raised` row — the flag-only
 fraud-engine seam.
 
@@ -420,9 +424,9 @@ check the `reconcile()` function and the admin dashboard run.
 | `holds (account_id) WHERE status='active'` | fast `available` computation |
 | `holds (expires_at) WHERE status='active'` | `expire_holds()` batch scan |
 | `transfers (requested_at) WHERE status='pending'` | operator "pending queue" |
-| `transfers (debit_account_id, created_at DESC)` / `(credit_account_id, created_at DESC)` | per-account transfer history (the tf-backend `UNION ALL` pattern still applies) |
+| `transfers (debit_account_id, created_at DESC)` / `(credit_account_id, created_at DESC)` | per-account transfer history (a `UNION ALL` over both legs) |
 | `idempotency_keys (expires_at)` | TTL cleanup job |
-| `users (lower(username))`, `accounts (lower(iban))` | search (the search-feature TODO), or `pg_trgm` GIN later |
+| `users (lower(username))`, `accounts (lower(iban))` | exact-match lookup; `pg_trgm` GIN backs fuzzy search |
 
 ---
 
@@ -433,7 +437,8 @@ check the `reconcile()` function and the admin dashboard run.
 - **Time**: always `TIMESTAMPTZ`, default `now()`. `updated_at` maintained by a
   `BEFORE UPDATE` trigger on every mutable table.
 - **IDs**: `UUID` PKs, `DEFAULT uuidv7()` (time-ordered → index-friendly inserts;
-  this is the UUIDv7-migration TODO, native in PG18 so no helper function needed).
+  native in PG18, with a version-gated polyfill for PG17 in
+  [`00001_foundation.sql`](../db/migrations/00001_foundation.sql)).
 - **Enums**: PostgreSQL `ENUM` types, named `<noun>_<attr>` (e.g. `transfer_status`).
 - **No hard deletes** of financial data: `ON DELETE RESTRICT` on every FK into
   `accounts`/`transfers`/`ledger_entries`. People/accounts are *closed*, not deleted.

@@ -50,7 +50,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		hashToken(req.RefreshToken), hashToken(newRefresh),
 		int(s.refreshTTL.Seconds()), int(s.refreshAbs.Seconds()), r.UserAgent(), s.clientIP(r))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	s.writeTokenPair(w, userID, role, uname, newRefresh)
@@ -63,7 +63,7 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	decodeOptionalJSON(r, &req)
 	if req.RefreshToken != "" {
 		if err := s.pg.RevokeRefreshToken(r.Context(), hashToken(req.RefreshToken)); err != nil {
-			mapDBError(w, err)
+			s.mapDBError(w, r, err)
 			return
 		}
 	}
@@ -79,7 +79,7 @@ func (s *Server) LogoutAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.pg.RevokeUserRefresh(r.Context(), subj); err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

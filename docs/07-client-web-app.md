@@ -1,19 +1,19 @@
 # bank0 — Client Web App (PWA, Cloudflare Workers)
 
-> **Status: built.** A **lightweight, mobile-first PWA** (TypeScript / Preact +
-> Vite, ~15 KB gzip) hosted on a **Cloudflare Worker** at `bank0.hnimn.art`, over
-> the client API at `api.bank0.hnimn.art` ([`06-client-api.md`](06-client-api.md)).
-> The six customer flows below are implemented; auth (JWT + refresh, with MFA/step-up
-> planned) lives in [`06-client-api.md`](06-client-api.md). Source: `web/app/`
-> (SPA) and `worker/` (Worker).
+> A **lightweight, mobile-first PWA** (TypeScript / Preact + Vite, ~15 KB gzip)
+> hosted on a **Cloudflare Worker** at `bank0.hnimn.art`, over the client API at
+> `api.bank0.hnimn.art` ([`06-client-api.md`](06-client-api.md)). Auth (JWT +
+> refresh, with MFA/step-up as a designed extension) lives in
+> [`06-client-api.md`](06-client-api.md). Source: `web/app/` (SPA) and `worker/`
+> (Worker).
 
 ---
 
 ## 1. Scope
 
-The six customer flows we're building:
+Six customer flows:
 
-1. Login with `username:password` → JWT (SSO/MFA later, §9).
+1. Login with `username:password` → JWT (SSO/MFA covered in §9).
 2. View own details, accounts, statements.
 3. Homepage = the user's accounts as a vertical scroll list.
 4. Create a transaction (transfer).
@@ -55,10 +55,10 @@ surface. It also positions the Worker as the future **BFF**
 later hold the refresh token in an `httpOnly; Secure; SameSite=Strict` cookie and inject the
 access token server-side, keeping tokens out of browser JS — **without changing the SPA**.
 
-**MVP token handling:** the access token (15m TTL today) lives in the SPA in memory + a
+**Token handling:** the access token (15m TTL) lives in the SPA in memory + a
 `sessionStorage` mirror (survives reload, cleared on tab close). The Worker forwards it as
-`Authorization: Bearer …`. This is the documented "lightweight/JWT" path; the httpOnly-cookie
-BFF upgrade is a Worker-only change later.
+`Authorization: Bearer …`. The httpOnly-cookie BFF upgrade is a Worker-only change that
+doesn't touch the SPA.
 
 ---
 
@@ -78,24 +78,24 @@ endpoints.
 | 4 Create transfer | `POST /transfers` (+`Idempotency-Key` header) → `TransferResult` |
 | 6 Transfer detail | `GET /transfers/{id}` → `Transfer` |
 
-### 3.2 Backend additions built for this app
+### 3.2 Backend endpoints behind these flows
 
 Both are **client-tagged**, ownership-scoped to the JWT `sub` (the `clientSubject`
 pattern used by `getAccount`/`listUserAccounts`), generated into `genclient`.
-They followed the **shared-op `Params` constraint**
-([`04-deployment.md`](04-deployment.md) §4): keep these **client-only** so they may carry
+They observe the **shared-op `Params` constraint**
+([`04-deployment.md`](04-deployment.md) §4): being **client-only**, they may carry
 query/body params without colliding with the admin package.
 
 **(a) `GET /me` — own profile** (Flow 2)
 - Returns the caller's own `User` (`full_name`, `email`, `phone_number`, `role`, `status`)
-  resolved from `sub`. No new table — reuses the existing users read, scoped to the subject.
-- Spec: new `tags:[client]` op `getMe`; reuse the `User` schema. Regenerate `genclient`.
-- Handler: `internal/api/handlers_users.go`, thin call to the existing user-by-id query with
+  resolved from `sub`. No dedicated table — reuses the users read, scoped to the subject.
+- Spec: `tags:[client]` op `getMe`, reusing the `User` schema.
+- Handler: `internal/api/handlers_users.go`, a thin call to the user-by-id query with
   `id := clientSubject(r)`.
 
-**(b) Saved beneficiaries** (Flow 5) — new feature, DB-first per [`01`](01-overview.md) §2
+**(b) Saved beneficiaries** (Flow 5) — DB-first per [`01`](01-overview.md)
 
-- **Migration** `00016_beneficiaries.sql`:
+- **Schema** ([`00008_features.sql`](../db/migrations/00008_features.sql)):
   ```sql
   CREATE TABLE beneficiaries (
       id                 UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -116,17 +116,17 @@ query/body params without colliding with the admin package.
   - `add_beneficiary(p_owner, p_label, p_iban) → id` — resolves the IBAN, stores the row;
     rejects self-IBAN and duplicates.
   - `list_beneficiaries(p_owner) → [...]`, `delete_beneficiary(p_owner, p_id)` — both scoped.
-- **Spec** (new `tags:[client]` ops, regenerate `genclient`):
+- **Endpoints** (`tags:[client]`):
   | Method | Path | Purpose |
   |---|---|---|
   | GET | `/beneficiaries` | list saved payees (fuzzy is **client-side**) |
   | POST | `/beneficiaries` | add by IBAN+label → resolves, stores |
   | DELETE | `/beneficiaries/{id}` | remove |
   | GET | `/beneficiaries/resolve?iban=` | preview an IBAN before saving (masked owner) |
-- **Transfer stays unchanged:** the SPA sends `credit_account = beneficiary.credit_account_id`
-  to the existing `POST /transfers`. Beneficiaries are purely a **lookup/directory**;
+- **Transfer is unchanged:** the SPA sends `credit_account = beneficiary.credit_account_id`
+  to `POST /transfers`. Beneficiaries are purely a **lookup/directory**;
   `createTransfer` still enforces that the **debit** account belongs to the caller.
-- **sqlc**: add `db/queries/beneficiaries.sql`, run `task generate:sqlc`.
+- **Queries:** `db/queries/beneficiaries.sql` (sqlc).
 
 > **Privacy note:** IBAN resolution exposes that an account exists + a masked owner name —
 > standard for "confirmation of payee". No balances, no full PII. Rate-limit
@@ -213,12 +213,10 @@ worker/
   wrangler.toml              # route bank0.hnimn.art/*, [assets] binding, API_ORIGIN var
 ```
 
-- **Type safety:** `src/api/types.ts` is a hand-kept mirror of the client schemas;
-  it could be generated with `openapi-typescript` later to track the contract like the Go side.
+- **Type safety:** `src/api/types.ts` is a hand-kept mirror of the client schemas
+  (generatable with `openapi-typescript` to track the contract like the Go side).
 - **Tooling:** `task webapp:dev` (Vite + `/api` proxy), `task webapp:build`
   (`tsc --noEmit` + Vite + PWA), `task webapp:deploy` (build + `wrangler deploy`).
-- **CI (TODO):** a `web-app` job running `npm ci && npm run build` and
-  `wrangler deploy --dry-run`, separate from the Go pipeline.
 
 ---
 
@@ -266,14 +264,14 @@ Worker logic (`worker/index.ts`):
 
 ---
 
-## 9. Auth lifecycle & SSO (later)
+## 9. Auth lifecycle & SSO
 
-**Today (built):** username/password → `POST /auth/login` → short (15m) HS256 access token
+**Current:** username/password → `POST /auth/login` → short (15m) HS256 access token
 **+ refresh token**. The SPA refreshes transparently on a 401 (single-flight; the same
 `Idempotency-Key` rides the retry so a transfer can't double-post) and revokes server-side on
 sign-out. Full design in [`06-client-api.md`](06-client-api.md) §3.
 
-**Next (designed, [`06-client-api.md`](06-client-api.md) §6):**
+**Designed extensions ([`06-client-api.md`](06-client-api.md) §6):**
 - **Move refresh to the Worker/BFF** — hold the refresh token in an `httpOnly` cookie so the SPA
   only ever sees a short-lived access token in memory. SPA code is unaffected.
 - **MFA (TOTP)** at login + **step-up** for large transfers — the transfer screen handles a
@@ -290,53 +288,49 @@ sign-out. Full design in [`06-client-api.md`](06-client-api.md) §3.
 
 ---
 
-## 10. Security checklist (MVP)
+## 10. Security model
 
-- [ ] SPA talks **only** to its own origin; Worker proxies to `api.*` (no CORS surface).
-- [ ] Access token in memory + `sessionStorage` (MVP); **path to httpOnly-cookie BFF** when
-      refresh lands. Never `localStorage` once refresh exists.
-- [ ] Service worker **never** caches `/api/*` (money data); precache the shell only.
-- [ ] CSP/HSTS/nosniff headers from the Worker; HTTPS only.
-- [ ] Every transfer carries a stable `Idempotency-Key`; retries never double-post.
-- [ ] `/beneficiaries/resolve` returns masked owner only, **rate-limited** (enumeration guard).
-- [ ] Ownership enforced server-side (existing `clientSubject` scoping) — the SPA is never trusted.
-- [ ] Confirm-before-send on transfers; show the resolved payee/IBAN at confirm time.
-
----
-
-## 11. Phased roadmap
-
-1. ✅ **Backend: `GET /me`** + `00016_beneficiaries.sql` (table, DB fns, sqlc, spec, codegen,
-   handlers, ownership tests) — **done**. Confirmation-of-payee `resolve` is hand-written
-   pgx (`resolve_account_by_iban()` RETURNS TABLE, which sqlc can't expand). Verified
-   end-to-end on Postgres: `GetMe` scoping + no password-hash leak; beneficiary
-   add/list/delete, self-add & duplicate rejection, cross-user 404, masked owner name,
-   and a transfer to a saved payee. Migration up/down/up clean.
-2. ✅ **Worker scaffold** (`worker/`): static assets + `/api/*` proxy, `wrangler.toml`, SPA
-   fallback, security headers. `wrangler deploy --dry-run` clean.
-3. ✅ **SPA core** (`web/app/`): Vite+Preact+TS, api client (Bearer + Idempotency-Key + error
-   map), signals auth store, login, accounts home (Flows 1/3).
-4. ✅ **Account detail + statement** (cursor "load more") + **profile** via `GET /me` (Flow 2).
-5. ✅ **Transfer card**: fuzzy source/dest, add-payee (resolve→save), confirm, idempotent
-   submit, receipt (Flows 4/5/6).
-6. ✅ **PWA**: manifest + icon, autoUpdate service worker that precaches the shell and treats
-   `/api/*` as network-only. *Remaining polish:* install prompt, pull-to-refresh.
-   Production build is ~14.5 KB gzipped JS.
-7. 🟡 **Auth hardening hookup** — refresh is live (transparent 401 refresh); BFF cookie + MFA via the Worker still to do ([`06-client-api.md`](06-client-api.md) §6).
-8. ⬜ **SSO/OIDC** via Worker (PKCE) + RS256/JWKS on the API.
+- SPA talks **only** to its own origin; the Worker proxies to `api.*` (no CORS surface).
+- Access token in memory + `sessionStorage`; the path to an httpOnly-cookie BFF is a
+  Worker-only change. Tokens never go in `localStorage`.
+- The service worker **never** caches `/api/*` (money data); it precaches the shell only.
+- CSP/HSTS/nosniff headers from the Worker; HTTPS only.
+- Every transfer carries a stable `Idempotency-Key`; retries never double-post.
+- `/beneficiaries/resolve` returns the masked owner only, **rate-limited** (enumeration guard).
+- Ownership is enforced server-side (`clientSubject` scoping) — the SPA is never trusted.
+- Confirm-before-send on transfers; the resolved payee/IBAN is shown at confirm time.
 
 ---
 
-## 12. Open questions
+## 11. Build & deploy artifacts
 
-- **Beneficiary self-transfer:** include the user's own *other* accounts in the beneficiary
-  picker automatically, or only externally-added payees? (MVP: show own accounts as an implicit
-  group, saved payees as another.)
-- **Confirmation of payee depth:** how much of the owner name do we unmask at resolve time
-  (initials vs. first name)? Affects the privacy/UX trade-off in `resolve_account_by_iban`.
-- **Locale/currency:** single currency today ([`02`](02-data-model.md)); fix the display locale
-  or detect from the browser?
-- **Token persistence:** `sessionStorage` (clears on tab close) vs. in-memory only (clears on
-  reload) for the MVP, before the BFF cookie lands?
-- **Offline:** any read-only offline (last-seen balances) later, or strictly online given it's a
-  bank?
+The SPA and Worker are built and deployed via the Taskfile:
+
+- **Backend support** — `GET /me` plus the `beneficiaries` schema/functions in
+  `db/migrations/`. Confirmation-of-payee `resolve` is hand-written pgx
+  (`resolve_account_by_iban()` RETURNS TABLE, which sqlc can't expand).
+- **Worker** (`worker/`) — static assets + `/api/*` proxy, `wrangler.toml`, SPA
+  fallback, security headers.
+- **SPA** (`web/app/`) — Vite + Preact + TS, api client (Bearer + Idempotency-Key +
+  error map), signals auth store, the six flows above, and the PWA layer (manifest +
+  icon, autoUpdate service worker that precaches the shell and treats `/api/*` as
+  network-only). Production build is ~14.5 KB gzipped JS.
+
+Auth hardening (Worker-held refresh cookie + MFA) and SSO/OIDC (Worker PKCE +
+RS256/JWKS on the API) are designed extensions — see
+[`06-client-api.md`](06-client-api.md) §6 and §9 below.
+
+---
+
+## 12. Design choices
+
+- **Beneficiary self-transfer:** the picker shows the user's own *other* accounts as
+  an implicit group and saved payees as another.
+- **Confirmation of payee depth:** the masked owner name (initials) is shown at
+  resolve time, balancing the privacy/UX trade-off in `resolve_account_by_iban`.
+- **Locale/currency:** single currency ([`02`](02-data-model.md)); display locale is
+  fixed rather than browser-detected.
+- **Token persistence:** `sessionStorage` (clears on tab close), until the BFF cookie
+  lands.
+- **Offline:** strictly online, given it's a bank — the service worker caches only the
+  app shell.

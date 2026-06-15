@@ -1,7 +1,7 @@
 # Spec — Customer account opening & transfer-limit-change requests
 
 > Implementation spec. Closes two P1 gaps in
-> [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md): **customer account
+> [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md): **customer account
 > opening** (open a second/savings account without staff) and **transfer-limit change
 > requests** (a customer asks to raise the €500/transfer cap; an operator approves via
 > the existing maker-checker). Both **extend the existing account model**, not new
@@ -31,7 +31,7 @@ Two design problems this spec solves concretely:
    pseudo-IBAN with a check, drawn from a sequence) so the server mints one. This is
    the missing piece both this spec and pots need.
 2. **Limit changes as maker-checker.** A customer-initiated limit raise is exactly the
-   4-eyes pattern already built for high-value credits (`00014_maker_checker.sql`):
+   4-eyes pattern already built for high-value credits (the maker-checker functions in `00006_maker_checker.sql`):
    record a pending request in `admin_actions`, a *different* operator approves
    (applies `update_transfer_limit`) or rejects. No new approval machinery — one new
    `action` value + two thin functions.
@@ -192,11 +192,14 @@ Design stance:
 
 ## 3. Data model — migration `00020_account_self_service.sql`
 
-Migrations are currently numbered to `00017_refresh_tokens.sql`. Several sibling specs
-in this directory contend for `00018`/`00019` (mfa, change-password, events, disputes,
-self-registration). **This spec's migration is independent of all of them** — assign
-it the next free number at land time (`00020` is illustrative). What matters is goose
-ordering, not the suffix. Adds: IBAN allocation, a per-user account cap, and the
+Migrations are now a consolidated 9-file domain baseline (`00001_foundation.sql`,
+`00002_iban.sql`, `00003_users.sql`, `00004_accounts.sql`, `00005_transfers.sql`,
+`00006_maker_checker.sql`, `00007_maintenance.sql`, `00008_features.sql`,
+`00009_system_seed.sql`); the next free number is `00010`.
+Several sibling specs in this directory also add new migrations (mfa, change-password,
+events, disputes, self-registration). **This spec's migration is independent of all of
+them** — assign it the next free number at land time (`00020` is illustrative). What
+matters is goose ordering, not the suffix. Adds: IBAN allocation, a per-user account cap, and the
 limit-request maker-checker functions. **No new tables** — limit requests live in
 `admin_actions` (like the existing approval flow).
 
@@ -528,5 +531,5 @@ let the client treat it as terminal — pick 409 for product clarity.
 8. Write DB then API tests (§5). `go test ./...` green with/without `TEST_DATABASE_DSN`.
 9. Update [`../06-client-api.md`](../06-client-api.md) §1 surface table,
    [`../05-admin-ui.md`](../05-admin-ui.md) (new queue), and the P1 rows in
-   [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md).
+   [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md).
 ```

@@ -1,97 +1,159 @@
--- bank0 dev seed — genuinely idempotent: safe to re-run on a POPULATED volume (no
--- `down -v` needed). EVERY object is individually guarded so a re-run tops up
--- what's missing and skips what exists — staff + the mule/guided scenario by
--- NOT EXISTS on their natural keys, accounts by IBAN, opening deposits on account
--- creation, and every transfer by NOT EXISTS on its seed idempotency key (see the
--- note at the transfers section). Uses the DB functions so all invariants/holds/
--- idempotency apply.
--- Run:  psql "$DSN" -f db/seed.sql      (or via the compose `seed` service)
+-- bank0 default seed (1.0) — re-runnable on a POPULATED volume without error.
 --
--- Shape: 30 customers, 1-3 accounts each (72 accounts total) — ~5-10% of the
--- generated demo seed (db/seed_demo.sql). Account IBANs are structurally-realistic
--- NL IBANs: a real 4-letter bank code (ABNA/INGB/RABO/…) + a 10-digit account number,
--- iban_generate -> MOD-97 checksum (satisfies the accounts_iban_checksum CHECK).
--- Every account gets an opening deposit + a ring transfer (out and in). Plus a
--- handful of pending transfers for the operator queue and one canceled + one
--- reversed transfer so the lifecycle states are all represented. The richer,
--- randomized data set lives in db/seed_demo.sql (`task seed:demo`).
+-- Re-run model: a SINGLE top-level guard. If the DB is already seeded (alice
+-- exists) the main DO block emits a NOTICE and RETURNs — a clean no-op, never an
+-- "idempotency key reused" error. On a FRESH DB the block runs exactly once and
+-- seeds fully. Because the body runs at most once per DB, every money movement uses
+-- a DYNAMIC idempotency key (gen_random_uuid()::text): there is no per-operation
+-- NOT EXISTS guard and no coupling to the idempotency_keys table state. (The old
+-- scheme pinned a fixed 'seed-…' key per movement so a re-run could top-up; that
+-- bit a client dev re-running on a populated DB — keys reused with different
+-- account uuids raise. The top-level guard makes the top-up machinery unnecessary.)
+--
+-- The staff users and the mule scenarios live in their OWN DO blocks, each still
+-- individually NOT EXISTS / ON CONFLICT guarded — they're cheap config and worth
+-- ensuring even on a partially-populated DB.
+--
+-- Run:  psql "$DSN" -f db/seed.sql      (or `task seed`)
+--
+-- Shape: ~89 customers (alice + 88), 2-3 accounts each (~200 accounts) — the
+-- LIGHTWEIGHT default, a fraction of the heavy randomized demo seed (generated on
+-- demand by `task seed:demo`); this just gives realistic volume so lists/statements
+-- span pages. Usernames: alice + bob stay PINNED bare (docs + the e2e suite log in
+-- as them); every other customer — the rest of the named personas, the generated
+-- volume, and the mules — is <first>.<last> (matching seed_demo, with a numeric
+-- suffix on the generated ones for uniqueness; all password "password"). Account
+-- IBANs are structurally-realistic NL IBANs: a RANDOM 4-letter bank code
+-- (ABNA/INGB/RABO/…) + a RANDOM 10-digit account number, iban_generate -> MOD-97
+-- checksum (satisfies accounts_iban_checksum). Every account gets an
+-- opening deposit + a ring transfer (out and in). Plus a handful of pending
+-- transfers for the operator queue and one canceled + one reversed transfer so the
+-- lifecycle states are all represented, and a long bulk run on alice's first
+-- account so its statement pages.
 --
 -- Staff logins (dev passwords):
---   admin     / admin       (role admin, from migration 00011)
+--   admin     / admin       (role admin, from migration 00009_system_seed)
 --   operator1 / operator    (role operator)
 --   auditor1  / auditor      (role auditor)
--- The 30 customers (alice/bob/carol/dave/erin/frank + 24 more) have no console
--- access; password "password".
+-- The customers have no console access; password "password".
 
+--- staff (own block, independently guarded — cheap config) ----------------
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'operator1'::citext) THEN
+        PERFORM create_user('operator1', 'operator', 'Olivia Operator', 'operator1@bank0.test', '+46700000010', 'operator');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'auditor1'::citext) THEN
+        PERFORM create_user('auditor1', 'auditor', 'Aaron Auditor', 'auditor1@bank0.test', '+46700000011', 'auditor');
+    END IF;
+END $$;
+
+-- Session-local helper: derive a <first>.<last> login from a full name, e.g.
+-- 'Carol Carlsson' -> 'carol.carlsson', 'Ines de Boer' -> 'ines.deboer'. Used for
+-- every customer except the pinned alice/bob. Auto-dropped at session end.
+CREATE OR REPLACE FUNCTION pg_temp.username_of(full_name text) RETURNS text
+    LANGUAGE sql IMMUTABLE AS $fn$
+    SELECT lower(split_part(full_name, ' ', 1)) || '.' ||
+           lower(replace(substring(full_name FROM position(' ' IN full_name) + 1), ' ', ''));
+$fn$;
+
+--- customers + accounts + transfers (run-once) ----------------------------
+-- Top-level guard: if alice exists the DB is already seeded — emit a NOTICE and
+-- RETURN. Everything below therefore runs at most ONCE per DB, so the money
+-- movements can use dynamic gen_random_uuid() idempotency keys with no per-op
+-- guard: a re-run never reaches them.
 DO $$
 DECLARE
-    usernames  TEXT[] := ARRAY[
+    -- The 30 NAMED demo personas (alice/bob/carol… — the e2e suite + guided demo
+    -- pin these specific usernames). Do not reorder or rename these.
+    named_users TEXT[] := ARRAY[
         'alice', 'bob', 'carol', 'dave', 'erin', 'frank', 'grace', 'henrik', 'ines', 'jonas',
         'klara', 'lars', 'maja', 'niklas', 'olga', 'pavel', 'quinn', 'rosa', 'sven', 'tara',
         'ulrik', 'vera', 'wouter', 'xenia', 'yusuf', 'zara', 'anton', 'bea', 'cleo', 'dario'];
-    fullnames  TEXT[] := ARRAY[
+    named_names TEXT[] := ARRAY[
         'Alice Andersson', 'Bob Bergström', 'Carol Carlsson', 'Dave Dahl', 'Erin Ek',
         'Frank Fischer', 'Grace Visser', 'Henrik Jansen', 'Ines de Boer', 'Jonas Bakker',
         'Klara Mulder', 'Lars de Vries', 'Maja Smit', 'Niklas Meijer', 'Olga Bos',
         'Pavel Novak', 'Quinn de Jong', 'Rosa Vermeulen', 'Sven Hendriks', 'Tara van Dijk',
         'Ulrik Dekker', 'Vera van den Berg', 'Wouter Peters', 'Xenia Kuipers', 'Yusuf Demir',
         'Zara van Leeuwen', 'Anton Schouten', 'Bea Willems', 'Cleo Maas', 'Dario Romano'];
-    -- 1-3 accounts per customer; sums to 72.
-    acctcounts INT[]  := ARRAY[
-        3, 2, 3, 2, 2, 3, 2, 3, 2, 2,
-        3, 2, 3, 2, 2, 3, 2, 3, 2, 2,
-        3, 2, 3, 2, 2, 3, 2, 3, 2, 2];
+    -- Name parts for the extra generated customers (cust31…). Combined
+    -- deterministically so each username maps to a stable full name.
+    gen_first TEXT[] := ARRAY[
+        'Emma', 'Lucas', 'Sara', 'Daan', 'Julia', 'Sem', 'Tess', 'Finn', 'Noor', 'Liam',
+        'Eva', 'Bram', 'Lotte', 'Thijs', 'Sophie', 'Ruben', 'Anna', 'Jesse', 'Fleur', 'Tim',
+        'Lena', 'Joost', 'Mila', 'Stijn', 'Iris', 'Gijs', 'Sanne', 'Teun', 'Roos', 'Cas'];
+    gen_last  TEXT[] := ARRAY[
+        'de Wit', 'van der Berg', 'Janssen', 'Visser', 'Kok', 'Bakker', 'de Groot', 'Vos',
+        'Mulder', 'Bos', 'Peters', 'Hendriks', 'van Dijk', 'de Jong', 'Smit', 'Brouwer',
+        'van Leeuwen', 'Dijkstra', 'Postma', 'Kuiper', 'Veenstra', 'Prins', 'Huisman',
+        'van der Heijden', 'Schipper', 'Maas', 'Verhoeven', 'Koster', 'Willems', 'Timmermans'];
+    -- Total customers to provision (30 named + the rest generated). Bumping n_total
+    -- and n_bulk below is the one knob to grow the default volume.
+    n_named    INT := 30;
+    n_total    INT := 88;            -- 30 named + 58 generated -> ~200 accounts
     -- Real NL bank codes, cycled, so the BBAN is bank-code + 10-digit account number
     -- (a realistic NL IBAN) rather than 14 raw digits.
     bankcodes  TEXT[] := ARRAY['ABNA', 'INGB', 'RABO', 'TRIO', 'SNSB', 'KNAB'];
     aids       UUID[] := '{}';
+    v_username TEXT;
+    v_fullname TEXT;
+    v_naccts   INT;
     v_user     UUID;
     v_acct     UUID;
     v_iban     TEXT;
     v_tid      UUID;
+    n_bulk     INT := 280;           -- bulk transfers on alice's first account
     seq        INT := 1;
     i          INT;
     j          INT;
     n          INT;
 BEGIN
-    --- staff ---------------------------------------------------------------
-    IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'operator1') THEN
-        PERFORM create_user('operator1', 'operator', 'Olivia Operator', 'operator1@bank0.test', '+46700000010', 'operator');
+    -- ── top-level run-once guard ────────────────────────────────────────────
+    -- A populated DB is a clean no-op (never an idempotency error). Only a fresh
+    -- DB (no alice) runs the body — exactly once — so dynamic keys are safe below.
+    IF EXISTS (SELECT 1 FROM users WHERE username = 'alice'::citext) THEN
+        RAISE NOTICE 'bank0 already seeded — skipping';
+        RETURN;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM users WHERE username = 'auditor1') THEN
-        PERFORM create_user('auditor1', 'auditor', 'Aaron Auditor', 'auditor1@bank0.test', '+46700000011', 'auditor');
-    END IF;
-
-    -- ── genuine per-operation idempotency ───────────────────────────────────
-    -- Each money movement below is guarded by NOT EXISTS on its seed idempotency
-    -- key, so a re-run tops up only what's missing and NEVER re-invokes a keyed
-    -- function. That matters because request_transfer()/transfer() fingerprint each
-    -- key as sha256(debit|credit|amount|kind) over the account UUIDs — and account
-    -- ids are uuidv7(), assigned at creation, NOT derived from the IBAN. Calling a
-    -- keyed fn again once accounts have been recreated would raise 'idempotency key
-    -- … reused with different parameters' and abort the seed (admin/client
-    -- depend_on it → the whole stack fails to come up). Guarding on key existence
-    -- sidesteps that entirely, so this section is replay-safe the way the staff
-    -- section above is — no all-or-nothing run-once gate needed.
 
     --- customers + accounts + opening deposits -----------------------------
-    FOR i IN 1 .. array_length(usernames, 1) LOOP
-        SELECT id INTO v_user FROM users WHERE username = usernames[i]::citext;
-        IF v_user IS NULL THEN
-            v_user := create_user(usernames[i]::citext, 'password'::text, fullnames[i]::text,
-                                  (usernames[i] || '@example.com')::citext, NULL::varchar, 'customer'::user_role);
+    -- The first n_named use the pinned named arrays; the rest get a deterministic
+    -- username (custNN) + a synthesized full name. Account count cycles 2-3 per
+    -- customer so the totals stay coherent (~2.2 accounts/customer).
+    FOR i IN 1 .. n_total LOOP
+        IF i <= n_named THEN
+            v_fullname := named_names[i];
+            IF i <= 2 THEN
+                v_username := named_users[i];                   -- alice, bob: pinned bare (docs + e2e)
+            ELSE
+                v_username := pg_temp.username_of(v_fullname);  -- carol… -> first.last
+            END IF;
+        ELSE
+            -- combine a first + last part by independent cycles for variety
+            v_fullname := gen_first[1 + ((i - 1) % array_length(gen_first, 1))] || ' ' ||
+                          gen_last[1 + ((i * 7) % array_length(gen_last, 1))];
+            v_username := pg_temp.username_of(v_fullname) || i; -- first.last<i> (unique, seed_demo style)
         END IF;
 
-        FOR j IN 1 .. acctcounts[i] LOOP
-            -- realistic NL BBAN: 4-letter bank code + 10-digit account number.
-            v_iban := iban_generate('NL', bankcodes[1 + (seq % array_length(bankcodes, 1))] || lpad(seq::text, 10, '0'));
-            SELECT id INTO v_acct FROM accounts WHERE iban = v_iban::varchar;
-            IF v_acct IS NULL THEN
-                v_acct := create_account(v_user, v_iban::varchar, lpad((1000 + seq)::text, 4, '0')::text, 50000::bigint);
-                -- opening deposit (€500): only on a freshly-created account, so a
-                -- re-run never re-fingerprints the 'seed-dep-' key against a new uuid.
-                PERFORM deposit('seed-dep-' || v_iban, v_acct, 50000, 'Opening deposit');
-            END IF;
+        -- 2-3 accounts: customers at positions ≡1 or ≡3 (mod 5) get 3, the rest 2.
+        v_naccts := CASE WHEN i % 5 IN (1, 3) THEN 3 ELSE 2 END;
+
+        v_user := create_user(v_username::citext, 'password'::text, v_fullname::text,
+                              (v_username || '@example.com')::citext, NULL::varchar, 'customer'::user_role);
+
+        FOR j IN 1 .. v_naccts LOOP
+            -- realistic NL BBAN: RANDOM 4-letter bank code + RANDOM 10-digit account
+            -- number (iban_generate fills the MOD-97 checksum). Retry guards the rare
+            -- collision on the UNIQUE accounts.iban.
+            LOOP
+                v_iban := iban_generate('NL', bankcodes[1 + floor(random() * array_length(bankcodes, 1))::int]
+                                              || lpad((floor(random() * 1e10))::bigint::text, 10, '0'));
+                EXIT WHEN NOT EXISTS (SELECT 1 FROM accounts WHERE iban = v_iban::varchar);
+            END LOOP;
+            v_acct := create_account(v_user, v_iban::varchar, lpad((1000 + seq)::text, 4, '0')::text, 50000::bigint);
+            -- opening deposit (€500). Dynamic key — this section runs at most once.
+            PERFORM deposit(gen_random_uuid()::text, v_acct, 50000, 'Opening deposit');
             aids := array_append(aids, v_acct);
             seq := seq + 1;
         END LOOP;
@@ -101,109 +163,95 @@ BEGIN
     --- from the previous). With the deposit, that's 3 transactions per account.
     n := array_length(aids, 1);
     FOR i IN 1 .. n LOOP
-        IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-ring-' || i) THEN
-            PERFORM transfer('seed-ring-' || i, aids[i], aids[(i % n) + 1], 1000,
-                             'Seed transfer #' || i, 'transfer');
-        END IF;
+        PERFORM transfer(gen_random_uuid()::text, aids[i], aids[(i % n) + 1], 1000,
+                         'Seed transfer #' || i, 'transfer');
     END LOOP;
 
     --- a few pending transfers for the operator queue ----------------------
-    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-1') THEN
-        PERFORM request_transfer('seed-pend-1', aids[1],  aids[4],  2500, 'Deferred: pending demo 1', 'transfer');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-2') THEN
-        PERFORM request_transfer('seed-pend-2', aids[5],  aids[2],  1500, 'Deferred: pending demo 2', 'transfer');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-3') THEN
-        PERFORM request_transfer('seed-pend-3', aids[7],  aids[10], 3000, 'Deferred: pending demo 3', 'transfer');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-pend-4') THEN
-        PERFORM request_transfer('seed-pend-4', aids[20], aids[33], 1800, 'Deferred: pending demo 4', 'transfer');
-    END IF;
+    PERFORM request_transfer(gen_random_uuid()::text, aids[1],  aids[4],  2500, 'Deferred: pending demo 1', 'transfer');
+    PERFORM request_transfer(gen_random_uuid()::text, aids[5],  aids[2],  1500, 'Deferred: pending demo 2', 'transfer');
+    PERFORM request_transfer(gen_random_uuid()::text, aids[7],  aids[10], 3000, 'Deferred: pending demo 3', 'transfer');
+    PERFORM request_transfer(gen_random_uuid()::text, aids[20], aids[33], 1800, 'Deferred: pending demo 4', 'transfer');
 
     --- one canceled + one reversed, so every lifecycle state is present ----
-    -- Guarded on the underlying transfer's key: cancel_transfer/reverse aren't
-    -- safe to re-invoke once the transfer is already canceled/reversed, so only
-    -- run them when the transfer is freshly created this run.
-    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-cancel-1') THEN
-        SELECT transfer_id INTO v_tid
-          FROM request_transfer('seed-cancel-1', aids[3], aids[15], 2000, 'Canceled demo', 'transfer');
-        PERFORM cancel_transfer(v_tid, 'seed: canceled demo');
-    END IF;
+    SELECT transfer_id INTO v_tid
+      FROM request_transfer(gen_random_uuid()::text, aids[3], aids[15], 2000, 'Canceled demo', 'transfer');
+    PERFORM cancel_transfer(v_tid, 'seed: canceled demo');
 
-    IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-rev-src') THEN
-        SELECT transfer_id INTO v_tid
-          FROM transfer('seed-rev-src', aids[8], aids[22], 1200, 'Reversed demo', 'transfer');
-        PERFORM reverse_transfer(v_tid, 'seed-rev-1', 'seed: reversed demo');
-    END IF;
+    SELECT transfer_id INTO v_tid
+      FROM transfer(gen_random_uuid()::text, aids[8], aids[22], 1200, 'Reversed demo', 'transfer');
+    PERFORM reverse_transfer(v_tid, gen_random_uuid()::text, 'seed: reversed demo');
 
     --- bulk volume so lists + the first account's statement span pages.
     --- aids[1] is in every bulk transfer (alternating side) -> a long statement.
-    FOR i IN 1 .. 90 LOOP
-        IF NOT EXISTS (SELECT 1 FROM idempotency_keys WHERE key = 'seed-bulk-' || i) THEN
-            IF i % 2 = 0 THEN
-                PERFORM transfer('seed-bulk-' || i, aids[1], aids[(i % (n - 1)) + 2],
-                                 100 * (1 + i % 3), 'Bulk #' || i || ' out', 'transfer');
-            ELSE
-                PERFORM transfer('seed-bulk-' || i, aids[(i % (n - 1)) + 2], aids[1],
-                                 100 * (1 + i % 3), 'Bulk #' || i || ' in', 'transfer');
-            END IF;
+    --- Amounts stay tiny (€1-3) so alice's first account never runs low even across
+    --- hundreds of outgoing legs (opening €500 + the ring/bulk inflows cover it).
+    FOR i IN 1 .. n_bulk LOOP
+        IF i % 2 = 0 THEN
+            PERFORM transfer(gen_random_uuid()::text, aids[1], aids[(i % (n - 1)) + 2],
+                             100 * (1 + i % 3), 'Bulk #' || i || ' out', 'transfer');
+        ELSE
+            PERFORM transfer(gen_random_uuid()::text, aids[(i % (n - 1)) + 2], aids[1],
+                             100 * (1 + i % 3), 'Bulk #' || i || ' in', 'transfer');
         END IF;
     END LOOP;
 END $$;
 
---- guided-transfer demo: an APP-scam "mule" steer --------------------------
--- Without an active guided_scenario (00019), GET /transfers/suggestion falls
--- back to the caller's OWN other account — a safe self-transfer, not a realistic
--- scam. Seed a dedicated "mule" customer + account and a GLOBAL scenario so
--- guided mode dictates a THIRD-PARTY recipient for every caller: the authorised-
--- push-payment steer fraudbank's guided mode demonstrates. Idempotent.
+--- guided-transfer demo: an APP-scam "mule menu" -------------------------------
+-- Without an active guided_scenario (00008_features), GET /transfers/suggestion
+-- falls back to the caller's OWN other account — a safe self-transfer, not a scam.
+-- The "mule menu" v2 (resolver in 00008_features) draws up to 3 random THIRD-PARTY targets from the
+-- ACTIVE guided_scenarios short-list. Seed ≥3 DEDICATED mule customers + accounts
+-- and one GLOBAL scenario per mule (target_user_id NULL = any caller) so the menu
+-- shows real strangers — NOT borrowed bob/carol decoys. bob/carol stay ordinary
+-- customers. Own block, independently guarded (NOT EXISTS / ON CONFLICT) so the
+-- mules + scenarios are ensured even on a partially-populated DB.
 DO $$
 DECLARE
-    v_mule_user UUID;
-    v_mule_acct UUID;
-    v_iban      TEXT := iban_generate('NL', 'KNAB' || lpad('9000000099', 10, '0'));
+    -- Dedicated mule customers — realistic Nordic/NL names. Each gets its own
+    -- account/IBAN and one active global guided_scenarios row pointing at it.
+    mule_name   TEXT[] := ARRAY['Markus Eklund',  'Saga Lindqvist',  'Joran Visser'];
+    mule_user   TEXT[] := ARRAY['markus.eklund',  'saga.lindqvist',  'joran.visser'];  -- first.last, like seed_demo
+    mule_pin    TEXT[] := ARRAY['9099',           '9098',            '9097'];
+    bankcodes   TEXT[] := ARRAY['ABNA', 'INGB', 'RABO', 'TRIO', 'SNSB', 'KNAB'];
+    scen_name   TEXT[] := ARRAY['app-scam-mule-1', 'app-scam-mule-2', 'app-scam-mule-3'];
+    scen_reason TEXT[] := ARRAY['Recommended payee', 'Trusted payee', 'Verified payee'];
+    v_user      UUID;
+    v_acct      UUID;
+    v_iban      TEXT;
+    k           INT;
 BEGIN
-    SELECT id INTO v_mule_user FROM users WHERE username = 'mule'::citext;
-    IF v_mule_user IS NULL THEN
-        v_mule_user := create_user('mule'::citext, 'password'::text, 'Markus Eklund'::text,
-                                   'mule@example.com'::citext, NULL::varchar, 'customer'::user_role);
-    END IF;
+    FOR k IN 1 .. array_length(mule_user, 1) LOOP
+        -- Idempotent on re-run keyed by the STABLE scenario name: if it exists, the
+        -- mule + account were created on a prior run, so skip. (The random IBAN below
+        -- can't be re-derived to dedupe an account by, unlike the old fixed BBAN.)
+        CONTINUE WHEN EXISTS (SELECT 1 FROM guided_scenarios WHERE name = scen_name[k]);
 
-    SELECT id INTO v_mule_acct FROM accounts WHERE iban = v_iban::varchar;
-    IF v_mule_acct IS NULL THEN
-        v_mule_acct := create_account(v_mule_user, v_iban::varchar, '9099'::text, 50000::bigint);
-        PERFORM deposit('seed-dep-' || v_iban, v_mule_acct, 50000, 'Opening deposit');
-    END IF;
+        SELECT id INTO v_user FROM users WHERE username = mule_user[k]::citext;
+        IF v_user IS NULL THEN
+            v_user := create_user(mule_user[k]::citext, 'password'::text, mule_name[k]::text,
+                                  (mule_user[k] || '@example.com')::citext, NULL::varchar, 'customer'::user_role);
+        END IF;
 
-    -- Guided-transfer v2 "mule menu" (spec-banking-grade-hardening.md §5): the
-    -- resolver draws up to 3 random THIRD-PARTY targets from the ACTIVE
-    -- guided_scenarios short-list below (never the caller's own — the own-account
-    -- path is the client's fallback). Global rows (target_user_id NULL) match any
-    -- caller; the resolver excludes the caller's own + the debit account.
-    INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
-    SELECT 'app-scam-demo', v_mule_acct, 'Recommended payee', NULL, 0, 100, TRUE
-     WHERE NOT EXISTS (SELECT 1 FROM guided_scenarios WHERE name = 'app-scam-demo');
+        -- random NL BBAN (bank code + 10 digits), unique on accounts.iban.
+        LOOP
+            v_iban := iban_generate('NL', bankcodes[1 + floor(random() * array_length(bankcodes, 1))::int]
+                                          || lpad((floor(random() * 1e10))::bigint::text, 10, '0'));
+            EXIT WHEN NOT EXISTS (SELECT 1 FROM accounts WHERE iban = v_iban::varchar);
+        END LOOP;
+        v_acct := create_account(v_user, v_iban::varchar, mule_pin[k]::text, 50000::bigint);
+        PERFORM deposit(gen_random_uuid()::text, v_acct, 50000, 'Opening deposit');
 
-    -- Two more global decoy mules (existing seed customers) so a full 3-option draw
-    -- is possible — the dedicated mule camouflaged among plausible strangers.
-    INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
-    SELECT 'app-scam-decoy-1', a.id, 'Trusted merchant', NULL, 0, 50, TRUE
-      FROM accounts a JOIN users u ON u.id = a.user_id
-     WHERE u.username = 'bob'::citext AND a.kind = 'customer'
-     ORDER BY a.created_at LIMIT 1
-    ON CONFLICT (name) DO NOTHING;
-
-    INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
-    SELECT 'app-scam-decoy-2', a.id, 'Verified payee', NULL, 0, 50, TRUE
-      FROM accounts a JOIN users u ON u.id = a.user_id
-     WHERE u.username = 'carol'::citext AND a.kind = 'customer'
-     ORDER BY a.created_at LIMIT 1
-    ON CONFLICT (name) DO NOTHING;
+        -- One active GLOBAL scenario per dedicated mule account (target_user_id
+        -- NULL = matches any caller; the resolver excludes the caller's own + debit).
+        INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
+        VALUES (scen_name[k], v_acct, scen_reason[k], NULL, 0, 100, TRUE);
+    END LOOP;
 END $$;
 
 SELECT 'seed complete: ' ||
        (SELECT count(*) FROM users    WHERE role = 'customer') || ' customers, ' ||
        (SELECT count(*) FROM accounts WHERE kind = 'customer') || ' accounts, ' ||
        (SELECT count(*) FROM transfers) || ' transfers ('  ||
-       (SELECT count(*) FROM transfers WHERE status = 'pending') || ' pending)' AS summary;
+       (SELECT count(*) FROM transfers WHERE status = 'pending') || ' pending), ' ||
+       (SELECT count(*) FROM guided_scenarios WHERE active) || ' active mule scenarios' AS summary;

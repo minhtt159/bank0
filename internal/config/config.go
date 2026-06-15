@@ -62,7 +62,7 @@ type ServerConfig struct {
 	OpenAPISpecPath string `mapstructure:"openapi_spec_path"`
 	// CORSOrigins is an opt-in exact-match allowlist for the client API surface
 	// (dev convenience). Empty = disabled, the production default — prod web ships
-	// same-origin via the Worker. See docs/09-fraudbank-bff-plan.md §1.2.
+	// same-origin via the Worker. See docs/09-fraudbank-integration.md §1.2.
 	CORSOrigins []string `mapstructure:"cors_origins"`
 	// RateLimitPerMin caps unauthenticated auth attempts (/auth/login, /auth/refresh)
 	// per client IP per minute — an in-app backstop behind the Cloudflare edge.

@@ -1,11 +1,11 @@
 # Spec — Notifications / events feed (`GET /me/events`)
 
 > Status: **spec, ready to implement.** Phase 1 of the "Notifications / webhooks"
-> P2 row in [`../09-fraudbank-bff-plan.md`](../09-fraudbank-bff-plan.md) §2
+> P2 row in [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md) §2
 > ("`GET /me/events?cursor=` (poll) first; push (FCM/APNs token registry) later").
-> Reuses the opaque composite cursor + envelope from
-> [`spec-ledger-pagination-and-filters.md`](../archive/spec-ledger-pagination-and-filters.md)
-> (`cursor.go`, the `…Page` shape) — implement that first or in the same train.
+> Reuses the opaque composite cursor from the shipped ledger pagination
+> (`internal/api/cursor.go`; as-built in [`../06-client-api.md`](../06-client-api.md)) —
+> note lists return bare arrays, not a `…Page` envelope.
 
 ---
 
@@ -130,7 +130,7 @@ After editing: `task generate:oapi` (build breaks until `ListMyEvents` — and `
 
 ## 3. Data model — migration `00018_events.sql`
 
-> **Migration number:** the next free slot on disk is `00018`, but several sibling specs in this directory also target it — [`../06-client-api.md`](../06-client-api.md) §6 reserves `00018_mfa.sql`, and `spec-disputes.md` / `spec-step-up-mfa.md` / `spec-self-registration.md` each claim "next free number". **At implementation time, `ls db/migrations/` and take the actual next free number** (likely `00019`/`00020`/… depending on merge order); update every `00018` reference in this file to match. Goose orders by the numeric prefix; never reuse one. If this lands **after** disputes, sequence the `dispute.updated` emission edit (§3.4) to `CREATE OR REPLACE` the *post-disputes* `resolve_dispute` body.
+> **Migration number:** migrations are now a 9-file domain baseline (`00001_foundation.sql` / `00002_iban.sql` / `00003_users.sql` / `00004_accounts.sql` / `00005_transfers.sql` / `00006_maker_checker.sql` / `00007_maintenance.sql` / `00008_features.sql` / `00009_system_seed.sql`), so the next free slot on disk is `00010`, but several sibling specs in this directory also add a migration — [`../06-client-api.md`](../06-client-api.md) §6 flags new MFA tables, and `spec-disputes.md` / `spec-step-up-mfa.md` / `spec-self-registration.md` each claim "next free number". **At implementation time, `ls db/migrations/` and take the actual next free number** (depending on merge order); update every illustrative `00018` reference in this file to match. Goose orders by the numeric prefix; never reuse one. If this lands **after** disputes, sequence the `dispute.updated` emission edit (§3.4) to `CREATE OR REPLACE` the *post-disputes* `resolve_dispute` body.
 
 ### 3.1 Enum + table
 
@@ -262,10 +262,10 @@ Each emission goes **inside the function that already performs the transition**,
 
 | Event | Function (file) | Insert site | Recipient(s) |
 |-------|-----------------|-------------|--------------|
-| `transfer.posted` | `post_transfer(p_transfer_id)` in `00008_transfer_functions.sql` — **edit this function** (`CREATE OR REPLACE` in `00018`, do **not** alter `00008`) | after the `UPDATE transfers SET status='posted'`, look up the **debit** account's `user_id` (skip if NULL/system); `emit_event(debit_owner, 'transfer.posted', …, transfer_id, debit_account_id, jsonb_build_object('amount_minor', v_t.amount_minor, 'counterparty', credit label))` | debit-side owner (the payer) |
+| `transfer.posted` | `post_transfer(p_transfer_id)` in `00005_transfers.sql` — **edit this function** (`CREATE OR REPLACE` in this spec's new migration, do **not** alter `00005`) | after the `UPDATE transfers SET status='posted'`, look up the **debit** account's `user_id` (skip if NULL/system); `emit_event(debit_owner, 'transfer.posted', …, transfer_id, debit_account_id, jsonb_build_object('amount_minor', v_t.amount_minor, 'counterparty', credit label))` | debit-side owner (the payer) |
 | `payment.incoming` | same `post_transfer` | same site, for the **credit** account's `user_id` (skip if NULL/system) — for a `deposit` the credit owner is the customer; for an internal transfer it's the recipient | credit-side owner (the payee) |
-| `device.new` | `issue_refresh_token(...)` in `00017_refresh_tokens.sql` — **edit via `CREATE OR REPLACE` in `00018`** | after inserting the new family row, `emit_event(p_user_id, 'device.new', 'New sign-in', …, NULL, NULL, jsonb_build_object('user_agent', p_user_agent, 'ip', p_ip, 'family_id', v_family))`. Because `related_transfer_id` is NULL, the `(user,type,NULL)` uniqueness does not dedupe — dedupe instead on `family_id` by adding a partial guard (see note) | the logging-in user |
-| `dispute.updated` | **gated on the disputes spec.** [`spec-disputes.md`](../archive/spec-disputes.md) defines `resolve_dispute(p_dispute_id, p_resolver, p_status, p_note)` (status machine `open → under_review → resolved/rejected`). **If that spec has landed**, edit `resolve_dispute` (via `CREATE OR REPLACE` in this migration, sequenced *after* disputes) to `emit_event(dispute_owner, 'dispute.updated', …, related_transfer_id := <disputed transfer>, data := jsonb_build_object('dispute_id', p_dispute_id, 'status', p_status))` after the status UPDATE. The dispute owner is the customer who filed it (`disputes.filed_by` / the disputed transfer's owning party — confirm the column name against `spec-disputes.md` §3). **If disputes has NOT landed**, define the enum member + feed plumbing but emit nothing yet; wire the emission when disputes ships. Either way the `(user, type, related_transfer_id)` unique would collapse multiple status changes on one dispute into one row — for `dispute.updated`, **exclude it from that unique** (it is keyed per-transfer, but you want one event per *status change*); emit via a direct INSERT (no `ON CONFLICT`) rather than `emit_event`, or add `status` to the dedupe. Document the choice. | dispute filer |
+| `device.new` | `issue_refresh_token(...)` in `00003_users.sql` — **edit via `CREATE OR REPLACE` in this spec's new migration** | after inserting the new family row, `emit_event(p_user_id, 'device.new', 'New sign-in', …, NULL, NULL, jsonb_build_object('user_agent', p_user_agent, 'ip', p_ip, 'family_id', v_family))`. Because `related_transfer_id` is NULL, the `(user,type,NULL)` uniqueness does not dedupe — dedupe instead on `family_id` by adding a partial guard (see note) | the logging-in user |
+| `dispute.updated` | disputes has **shipped**: `resolve_dispute(p_dispute_id, p_resolver, p_status, p_note)` (status machine `open → under_review → resolved/rejected`) lives in `db/migrations/` (as-built: [`../05-admin-ui.md`](../05-admin-ui.md) §4.7). Edit it (via `CREATE OR REPLACE` in this migration, sequenced *after* disputes) to `emit_event(dispute_owner, 'dispute.updated', …, related_transfer_id := <disputed transfer>, data := jsonb_build_object('dispute_id', p_dispute_id, 'status', p_status))` after the status UPDATE. The dispute owner is the customer who filed it (`disputes.filed_by` / the disputed transfer's owning party — confirm the column name against the `disputes` table in `db/migrations/`). The `(user, type, related_transfer_id)` unique would collapse multiple status changes on one dispute into one row — for `dispute.updated`, **exclude it from that unique** (it is keyed per-transfer, but you want one event per *status change*); emit via a direct INSERT (no `ON CONFLICT`) rather than `emit_event`, or add `status` to the dedupe. Document the choice. | dispute filer |
 
 > **`device.new` dedupe:** since `related_transfer_id` is NULL for device events, the `(user, type, related_transfer_id)` unique index won't prevent duplicates across logins (and shouldn't — each new family is a distinct device event). To make emission idempotent against a retried `issue_refresh_token`, store `family_id` in `data` and add a **partial unique index** on the extracted family id:
 > ```sql
@@ -462,8 +462,8 @@ These are additive; the `events` table and `emit_event` write-points designed he
 
 ## 10. Implementation order
 
-1. Land (or co-deliver) [`spec-ledger-pagination-and-filters.md`](../archive/spec-ledger-pagination-and-filters.md) for `cursor.go` + reusable params.
-2. Write `db/migrations/00018_events.sql` (§3) — **take the real next free number** if MFA's `00018` has landed. Include the enum, table, indexes, append-only trigger, `emit_event`, `mark_events_read`, the device partial unique index, the `CREATE OR REPLACE` of `post_transfer` (+emit) and `issue_refresh_token` (+emit), and a down that restores the originals.
+1. Reuse the shipped `internal/api/cursor.go` (composite cursor + reusable params) — already in the baseline.
+2. Write `db/migrations/00018_events.sql` (§3, `00018` illustrative) — **take the real next free number** after the 9-file domain baseline (and after any sibling spec migration that has already landed). Include the enum, table, indexes, append-only trigger, `emit_event`, `mark_events_read`, the device partial unique index, the `CREATE OR REPLACE` of `post_transfer` (original in `00005_transfers.sql`, +emit) and `issue_refresh_token` (original in `00003_users.sql`, +emit), and a down that restores those original bodies.
 3. `task test:db` first against just the migration: confirm up→down→up and that the existing transfer/refresh tests still pass with the augmented functions.
 4. Add `db/queries/events.sql` (§4); `task generate:sqlc`.
 5. Edit `api/openapi.yaml` (§2): `/me/events` (+ optional `/me/events/read`), `Event` + `EventPage`. `task generate:oapi` (build breaks — expected).

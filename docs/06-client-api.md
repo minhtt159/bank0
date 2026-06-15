@@ -4,10 +4,8 @@
 > `server.mode=api`. JWT bearer auth, ownership-scoped to the token subject, and
 > **fronted by a Cloudflare proxy** (see [`04-deployment.md`](04-deployment.md)).
 > The browser never calls this host directly — the PWA's Worker proxies `/api/*`
-> here ([`07-client-web-app.md`](07-client-web-app.md)).
->
-> Status: **built and verified.** Login + refresh + ownership are live; MFA and
-> step-up are designed (§6) but not yet implemented.
+> here ([`07-client-web-app.md`](07-client-web-app.md)). MFA and step-up auth are
+> a designed extension (§6).
 
 ---
 
@@ -71,14 +69,15 @@ two are never interchangeable.
 
 ---
 
-## 3. Authentication — refresh tokens (implemented)
+## 3. Authentication — refresh tokens
 
 Short access tokens need a way to stay logged in without a long-lived bearer.
 The refresh token is an **opaque random string**; the DB stores only
-`sha256(token)` (migration `00017_refresh_tokens.sql`), so a DB leak never yields
+`sha256(token)` (the `refresh_tokens` table in
+[`00003_users.sql`](../db/migrations/00003_users.sql)), so a DB leak never yields
 a live token. All state and transitions live in PL/pgSQL — the Go layer calls one
 function and maps typed errors to HTTP, the project's standard discipline
-([`01-overview.md`](01-overview.md) P2/P5).
+([`01-overview.md`](01-overview.md)).
 
 ### 3.1 Model
 
@@ -131,7 +130,7 @@ sequenceDiagram
 
 ---
 
-## 4. Ownership scoping (the IDOR fix)
+## 4. Ownership scoping
 
 Every client request is scoped to the JWT `sub` (the `clientSubject` helper):
 
@@ -144,7 +143,7 @@ Every client request is scoped to the JWT `sub` (the `clientSubject` helper):
 
 Scoping applies only on the client surface (a `clientSubject` is present);
 operators on the portal are deliberately unscoped (they act on the bank's
-behalf). Verified end-to-end: alice cannot read or debit bob's account.
+behalf). One customer can never read or debit another's account.
 
 ---
 
@@ -158,11 +157,12 @@ behalf). Verified end-to-end: alice cannot read or debit bob's account.
 
 ---
 
-## 6. Planned: MFA & step-up (designed, not built)
+## 6. MFA & step-up (designed extension)
 
-The next auth increment hardens login and money moves. Same DB-first discipline;
-the access-token path (`requireJWT`) barely changes. Tables land in a new
-migration (the next free slot is `00032`).
+The MFA/step-up increment hardens login and money moves. Same DB-first discipline;
+the access-token path (`requireJWT`) barely changes. Its tables land in a new
+migration after the baseline; the full design is in
+[`specs/spec-step-up-mfa.md`](specs/spec-step-up-mfa.md).
 
 ### 6.1 TOTP MFA
 
@@ -192,37 +192,35 @@ authorization-code + PKCE and hold tokens in httpOnly cookies (the BFF in
 HS256 shared secret to **RS256/JWKS**. `aud=bank0-client` and `sub → users.id`
 are unchanged, so the ledger and ownership logic don't move.
 
-### 6.4 Security checklist (when MFA goes real)
+### 6.4 Security requirements for MFA
 
-- [ ] Refresh tokens & recovery codes stored as `sha256` only; never logged.
-- [ ] TOTP seed encrypted at rest; recovery codes one-time; 6-digit verify throttled/locked.
-- [ ] Step-up enforced server-side via `amr`/`auth_time`, never client-trusted.
-- [ ] Rate-limit `/auth/login`, `/auth/refresh`, `/auth/mfa/verify` per subject + IP.
-- [ ] PII handling vs. the immutable ledger: erase PII in `users`, keep pseudonymous ledger rows.
+- Refresh tokens & recovery codes stored as `sha256` only; never logged.
+- TOTP seed encrypted at rest; recovery codes one-time; 6-digit verify throttled/locked.
+- Step-up enforced server-side via `amr`/`auth_time`, never client-trusted.
+- Rate-limit `/auth/login`, `/auth/refresh`, `/auth/mfa/verify` per subject + IP.
+- PII handling vs. the immutable ledger: erase PII in `users`, keep pseudonymous ledger rows.
 
 ---
 
-## 7. Appendix — rationale & history
+## 7. Design notes
 
-This surface began as a **deferred plan** ("how we'd add a customer surface
-later") and was built out in phases. The reasoning is worth keeping:
-
-- **Not a new backend.** The client surface is an auth/identity + ownership layer
-  on the *existing* ledger API — no second source of truth.
-- **The blocking gaps, all now closed:**
-  1. *Ownership enforcement (IDOR).* Was the #1 pre-req; now every read/write is
-     subject-scoped (§4).
-  2. *Real authentication.* Began as a single HS256 access token; now access +
-     rotating refresh with reuse detection (§2–3). MFA/step-up is the next step (§6).
-  3. *Authorization model.* Customers are `role=customer`; admin ops live only on
-     the portal cookie surface; the client JWT's `aud=bank0-client` can't be
-     replayed against a (future) admin audience.
-- **Why a Cloudflare-fronted single binary, not a separate BFF service (yet):**
-  the Worker already gives us a same-origin seam and a place to hold refresh
-  cookies later, without standing up another deployment. The BFF/OIDC path is
-  described in [`07-client-web-app.md`](07-client-web-app.md) and §6.3.
-- **New backend work that did land beyond the original API:** `GET /me`,
-  saved **beneficiaries** (`00016`, with confirmation-of-payee masking), and the
-  refresh-token tables/functions (`00017`).
-- **Still deferred:** onboarding/KYC state on `users`, self-service profile edits,
-  notifications, statement export (PDF/CSV), multi-currency.
+- **Not a separate backend.** The client surface is an auth/identity + ownership
+  layer on the *same* ledger API — no second source of truth.
+- **Authentication.** Login mints a short HS256 access token plus a rotating
+  refresh token with reuse detection (§2–3); MFA/step-up is the designed
+  extension (§6).
+- **Authorization model.** Customers are `role=customer`; admin ops live only on
+  the portal cookie surface, and the client JWT's `aud=bank0-client` can't be
+  replayed against an admin audience.
+- **Why a Cloudflare-fronted single binary rather than a separate BFF service:**
+  the Worker provides a same-origin seam and a place to hold refresh cookies
+  without standing up another deployment. The BFF/OIDC path is described in
+  [`07-client-web-app.md`](07-client-web-app.md) and §6.3.
+- **Beyond the core ledger API**, this surface adds `GET /me`, saved
+  **beneficiaries** (with confirmation-of-payee masking), and the refresh-token
+  tables/functions — schema in
+  [`00003_users.sql`](../db/migrations/00003_users.sql) and
+  [`00008_features.sql`](../db/migrations/00008_features.sql).
+- **Open backlog** (onboarding/KYC, self-registration, notifications, statement
+  export, multi-currency) lives in [`specs/`](specs/) — see
+  [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).

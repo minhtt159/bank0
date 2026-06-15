@@ -16,7 +16,7 @@ import (
 // endpoint must stay an array (typed clients like [LedgerEntry] / List<Transfer>
 // decode-fail on null). This is the single, audit-proof guarantee for every list
 // handler — present and future (disputes, list-my-transfers, ...). See
-// docs/09-fraudbank-bff-plan.md §0.2.
+// docs/09-fraudbank-integration.md §0.2.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	if v != nil {
 		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.IsNil() {
@@ -40,7 +40,13 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 // mapDBError is the ONLY place the API encodes business knowledge: it translates
 // the typed errors the PL/pgSQL functions raise into HTTP status codes. Every
 // rule itself still lives in the database (see docs/03-...md §5).
-func mapDBError(w http.ResponseWriter, err error) {
+//
+// It is a *Server method so it can reach the per-request logger (s.logFor) and log
+// the FULL underlying error on the catch-all 500 branch — operators were otherwise
+// blind to genuine internal faults (e.g. a missing function), since the client only
+// ever sees the curated, leak-free body. The mapped business branches (404/409/422/
+// 403/401) are expected outcomes and are intentionally NOT logged here.
+func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
@@ -53,9 +59,7 @@ func mapDBError(w http.ResponseWriter, err error) {
 		// below) which are meaningful + safe for the client. For raw, Postgres-
 		// generated messages (a unique-constraint name, a generic check trip) we
 		// return a stable curated message instead, so internal schema details don't
-		// leak to client-scoped/unauthenticated callers. (Server-side logging of the
-		// raw error on the 500 path is a follow-up — it needs mapDBError to carry the
-		// request logger.)
+		// leak to client-scoped/unauthenticated callers.
 		msg := pg.Message
 		switch pg.Code {
 		case "23505": // unique_violation (raw message names the constraint — curate)
@@ -97,11 +101,22 @@ func mapDBError(w http.ResponseWriter, err error) {
 		}
 	}
 
+	// Catch-all: an error we never mapped is a genuine internal fault (a missing
+	// function, a permissions glitch, a pool error, an unanticipated SQLSTATE). The
+	// client gets a curated, leak-free body, but we MUST log the full underlying
+	// error server-side — correlated by request_id via s.logFor — or operators are
+	// blind to real 500s. Surface the SQLSTATE separately when we have one.
+	pgCode := ""
+	if pg != nil {
+		pgCode = pg.Code
+	}
+	s.logFor(r.Context()).Error("unmapped db error -> 500", "err", err, "sqlstate", pgCode)
 	writeError(w, http.StatusInternalServerError, "internal", "internal error")
 }
 
 // dbErrorMessage extracts a human-readable message from a DB error, for console
-// flash messages (the JSON API uses mapDBError instead).
+// flash messages (the JSON API uses mapDBError instead). It is a pure mapping; the
+// console handlers reach it via s.dbFlash so an unexpected error is also logged.
 func dbErrorMessage(err error) string {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "not found"
@@ -111,6 +126,22 @@ func dbErrorMessage(err error) string {
 		return pg.Message
 	}
 	return "internal error"
+}
+
+// dbFlash is the console-flash counterpart to mapDBError: it returns the
+// human-readable message for the flash banner, but — like the 500 path in
+// mapDBError — logs the FULL underlying error server-side (correlated by
+// request_id) when it is an unexpected internal fault, so a console operator's
+// "internal error" banner isn't a dead end in the logs either. A recognised
+// pgx.ErrNoRows / business PgError is an expected outcome and is not logged.
+func (s *Server) dbFlash(r *http.Request, err error) string {
+	if !errors.Is(err, pgx.ErrNoRows) {
+		var pg *pgconn.PgError
+		if !errors.As(err, &pg) {
+			s.logFor(r.Context()).Error("unmapped db error -> console flash", "err", err)
+		}
+	}
+	return dbErrorMessage(err)
 }
 
 // maxJSONBody caps request bodies so a giant payload can't exhaust memory.

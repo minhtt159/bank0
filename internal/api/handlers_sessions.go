@@ -23,7 +23,7 @@ func (s *Server) ListSessions(w http.ResponseWriter, r *http.Request, params gen
 	}
 	sessions, err := s.pg.ListUserSessions(r.Context(), subj)
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	if params.XRefreshToken != nil && *params.XRefreshToken != "" {
@@ -50,7 +50,7 @@ func (s *Server) RevokeSession(w http.ResponseWriter, r *http.Request, familyID 
 	}
 	n, err := s.pg.RevokeUserFamily(r.Context(), subj, uuid.UUID(familyID))
 	if err != nil {
-		mapDBError(w, err)
+		s.mapDBError(w, r, err)
 		return
 	}
 	if n == 0 {
@@ -60,7 +60,7 @@ func (s *Server) RevokeSession(w http.ResponseWriter, r *http.Request, familyID 
 			Family: uuid.UUID(familyID), Owner: subj,
 		})
 		if err != nil {
-			mapDBError(w, err)
+			s.mapDBError(w, r, err)
 			return
 		}
 		if !owned {
