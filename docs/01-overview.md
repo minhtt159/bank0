@@ -89,10 +89,10 @@ open http://localhost:8090/docs    # client API reference (Scalar)
 
 Seeded logins (dev passwords): staff `admin`/`admin`, `operator1`/`operator`,
 `auditor1`/`auditor`; customers `alice`/`password` … (30 named + generated, no console
-access). The default seed (`db/seed.sql`, idempotent) loads 91 customers / 215
-accounts (valid NL IBANs) / 714 transfers, including pending/canceled/reversed for the
-full lifecycle and three dedicated guided-transfer "mule" accounts. `task seed:demo` loads a much
-larger randomized set.
+access). The default seed (`db/seed.sql`, idempotent) loads 98 customers / 242
+accounts (valid NL IBANs) / 741 transfers, including pending/canceled/reversed for the
+full lifecycle and a randomized 10-user / 30-account guided-transfer "mule" pool.
+`task seed:demo` loads a much larger randomized set.
 
 ### Scenario — a customer moves money (client API → PWA)
 

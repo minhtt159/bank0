@@ -41,11 +41,11 @@ open http://localhost:8090/docs    # client API reference (Scalar)
 
 Seeded logins (dev passwords): staff `admin`/`admin`, `operator1`/`operator`,
 `auditor1`/`auditor`; customers `alice`/`password` … (no console access). The default
-seed (`db/seed.sql`, idempotent) loads 91 customers / 215 accounts (valid NL IBANs) /
-714 transfers, with pending/canceled/reversed lifecycle coverage and three dedicated
-guided-transfer "mule" accounts; `task seed:demo` loads a larger randomized set, and
-`task dev:reset` rebuilds the stack from a clean DB and seeds it in one step. **Change
-the admin password before exposing the portal.**
+seed (`db/seed.sql`, idempotent) loads 98 customers / 242 accounts (valid NL IBANs) /
+741 transfers, with pending/canceled/reversed lifecycle coverage and a randomized
+10-user / 30-account guided-transfer "mule" pool; `task seed:demo` loads a larger
+randomized set, and `task dev:reset` rebuilds the stack from a clean DB and seeds it in
+one step. **Change the admin password before exposing the portal.**
 
 Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
 

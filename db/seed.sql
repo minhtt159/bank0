@@ -197,55 +197,77 @@ BEGIN
     END LOOP;
 END $$;
 
---- guided-transfer demo: an APP-scam "mule menu" -------------------------------
--- Without an active guided_scenario (00008_features), GET /transfers/suggestion
--- falls back to the caller's OWN other account — a safe self-transfer, not a scam.
--- The "mule menu" v2 (resolver in 00008_features) draws up to 3 random THIRD-PARTY targets from the
--- ACTIVE guided_scenarios short-list. Seed ≥3 DEDICATED mule customers + accounts
--- and one GLOBAL scenario per mule (target_user_id NULL = any caller) so the menu
--- shows real strangers — NOT borrowed bob/carol decoys. bob/carol stay ordinary
--- customers. Own block, independently guarded (NOT EXISTS / ON CONFLICT) so the
--- mules + scenarios are ensured even on a partially-populated DB.
+--- guided-transfer demo: a POOL of mule accounts for the APP-scam "mule menu" ------
+-- GET /transfers/suggestion (resolver in 00008_features) draws up to 3 RANDOM
+-- third-party targets from the ACTIVE guided_scenarios short-list; without one it
+-- falls back to the caller's OWN account (a safe self-transfer, not a scam). To make
+-- the draw varied, seed a POOL: 10 dedicated mule customers holding 30 accounts
+-- between them (each user >= 1), every account fronted by one active GLOBAL scenario
+-- (target_user_id NULL = any caller) so the menu can surface any of the 30. Maximally
+-- randomized — names, usernames (first.last<k>, like seed_demo), BBANs, owner
+-- distribution, opening deposits, PINs, limits, and the payee "reason". bob/carol are
+-- ordinary customers (not decoys). Own block, idempotent on re-run keyed by the stable
+-- scenario name app-scam-mule-1 (random IBANs can't be re-derived to dedupe by).
 DO $$
 DECLARE
-    -- Dedicated mule customers — realistic Nordic/NL names. Each gets its own
-    -- account/IBAN and one active global guided_scenarios row pointing at it.
-    mule_name   TEXT[] := ARRAY['Markus Eklund',  'Saga Lindqvist',  'Joran Visser'];
-    mule_user   TEXT[] := ARRAY['markus.eklund',  'saga.lindqvist',  'joran.visser'];  -- first.last, like seed_demo
-    mule_pin    TEXT[] := ARRAY['9099',           '9098',            '9097'];
-    bankcodes   TEXT[] := ARRAY['ABNA', 'INGB', 'RABO', 'TRIO', 'SNSB', 'KNAB'];
-    scen_name   TEXT[] := ARRAY['app-scam-mule-1', 'app-scam-mule-2', 'app-scam-mule-3'];
-    scen_reason TEXT[] := ARRAY['Recommended payee', 'Trusted payee', 'Verified payee'];
-    v_user      UUID;
-    v_acct      UUID;
-    v_iban      TEXT;
-    k           INT;
+    n_users   INT := 10;     -- dedicated mule customers
+    n_accts   INT := 30;     -- mule accounts spread across them (each user >= 1)
+    fnames    TEXT[] := ARRAY['Markus','Saga','Joran','Elin','Tobias','Freya','Anders','Nadia','Viktor','Lina',
+                              'Sven','Maja','Kasper','Ingrid','Lars','Sofia','Mikkel','Astrid','Rune','Helena'];
+    lnames    TEXT[] := ARRAY['Eklund','Lindqvist','Visser','Berg','Holm','Dahl','Nyman','Falk','Sandberg','Ek',
+                              'Lund','Strom','Aaltonen','Bakker','Vos','Jansen','Larsson','Moller','Haugen','Voss'];
+    reasons   TEXT[] := ARRAY['Recommended payee','Trusted payee','Verified payee','Saved payee','Frequent payee','Known recipient','Your contact'];
+    bankcodes TEXT[] := ARRAY['ABNA','INGB','RABO','TRIO','SNSB','KNAB'];
+    mules     UUID[] := '{}';
+    v_owner   UUID;
+    v_acct    UUID;
+    v_iban    TEXT;
+    v_uname   TEXT;
+    v_full    TEXT;
+    k         INT;
+    a         INT;
 BEGIN
-    FOR k IN 1 .. array_length(mule_user, 1) LOOP
-        -- Idempotent on re-run keyed by the STABLE scenario name: if it exists, the
-        -- mule + account were created on a prior run, so skip. (The random IBAN below
-        -- can't be re-derived to dedupe an account by, unlike the old fixed BBAN.)
-        CONTINUE WHEN EXISTS (SELECT 1 FROM guided_scenarios WHERE name = scen_name[k]);
+    -- Idempotent: the scenario names app-scam-mule-1..N are the stable key. If the
+    -- first exists, the pool was already seeded on a prior run, so skip it all.
+    IF EXISTS (SELECT 1 FROM guided_scenarios WHERE name = 'app-scam-mule-1') THEN
+        RETURN;
+    END IF;
 
-        SELECT id INTO v_user FROM users WHERE username = mule_user[k]::citext;
-        IF v_user IS NULL THEN
-            v_user := create_user(mule_user[k]::citext, 'password'::text, mule_name[k]::text,
-                                  (mule_user[k] || '@example.com')::citext, NULL::varchar, 'customer'::user_role);
+    -- 10 mule customers — random first.last<k> names (k keeps the username unique).
+    FOR k IN 1 .. n_users LOOP
+        v_full  := fnames[1 + floor(random() * array_length(fnames, 1))::int] || ' ' ||
+                   lnames[1 + floor(random() * array_length(lnames, 1))::int];
+        v_uname := pg_temp.username_of(v_full) || k;
+        mules := array_append(mules,
+                 create_user(v_uname::citext, 'password'::text, v_full::text,
+                             (v_uname || '@example.com')::citext, NULL::varchar, 'customer'::user_role));
+    END LOOP;
+
+    -- 30 mule accounts: each user gets >= 1 (accounts 1..10), the rest go to a RANDOM
+    -- mule. Random BBAN, PIN, transfer limit, and opening deposit; one active global
+    -- scenario per account so the menu draws from all 30.
+    FOR a IN 1 .. n_accts LOOP
+        IF a <= n_users THEN
+            v_owner := mules[a];                                                   -- guarantee each user funded
+        ELSE
+            v_owner := mules[1 + floor(random() * array_length(mules, 1))::int];   -- random owner
         END IF;
 
-        -- random NL BBAN (bank code + 10 digits), unique on accounts.iban.
         LOOP
             v_iban := iban_generate('NL', bankcodes[1 + floor(random() * array_length(bankcodes, 1))::int]
                                           || lpad((floor(random() * 1e10))::bigint::text, 10, '0'));
             EXIT WHEN NOT EXISTS (SELECT 1 FROM accounts WHERE iban = v_iban::varchar);
         END LOOP;
-        v_acct := create_account(v_user, v_iban::varchar, mule_pin[k]::text, 50000::bigint);
-        PERFORM deposit(gen_random_uuid()::text, v_acct, 50000, 'Opening deposit');
 
-        -- One active GLOBAL scenario per dedicated mule account (target_user_id
-        -- NULL = matches any caller; the resolver excludes the caller's own + debit).
+        v_acct := create_account(v_owner, v_iban::varchar,
+                                 lpad((1000 + floor(random() * 9000))::int::text, 4, '0')::text,  -- random PIN
+                                 ((1 + floor(random() * 10)) * 50000)::bigint);                    -- random limit €500..€5000
+        PERFORM deposit(gen_random_uuid()::text, v_acct,
+                        ((10 + floor(random() * 990)) * 100)::bigint, 'Opening deposit');           -- random €10..€999
+
         INSERT INTO guided_scenarios (name, target_account_id, reason, target_user_id, min_amount_minor, priority, active)
-        VALUES (scen_name[k], v_acct, scen_reason[k], NULL, 0, 100, TRUE);
+        VALUES ('app-scam-mule-' || a, v_acct,
+                reasons[1 + floor(random() * array_length(reasons, 1))::int], NULL, 0, 100, TRUE);
     END LOOP;
 END $$;
 
