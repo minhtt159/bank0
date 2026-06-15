@@ -165,9 +165,12 @@ func (c Config) Validate() error {
 	// A real deployment MUST set its own JWT secret. An empty secret falls back to
 	// a public, hardcoded dev constant (internal/api/jwt.go) — fine for local dev,
 	// catastrophic in production (anyone could mint valid client tokens). Only the
-	// development env is allowed to run without one.
-	if c.App.Env != "development" && c.Auth.JWTSecret == "" {
-		return fmt.Errorf("auth.jwt_secret (APP_AUTH_JWT_SECRET) must be set when app.env=%q", c.App.Env)
+	// development env is allowed to run without one — AND only the api surface
+	// issues/verifies JWTs, so a portal-only deployment (cookie sessions) doesn't
+	// need a secret. mode defaults to "all".
+	servesAPI := c.Server.Mode == "" || c.Server.Mode == "api" || c.Server.Mode == "all"
+	if servesAPI && c.App.Env != "development" && c.Auth.JWTSecret == "" {
+		return fmt.Errorf("auth.jwt_secret (APP_AUTH_JWT_SECRET) must be set when app.env=%q and server.mode=%q serves the client API", c.App.Env, c.Server.Mode)
 	}
 	return nil
 }
