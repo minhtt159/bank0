@@ -190,4 +190,17 @@ describe("worker /api proxy contract", () => {
       expect(body).toContain('"bank0"');
     });
   });
+
+  describe("5. upstream failure", () => {
+    it("returns a controlled JSON 502 when the upstream errors", async () => {
+      fetchMock
+        .get(UPSTREAM)
+        .intercept({ path: "/transfers", method: () => true })
+        .replyWithError(new Error("connection refused"));
+      const res = await SELF.fetch("https://bank0.test/api/transfers");
+      expect(res.status).toBe(502);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect((await res.json()).error).toBe("bad_gateway");
+    });
+  });
 });

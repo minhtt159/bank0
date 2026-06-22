@@ -6,6 +6,7 @@ import { formatMinor, parseMajor } from "../lib/money";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { isValidIBAN } from "../lib/iban";
 import type { Account, Beneficiary, ResolvedAccount, TransferSuggestion } from "../api/types";
+import { ErrorBanner } from "../lib/feedback";
 
 export function Transfer() {
   const { route } = useLocation();
@@ -152,12 +153,12 @@ export function Transfer() {
     }
   }
 
-  if (err && accounts.length === 0) return <div class="error">{err}</div>;
+  if (err && accounts.length === 0) return <ErrorBanner>{err}</ErrorBanner>;
 
   if (step === "confirm" && src && dst && minor != null) {
     return (
       <>
-        <a class="muted" href="#" onClick={(e) => { e.preventDefault(); setStep("form"); }}>‹ Edit</a>
+        <button type="button" class="link" style="color:var(--muted)" onClick={() => setStep("form")}>‹ Edit</button>
         <h1>Confirm transfer</h1>
         <div class="card">
           <div class="amount" style="text-align:center;margin:8px 0 16px">{formatMinor(minor, src.currency)}</div>
@@ -166,7 +167,7 @@ export function Transfer() {
           <div class="row"><span class="muted">Payee name</span><span>{dst.owner_name_masked}</span></div>
           <div class="row"><span class="muted">Payee IBAN</span><span class="iban">{dst.iban}</span></div>
         </div>
-        {err && <div class="error">{err}</div>}
+        {err && <ErrorBanner>{err}</ErrorBanner>}
         <button class="block" onClick={send} disabled={busy}>
           {busy ? "Sending…" : `Send ${formatMinor(minor, src.currency)}`}
         </button>
@@ -178,19 +179,21 @@ export function Transfer() {
     <>
       <a class="muted" href="/">‹ Cancel</a>
       <h1>Send money</h1>
-      {err && <div class="error">{err}</div>}
+      {err && <ErrorBanner>{err}</ErrorBanner>}
 
       <h2>From</h2>
-      <input placeholder="Search your accounts" value={srcQ}
+      <input placeholder="Search your accounts" aria-label="Search your accounts" value={srcQ}
         onInput={(e) => setSrcQ((e.target as HTMLInputElement).value)} />
-      <div style="margin-top:8px">
+      <div style="margin-top:8px" role="radiogroup" aria-label="Source account">
         {srcMatches.map((a) => (
-          <div key={a.id} class={`pick ${a.id === srcId ? "sel" : ""}`} onClick={() => setSrcId(a.id)}>
+          <label key={a.id} class={`pick ${a.id === srcId ? "sel" : ""}`}>
+            <input type="radio" name="source-account" class="visually-hidden"
+              checked={a.id === srcId} onChange={() => setSrcId(a.id)} />
             <div class="row">
               <span class="iban">{a.iban}</span>
               <span>{formatMinor(a.available_minor, a.currency)}</span>
             </div>
-          </div>
+          </label>
         ))}
       </div>
 
@@ -211,14 +214,16 @@ export function Transfer() {
       )}
       {!adding && (
         <>
-          <input placeholder="Search saved payees" value={dstQ}
+          <input placeholder="Search saved payees" aria-label="Search saved payees" value={dstQ}
             onInput={(e) => setDstQ((e.target as HTMLInputElement).value)} />
-          <div style="margin-top:8px">
+          <div style="margin-top:8px" role="radiogroup" aria-label="Payee">
             {dstMatches.map((b) => (
-              <div key={b.id} class={`pick ${b.id === dstId ? "sel" : ""}`} onClick={() => setDstId(b.id)}>
+              <label key={b.id} class={`pick ${b.id === dstId ? "sel" : ""}`}>
+                <input type="radio" name="payee" class="visually-hidden"
+                  checked={b.id === dstId} onChange={() => setDstId(b.id)} />
                 <div class="row"><span>{b.label}</span><span class="muted">{b.owner_name_masked}</span></div>
                 <div class="iban muted" style="font-size:13px">{b.iban}</div>
-              </div>
+              </label>
             ))}
             {bens.length === 0 && <div class="muted">No saved payees yet.</div>}
           </div>
@@ -228,14 +233,14 @@ export function Transfer() {
 
       {adding && (
         <div class="card">
-          {addErr && <div class="error">{addErr}</div>}
+          {addErr && <ErrorBanner>{addErr}</ErrorBanner>}
           <label>Payee name (your label)</label>
           <input value={newLabel} onInput={(e) => setNewLabel((e.target as HTMLInputElement).value)} />
           <label>IBAN</label>
           <input class="iban" value={newIban}
             onInput={(e) => { setNewIban((e.target as HTMLInputElement).value); setPreview(null); }} />
           {newIban.trim() && !isValidIBAN(newIban) && (
-            <p class="error" style="font-size:13px">Invalid IBAN — check the digits, length, and country code.</p>
+            <ErrorBanner small>Invalid IBAN — check the digits, length, and country code.</ErrorBanner>
           )}
           {preview && (
             <p class="muted">Confirmation of payee: <strong>{preview.owner_name_masked}</strong></p>
@@ -250,9 +255,9 @@ export function Transfer() {
       )}
 
       <h2 style="margin-top:18px">Amount</h2>
-      <input inputMode="decimal" placeholder="0.00" value={amount}
+      <input inputMode="decimal" placeholder="0.00" aria-label="Amount" value={amount}
         onInput={(e) => setAmount((e.target as HTMLInputElement).value)} />
-      {overBalance && <div class="error">Exceeds available balance.</div>}
+      {overBalance && <ErrorBanner>Exceeds available balance.</ErrorBanner>}
 
       <button class="block" style="margin-top:20px" onClick={review}
         disabled={!srcId || !dstId || minor == null || overBalance}>

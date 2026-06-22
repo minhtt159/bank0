@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
+import { ErrorBanner } from "../lib/feedback";
 
 const MIN_LEN = 12; // matches ChangePasswordRequest.new_password minLength in the spec
 
@@ -52,18 +53,18 @@ export function ChangePassword() {
       <a class="muted" href="/profile">‹ Profile</a>
       <h1>Change password</h1>
       <form onSubmit={submit}>
-        {err && <div class="error">{err}</div>}
+        {err && <ErrorBanner>{err}</ErrorBanner>}
         <label for="cur">Current password</label>
         <input id="cur" type="password" autocomplete="current-password" value={current}
           onInput={(e) => setCurrent((e.target as HTMLInputElement).value)} />
         <label for="new">New password</label>
         <input id="new" type="password" autocomplete="new-password" value={next}
           onInput={(e) => setNext((e.target as HTMLInputElement).value)} />
-        {tooShort && <p class="error" style="font-size:13px">Use at least {MIN_LEN} characters.</p>}
+        {tooShort && <ErrorBanner small>Use at least {MIN_LEN} characters.</ErrorBanner>}
         <label for="conf">Confirm new password</label>
         <input id="conf" type="password" autocomplete="new-password" value={confirm}
           onInput={(e) => setConfirm((e.target as HTMLInputElement).value)} />
-        {mismatch && <p class="error" style="font-size:13px">Passwords don't match.</p>}
+        {mismatch && <ErrorBanner small>Passwords don't match.</ErrorBanner>}
         <button class="block" style="margin-top:20px" disabled={!canSubmit}>
           {busy ? "Saving…" : "Change password"}
         </button>

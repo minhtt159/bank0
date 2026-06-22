@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { api } from "../api/client";
 import { disputeCategoryLabel, disputeStatusLabel } from "../lib/labels";
 import type { Dispute } from "../api/types";
+import { ErrorBanner, Loading } from "../lib/feedback";
 
 export function Disputes() {
   const [disputes, setDisputes] = useState<Dispute[] | null>(null);
@@ -11,8 +12,8 @@ export function Disputes() {
     api.disputes().then(setDisputes).catch((e) => setErr(e.message));
   }, []);
 
-  if (err) return <div class="error">{err}</div>;
-  if (!disputes) return <div class="center">Loading…</div>;
+  if (err) return <ErrorBanner>{err}</ErrorBanner>;
+  if (!disputes) return <Loading />;
 
   return (
     <>

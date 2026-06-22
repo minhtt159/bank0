@@ -100,7 +100,16 @@ async function req<T>(method: string, path: string, opts: Opts = {}, retried = f
   if (resp.status === 204) return undefined as T;
 
   const text = await resp.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Non-JSON body (e.g. a proxy/gateway error page or the worker's 502).
+      // Surface a clean ApiError instead of an unhandled SyntaxError.
+      throw new ApiError(resp.status, "bad_response", resp.ok ? "Unexpected response from server." : resp.statusText);
+    }
+  }
   if (!resp.ok) {
     throw new ApiError(resp.status, data?.error ?? "error", data?.message ?? resp.statusText);
   }

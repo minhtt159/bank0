@@ -41,7 +41,21 @@ export default {
         // streaming a request body requires half-duplex in Workers/fetch
         (init as RequestInit & { duplex: "half" }).duplex = "half";
       }
-      return fetch(upstream.toString(), init);
+      // Time-box the upstream call and turn any failure (origin down, DNS, timeout)
+      // into a controlled JSON 502 rather than a raw Cloudflare 1101 error page.
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 15_000);
+      try {
+        return await fetch(upstream.toString(), { ...init, signal: ac.signal });
+      } catch (e) {
+        const reason = (e as Error)?.name === "AbortError" ? "upstream timed out" : "upstream unavailable";
+        return new Response(JSON.stringify({ error: "bad_gateway", message: reason }), {
+          status: 502,
+          headers: { "content-type": "application/json" },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     // --- static SPA assets ---

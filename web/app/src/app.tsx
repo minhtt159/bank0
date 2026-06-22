@@ -1,4 +1,5 @@
 import { LocationProvider, Router, Route, useLocation } from "preact-iso";
+import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { isAuthed } from "./store/auth";
 import { api } from "./api/client";
@@ -25,6 +26,10 @@ function Protected({ children }: { children: ComponentChildren }) {
 
 function Shell({ children }: { children: ComponentChildren }) {
   const { path, route } = useLocation();
+  // Move focus to the main region on every navigation so keyboard/screen-reader
+  // users land at the new content instead of being stranded where the old link was.
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => { mainRef.current?.focus(); }, [path]);
   return (
     <div class="shell">
       <header class="topbar">
@@ -35,7 +40,7 @@ function Shell({ children }: { children: ComponentChildren }) {
           <button class="link" onClick={() => api.logout()}>Sign out</button>
         </nav>
       </header>
-      <main>{children}</main>
+      <main ref={mainRef} tabIndex={-1}>{children}</main>
       <button class="fab" title="Send money" onClick={() => route("/transfer")}>+ Send</button>
     </div>
   );

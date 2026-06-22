@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { api } from "../api/client";
 import { formatMinor } from "../lib/money";
 import type { Account as Acct, LedgerEntry } from "../api/types";
+import { ErrorBanner, Loading } from "../lib/feedback";
 
 const PAGE = 25;
 
@@ -32,8 +33,8 @@ export function Account({ id }: { id: string }) {
     loadMore();
   }, [id]);
 
-  if (err) return <div class="error">{err}</div>;
-  if (!acct) return <div class="center">Loading…</div>;
+  if (err) return <ErrorBanner>{err}</ErrorBanner>;
+  if (!acct) return <Loading />;
 
   return (
     <>
