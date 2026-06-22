@@ -122,7 +122,7 @@ sequenceDiagram
     else first time
         FN->>FN: lock debit acct, check available vs limit, place hold
         FN->>TR: post_transfer() (auto for small amounts)
-        TR->>TR: INSERT 2 ledger_entries; trigger updates balances
+        TR->>TR: INSERT 2 ledger_entries, trigger updates balances
         TR-->>H: {transfer_id, status: posted}
     end
     H-->>C: 200 {transfer_id, status}

@@ -34,14 +34,15 @@ The console is built around these requirements:
 
 ## 2. Roles (least privilege)
 
-Maps to `users.role`. Enforced in middleware (route → required role) **and**
-mirrored in the UI (hide what you can't do).
+Maps to `users.role`. Enforced **in each handler** (a `requireRole` check on the
+gated action — there is no route→role middleware; the portal subrouter carries only
+`requireSession` + `csrfGuard`) **and** mirrored in the UI (hide what you can't do).
 
 | Role | Can | Cannot |
 |------|-----|--------|
 | `auditor` | read everything: accounts, ledgers, transfers, reconcile, audit log | change anything |
-| `operator` | + create accounts, freeze/unfreeze, cancel *pending* transfers, request deposits/withdrawals up to a threshold | reverse posted transfers, large credits, manage users |
-| `admin` | + reverse posted transfers, approve maker-checker items, large credits, manage operator accounts | (nothing app-level; still audited) |
+| `operator` | + create accounts, freeze/unfreeze, cancel *pending* transfers, post credits/withdrawals up to the maker-checker threshold | reverse posted transfers, post above-threshold moves directly (they route to Approvals), manage users |
+| `admin` | + reverse posted transfers, approve maker-checker items (a different admin than the maker), manage all users | (nothing app-level; still audited) |
 | `customer` | no console access | — |
 
 > Every state-changing screen calls a DB function that already enforces its own
@@ -55,11 +56,14 @@ mirrored in the UI (hide what you can't do).
 ┌ Top bar: bank0 · role badge · operator name · logout ─────────────┐
 │ Left nav            │  Main panel (HTMX-swapped)                   │
 │ • Dashboard         │                                              │
+│ • Users             │                                              │
 │ • Accounts          │   [ context-specific content ]               │
 │ • Transfers         │                                              │
-│ • Approvals (N)     │   right rail: detail / actions               │
+│ • Reconciliation    │   right rail: detail / actions               │
+│ • Approvals (N)     │                                              │
+│ • Disputes          │                                              │
 │ • Audit log         │                                              │
-│ • Reconciliation    │                                              │
+│ • Settings          │                                              │
 └─────────────────────┴──────────────────────────────────────────────┘
 ```
 

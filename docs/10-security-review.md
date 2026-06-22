@@ -22,7 +22,7 @@
 | **Rate limiting + trusted-proxy IP** | An in-app sliding-window limiter keys per client IP on the credential paths (`/auth/login`, `/auth/refresh`, `/auth/logout`), config `server.rate_limit_per_min` (default 60; `0` disables). Forwarded headers are trusted only when `server.trust_proxy_headers=true` (set behind Cloudflare), then `CF-Connecting-IP` is preferred, else the first XFF hop, else `RemoteAddr` — so the limiter key can't be spoofed by rotating `X-Forwarded-For`. 429 + `Retry-After`. The Cloudflare edge is the primary control; this is a per-instance backstop. Tested: `TestRateLimiterAllow`, `TestRateLimitMiddleware429`, `TestClientIP`. |
 | **Bounded request bodies** | `decodeJSON` wraps the body in `http.MaxBytesReader` (1 MiB). |
 | **Security headers** | A `securityHeaders` middleware sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and a `frame-ancestors 'none'; base-uri 'self'; object-src 'none'` CSP on every surface. The PWA additionally gets a full CSP + HSTS from its Worker. |
-| **DB errors don't leak** | `mapDBError` returns curated, stable messages for raw constraint trips (unique violation, generic `23514`, restrict violation, auth) rather than echoing Postgres text. It still surfaces developer-authored business `RAISE`s (`P0001`, crafted `insufficient`/idempotency messages) since those are meaningful and caller-scoped. |
+| **DB errors don't leak** | `mapDBError` returns curated, stable messages for raw constraint trips (unique violation, generic `23514`, restrict violation, auth) rather than echoing Postgres text. It still surfaces developer-authored business `RAISE`s (`P0001`, crafted `insufficient`/idempotency messages) since those are meaningful and caller-scoped. An **unmapped** error returns a generic `500 internal` to the client while the raw error + SQLSTATE are logged server-side (`s.mapDBError` → `s.logFor`, correlated by `request_id`), so it stays debuggable without leaking. |
 | **Parameterized queries** | All DB access is parameterized via sqlc / PL/pgSQL functions; free text (`dispute.reason`, beneficiary search, IBAN) is stored/compared as a bound value, never concatenated. |
 
 ## Known limitations
@@ -31,9 +31,6 @@
   A global limit across replicas needs a shared store — the Cloudflare edge (the
   primary control) or a DB/Redis-backed counter. `/me/password` is not yet rate
   limited: it sits behind a valid JWT, so it is a lower-priority oracle.
-- **Raw-error server-side logging.** The 500 path returns a curated message but
-  does not yet **log** the raw error server-side; that needs `mapDBError` to carry
-  the request logger (a signature change across all handlers).
 - **Stricter console CSP.** The `securityHeaders` CSP omits a `script-src`
   lockdown so the CDN-loaded htmx keeps working. Self-hosting htmx (with SRI)
   would allow `script-src 'self'`.
