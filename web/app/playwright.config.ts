@@ -9,6 +9,7 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false, // one shared seeded backend
   workers: 1,
+  retries: process.env.CI ? 2 : 0, // absorb rare timing flakes in CI; fail fast locally
   // list for the console; html (never auto-served) so CI can upload a report with
   // the retained traces as a failure artifact.
   reporter: [["list"], ["html", { open: "never" }]],

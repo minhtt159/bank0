@@ -118,11 +118,30 @@ jobs:
         run: npm test
         working-directory: worker
 
+  # Customer-PWA unit tests (pure logic: IBAN validation, etc.). Cheap and DB-free,
+  # so it gates every PR. The IBAN length table's cross-source drift is guarded
+  # separately by a Go test (internal/iban/drift_test.go).
+  webapp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: web/app
+      - name: Unit tests
+        run: npm test
+        working-directory: web/app
+
   # Tier A end-to-end: the REAL two-binary split topology (portal + api processes)
-  # behind `//go:build e2e`. Heavier (spawns two processes); manual only, like the
-  # PG17 parity run. Actions -> CI -> Run workflow.
+  # behind `//go:build e2e`. Go + Postgres only (no browser), so it gates every PR as
+  # the regression net for split-mode routing. PG17 parity is still a manual dispatch
+  # (pg_version input); the heavy browser tier (e2e-browser) also stays manual.
   e2e-go:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     services:
       postgres:
