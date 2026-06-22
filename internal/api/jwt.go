@@ -179,6 +179,19 @@ func clientSubject(ctx context.Context) (uuid.UUID, bool) {
 	return id, true
 }
 
+// clientSubjectOr401 returns the authenticated client subject, writing a 401 and
+// returning ok=false when the request is not on the client (JWT) surface. Client
+// handlers that require a subject before doing anything use it instead of repeating
+// the clientSubject -> 401 preamble. Handlers that legitimately tolerate the portal
+// surface (ok=false, e.g. the shared client+admin reads) keep calling clientSubject.
+func (s *Server) clientSubjectOr401(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	subj, ok := clientSubject(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+	}
+	return subj, ok
+}
+
 // ownsAccount returns true if the subject owns the (nullable) account owner.
 func ownsAccount(subject uuid.UUID, owner *uuid.UUID) bool {
 	return owner != nil && *owner == subject

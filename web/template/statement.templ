@@ -7,7 +7,7 @@ import (
 
 // StatementView: an account's ledger (running balance), in the main panel. Rows
 // drill into the transfer detail (rail). Paginated by posted_at cursor.
-templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, prevURL string, nextURL string) {
+templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.GetAccountLedgerRow, prevURL string, nextURL string) {
 	<div class="panel">
 		<div class="panel-head">
 			<h1>Statement</h1>
@@ -27,7 +27,7 @@ templ StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, pr
 
 // StatementBody: the paginated table + pager. Swapped into #statement-results on
 // a Prev/Next step.
-templ StatementBody(rows []sqlc.AccountStatementRow, prevURL string, nextURL string) {
+templ StatementBody(rows []sqlc.GetAccountLedgerRow, prevURL string, nextURL string) {
 	<table>
 		<thead>
 			<tr>
@@ -46,7 +46,7 @@ templ StatementBody(rows []sqlc.AccountStatementRow, prevURL string, nextURL str
 	@pager(prevURL, nextURL, "statement-results")
 }
 
-templ StatementItems(rows []sqlc.AccountStatementRow) {
+templ StatementItems(rows []sqlc.GetAccountLedgerRow) {
 	if len(rows) == 0 {
 		<tr><td colspan="6" class="muted">No ledger entries.</td></tr>
 	}

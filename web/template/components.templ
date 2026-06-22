@@ -72,3 +72,12 @@ templ pager(prevURL string, nextURL string, target string) {
 	}
 }
 
+// flashBar renders the post-action status banner shared by the console panels and
+// drill-downs (approvals, disputes, settings, transfers, user/transfer detail). An
+// empty flash renders nothing.
+templ flashBar(flash string) {
+	if flash != "" {
+		<div class="flash">{ flash }</div>
+	}
+}
+

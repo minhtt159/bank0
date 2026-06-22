@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/minhtt159/bank0/internal/api/genclient"
-	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+	"github.com/minhtt159/bank0/internal/iban"
 )
 
 // Beneficiaries are the customer app's saved payees (docs/07). Every operation is
@@ -17,9 +17,8 @@ import (
 
 // ListBeneficiaries implements genclient.ServerInterface.
 func (s *Server) ListBeneficiaries(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	rows, err := s.pg.Queries.ListBeneficiaries(r.Context(), subj)
@@ -38,9 +37,8 @@ type addBeneficiaryReq struct {
 // AddBeneficiary implements genclient.ServerInterface: resolve an IBAN to an
 // account and save it for the caller. Returns the created beneficiary.
 func (s *Server) AddBeneficiary(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req addBeneficiaryReq
@@ -75,9 +73,8 @@ func (s *Server) AddBeneficiary(w http.ResponseWriter, r *http.Request) {
 // The match VERDICT is computed in the DB against params.Name — clients render
 // the outcome + gate, they do not decide it.
 func (s *Server) ResolveBeneficiary(w http.ResponseWriter, r *http.Request, params genclient.ResolveBeneficiaryParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	if params.Iban == "" {
@@ -98,9 +95,8 @@ func (s *Server) ResolveBeneficiary(w http.ResponseWriter, r *http.Request, para
 
 // DeleteBeneficiary implements genclient.ServerInterface: scoped removal.
 func (s *Server) DeleteBeneficiary(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	if err := s.pg.Queries.DeleteBeneficiary(r.Context(), sqlc.DeleteBeneficiaryParams{

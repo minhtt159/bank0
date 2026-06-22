@@ -15,9 +15,7 @@ templ TransfersPanel() {
 // TransferTable: full table + pager. Returned for first page, search, an action,
 // or a Prev/Next step — always swapped into #transfers-results (innerHTML).
 templ TransferTable(rows []sqlc.SearchTransfersRow, canAct bool, prevURL string, nextURL string, flash string) {
-	if flash != "" {
-		<div class="flash">{ flash }</div>
-	}
+	@flashBar(flash)
 	<table>
 		<thead>
 			<tr>

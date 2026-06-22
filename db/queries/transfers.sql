@@ -120,16 +120,3 @@ FROM holds
 WHERE transfer_id = sqlc.arg(transfer_id)::uuid
 ORDER BY created_at DESC
 LIMIT 1;
-
--- name: AccountStatement :many
--- Console account statement with a composite (posted_at, id) keyset cursor so
--- ties (same posted_at) page correctly.
-SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signed_amount,
-       balance_after, currency, posted_at, transfer_kind, transfer_status, description,
-       counterparty_iban, counterparty_owner
-FROM enriched_ledger
-WHERE account_id = sqlc.arg(account_id)::uuid
-  AND (sqlc.narg(cursor)::timestamptz IS NULL
-       OR (posted_at, id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
-ORDER BY posted_at DESC, id DESC
-LIMIT sqlc.arg(page_limit)::int;

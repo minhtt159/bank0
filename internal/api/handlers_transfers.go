@@ -37,9 +37,8 @@ func validTransferKind(k sqlc.TransferKind) bool {
 // keyset cursor — pass the last row's requested_at as cursor + its id as cursor_id.
 // Read-only, no idempotency. See docs/specs/spec-list-my-transfers.md.
 func (s *Server) ListMyTransfers(w http.ResponseWriter, r *http.Request, params genclient.ListMyTransfersParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	q := sqlc.ListMyTransfersParams{
@@ -98,9 +97,8 @@ type createTransferReq struct {
 // CreateTransfer implements genclient.ServerInterface. Auto-posts by default;
 // idempotent on the Idempotency-Key header (bound by the generated wrapper).
 func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params genclient.CreateTransferParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req createTransferReq
@@ -235,9 +233,8 @@ func (s *Server) respondPending(w http.ResponseWriter, r *http.Request, cursor *
 // enforced inside client_post_transfer (one round trip); a transfer the caller
 // doesn't own raises 'not found' -> 404, hiding existence.
 func (s *Server) PostTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	status, err := s.pg.Queries.ClientPostTransfer(r.Context(), sqlc.ClientPostTransferParams{
@@ -257,9 +254,8 @@ type reasonReq struct {
 // CancelTransfer implements genclient.ServerInterface. Ownership enforced in the DB
 // (client_cancel_transfer); a transfer the caller doesn't own -> 404.
 func (s *Server) CancelTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req reasonReq

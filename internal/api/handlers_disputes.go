@@ -48,9 +48,8 @@ func validScamType(t string) bool {
 // Client surface only; the party check + disputability live in raise_dispute (the
 // raiser owning a side is enforced in PL/pgSQL, not client-trusted).
 func (s *Server) RaiseDispute(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req raiseDisputeReq
@@ -94,9 +93,8 @@ func (s *Server) RaiseDispute(w http.ResponseWriter, r *http.Request, id openapi
 
 // ListMyDisputes implements genclient.ServerInterface — subject-scoped, newest first.
 func (s *Server) ListMyDisputes(w http.ResponseWriter, r *http.Request, params genclient.ListMyDisputesParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	rows, err := s.pg.Queries.ListDisputesForRaiser(r.Context(), sqlc.ListDisputesForRaiserParams{
@@ -114,9 +112,8 @@ func (s *Server) ListMyDisputes(w http.ResponseWriter, r *http.Request, params g
 // GetDispute implements genclient.ServerInterface — scoped to the raiser. A dispute
 // that exists but belongs to another user returns 404 (never revealed).
 func (s *Server) GetDispute(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	d, err := s.pg.Queries.GetDisputeForRaiser(r.Context(), sqlc.GetDisputeForRaiserParams{

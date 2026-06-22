@@ -14,9 +14,7 @@ templ TransferDetail(t sqlc.GetTransferDetailRow, legs []sqlc.TransferLegsRow, h
 			<h2>{ money.FormatMinor(t.AmountMinor) } { t.Currency }</h2>
 			<span class="muted"><span class={ "pill " + string(t.Status) }>{ string(t.Status) }</span> · { string(t.Kind) }</span>
 		</div>
-		if flash != "" {
-			<div class="flash">{ flash }</div>
-		}
+		@flashBar(flash)
 		<section class="block">
 			<div class="kv"><span>From</span><span class="mono">{ t.DebitLabel }</span></div>
 			<div class="kv"><span>To</span><span class="mono">{ t.CreditLabel }</span></div>

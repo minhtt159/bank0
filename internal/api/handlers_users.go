@@ -72,9 +72,8 @@ func (s *Server) GetUser(w http.ResponseWriter, r *http.Request, id openapi_type
 // from the JWT subject. Client surface only (always behind requireJWT); the
 // GetUserByID projection excludes the password hash.
 func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	u, err := s.pg.Queries.GetUserByID(r.Context(), subj)
@@ -104,9 +103,8 @@ func looksLikeEmail(e string) bool {
 // can never change a password (use POST /me/password), unlock an account, or
 // escalate role. See docs/specs/spec-self-service-profile.md.
 func (s *Server) UpdateMe(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req updateMeReq

@@ -23,9 +23,8 @@ type openAccountReq struct {
 // Ownership is implicit: the account is opened for the JWT subject — there is
 // no user_id in the request, so a caller can never open for someone else.
 func (s *Server) OpenMyAccount(w http.ResponseWriter, r *http.Request, params genclient.OpenMyAccountParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req openAccountReq
@@ -62,9 +61,8 @@ type limitRequestReq struct {
 // transfer-debit convention: the caller can see the account exists in their own
 // listings only if it's theirs).
 func (s *Server) RequestLimitChange(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	owner, err := s.pg.Queries.AccountOwner(r.Context(), uuid.UUID(id))

@@ -15,7 +15,7 @@ import (
 
 // StatementView: an account's ledger (running balance), in the main panel. Rows
 // drill into the transfer detail (rail). Paginated by posted_at cursor.
-func StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, prevURL string, nextURL string) templ.Component {
+func StatementView(acct sqlc.GetAccountRow, rows []sqlc.GetAccountLedgerRow, prevURL string, nextURL string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -141,7 +141,7 @@ func StatementView(acct sqlc.GetAccountRow, rows []sqlc.AccountStatementRow, pre
 
 // StatementBody: the paginated table + pager. Swapped into #statement-results on
 // a Prev/Next step.
-func StatementBody(rows []sqlc.AccountStatementRow, prevURL string, nextURL string) templ.Component {
+func StatementBody(rows []sqlc.GetAccountLedgerRow, prevURL string, nextURL string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -182,7 +182,7 @@ func StatementBody(rows []sqlc.AccountStatementRow, prevURL string, nextURL stri
 	})
 }
 
-func StatementItems(rows []sqlc.AccountStatementRow) templ.Component {
+func StatementItems(rows []sqlc.GetAccountLedgerRow) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

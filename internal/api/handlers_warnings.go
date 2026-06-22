@@ -22,9 +22,8 @@ type warningAckReq struct {
 // the DB rejects a debit account the caller doesn't own (42501 -> 403). The
 // category CHECK lives in the table (23514 -> 422).
 func (s *Server) RecordWarningAck(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req warningAckReq

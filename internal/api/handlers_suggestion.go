@@ -18,9 +18,8 @@ import (
 // Always 200: an empty array means "no candidate", and the client falls back to the
 // caller's own account.
 func (s *Server) SuggestTransferDestinations(w http.ResponseWriter, r *http.Request, params genclient.SuggestTransferDestinationsParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	// from_account ownership is checked FIRST, so the endpoint can't be used as an
