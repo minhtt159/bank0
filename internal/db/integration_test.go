@@ -120,7 +120,7 @@ func TestTransferDoubleEntryAndReconcile(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 10_000)
 
-	res, err := pg.Transfer(ctx, uuid.NewString(), a, b, 3_000, "rent", sqlc.TransferKindTransfer)
+	res, err := testTransfer(ctx, pg, uuid.NewString(), a, b, 3_000, "rent", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("transfer: %v", err)
 	}
@@ -145,11 +145,11 @@ func TestIdempotentTransferReplay(t *testing.T) {
 	fund(t, pg, a, 10_000)
 
 	key := uuid.NewString()
-	r1, err := pg.Transfer(ctx, key, a, b, 2_500, "x", sqlc.TransferKindTransfer)
+	r1, err := testTransfer(ctx, pg, key, a, b, 2_500, "x", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("transfer1: %v", err)
 	}
-	r2, err := pg.Transfer(ctx, key, a, b, 2_500, "x", sqlc.TransferKindTransfer)
+	r2, err := testTransfer(ctx, pg, key, a, b, 2_500, "x", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("transfer2 (replay): %v", err)
 	}
@@ -168,7 +168,7 @@ func TestInsufficientFundsRejected(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 1_000)
 
-	if _, err := pg.Transfer(ctx, uuid.NewString(), a, b, 5_000, "too much", sqlc.TransferKindTransfer); err == nil {
+	if _, err := testTransfer(ctx, pg, uuid.NewString(), a, b, 5_000, "too much", sqlc.TransferKindTransfer); err == nil {
 		t.Fatal("expected insufficient-funds error")
 	}
 	if lb, _ := balance(t, pg, a); lb != 1_000 {
@@ -184,7 +184,7 @@ func TestHoldsReduceAvailableAndCancelReleases(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 10_000)
 
-	req, err := pg.RequestTransfer(ctx, uuid.NewString(), a, b, 4_000, "pending", sqlc.TransferKindTransfer)
+	req, err := testRequestTransfer(ctx, pg, uuid.NewString(), a, b, 4_000, "pending", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestPostTransferLifecycle(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 10_000)
 
-	req, _ := pg.RequestTransfer(ctx, uuid.NewString(), a, b, 1_000, "x", sqlc.TransferKindTransfer)
+	req, _ := testRequestTransfer(ctx, pg, uuid.NewString(), a, b, 1_000, "x", sqlc.TransferKindTransfer)
 	if st, err := pg.Queries.PostTransfer(ctx, req.TransferID); err != nil || st != sqlc.TransferStatusPosted {
 		t.Fatalf("post: %v st=%s", err, st)
 	}
@@ -229,7 +229,7 @@ func TestReverseAppendsInverseAndRebalances(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 10_000)
 
-	res, _ := pg.Transfer(ctx, uuid.NewString(), a, b, 4_000, "oops", sqlc.TransferKindTransfer)
+	res, _ := testTransfer(ctx, pg, uuid.NewString(), a, b, 4_000, "oops", sqlc.TransferKindTransfer)
 	if _, err := pg.Queries.ReverseTransfer(ctx, sqlc.ReverseTransferParams{
 		ID: res.TransferID, IdempotencyKey: uuid.NewString(), Reason: "mistake",
 	}); err != nil {
@@ -395,4 +395,25 @@ func TestWithdrawAndMakerCheckerWithdrawal(t *testing.T) {
 		t.Errorf("balance after approved withdrawal = %d, want 2000", lb)
 	}
 	reconcileClean(t, pg)
+}
+
+// testTransfer / testRequestTransfer are TEST-ONLY shims over the raw money
+// PL/pgSQL. Production has exactly one Go transfer writer (ClientTransfer,
+// ownership-enforcing); these exist so concurrency/lifecycle tests can drive
+// transfer()/request_transfer() directly without an exported, ownership-free
+// wrapper sitting in the prod surface.
+func testTransfer(ctx context.Context, pg *Postgres, key string, debit, credit uuid.UUID, amountMinor int64, desc string, kind sqlc.TransferKind) (TransferResult, error) {
+	var r TransferResult
+	err := pg.Pool.QueryRow(ctx,
+		`SELECT transfer_id, status, was_replay FROM transfer($1::text, $2::uuid, $3::uuid, $4::bigint, $5::text, $6::transfer_kind)`,
+		key, debit, credit, amountMinor, desc, kind).Scan(&r.TransferID, &r.Status, &r.WasReplay)
+	return r, err
+}
+
+func testRequestTransfer(ctx context.Context, pg *Postgres, key string, debit, credit uuid.UUID, amountMinor int64, desc string, kind sqlc.TransferKind) (TransferResult, error) {
+	var r TransferResult
+	err := pg.Pool.QueryRow(ctx,
+		`SELECT transfer_id, status, was_replay FROM request_transfer($1::text, $2::uuid, $3::uuid, $4::bigint, $5::text, $6::transfer_kind)`,
+		key, debit, credit, amountMinor, desc, kind).Scan(&r.TransferID, &r.Status, &r.WasReplay)
+	return r, err
 }

@@ -38,7 +38,7 @@ func TestReverseClawbackSucceedsWhenRecipientStillHoldsFunds(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 10_000)
 
-	res, err := pg.Transfer(ctx, uuid.NewString(), a, b, 4_000, "to claw back", sqlc.TransferKindTransfer)
+	res, err := testTransfer(ctx, pg, uuid.NewString(), a, b, 4_000, "to claw back", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("transfer a->b: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestReverseClawbackRejectedWhenRecipientHasSpentFunds(t *testing.T) {
 	fund(t, pg, a, 10_000)
 
 	// a -> b (the transfer we will try to claw back).
-	res, err := pg.Transfer(ctx, uuid.NewString(), a, b, 4_000, "to claw back", sqlc.TransferKindTransfer)
+	res, err := testTransfer(ctx, pg, uuid.NewString(), a, b, 4_000, "to claw back", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("transfer a->b: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestReverseClawbackRejectedWhenRecipientHasSpentFunds(t *testing.T) {
 	}
 
 	// b spends most of it onward to c, dropping b's balance below 4000.
-	if _, err := pg.Transfer(ctx, uuid.NewString(), b, c, 3_500, "mule cash-out", sqlc.TransferKindTransfer); err != nil {
+	if _, err := testTransfer(ctx, pg, uuid.NewString(), b, c, 3_500, "mule cash-out", sqlc.TransferKindTransfer); err != nil {
 		t.Fatalf("transfer b->c (spend): %v", err)
 	}
 	if lb, _ := balance(t, pg, b); lb != 500 {

@@ -50,7 +50,7 @@ func TestConcurrentSameIdempotencyKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := pg.Transfer(ctx, key, a, b, amount, "same-key race", sqlc.TransferKindTransfer)
+			res, err := testTransfer(ctx, pg, key, a, b, amount, "same-key race", sqlc.TransferKindTransfer)
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -112,7 +112,7 @@ func TestConcurrentTransfersSharedDebit(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = pg.Transfer(ctx, uuid.NewString(), src, dests[i], amount, "fan-out", sqlc.TransferKindTransfer)
+			_, errs[i] = testTransfer(ctx, pg, uuid.NewString(), src, dests[i], amount, "fan-out", sqlc.TransferKindTransfer)
 		}(i)
 	}
 	wg.Wait()
@@ -158,11 +158,11 @@ func TestConcurrentDeadlockOrdering(t *testing.T) {
 		wg.Add(2)
 		go func(i int) { // A -> B
 			defer wg.Done()
-			_, errs[2*i] = pg.Transfer(ctx, uuid.NewString(), a, b, amount, "a->b", sqlc.TransferKindTransfer)
+			_, errs[2*i] = testTransfer(ctx, pg, uuid.NewString(), a, b, amount, "a->b", sqlc.TransferKindTransfer)
 		}(i)
 		go func(i int) { // B -> A, the opposite lock order if it weren't normalized
 			defer wg.Done()
-			_, errs[2*i+1] = pg.Transfer(ctx, uuid.NewString(), b, a, amount, "b->a", sqlc.TransferKindTransfer)
+			_, errs[2*i+1] = testTransfer(ctx, pg, uuid.NewString(), b, a, amount, "b->a", sqlc.TransferKindTransfer)
 		}(i)
 	}
 	wg.Wait()
