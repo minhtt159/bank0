@@ -25,8 +25,7 @@
 > AML). It is **additive**: every recommendation is a vendored-OpenAPI edit + a
 > goose migration (DDL + PL/pgSQL) consistent with the DB-first architecture —
 > **not a re-architecture**. The companion line-level specs it leans on are
-> [`spec-step-up-mfa.md`](spec-step-up-mfa.md) and
-> the retired spec-notifications-events (now as-built); the shipped
+> the retired spec-step-up-mfa and spec-notifications-events (both now as-built); the shipped
 > guided endpoint it evolves (v1) is documented as-built in [`../06-client-api.md`](../06-client-api.md) §1.
 >
 > **Confidence & hedges.** Facts from EUR-Lex, IETF, the UK PSR and the EU Instant
@@ -176,9 +175,11 @@ reimbursement amount, SLA clock, recall status, or scam-type mapping.
 
 ### 3.4 SCA & transaction risk (PSD2, step-up, TRA)
 
-**Current:** **zero real SCA** — login is single-factor (password → 15-min JWT).
-Step-up MFA is fully spec'd ([`spec-step-up-mfa.md`](spec-step-up-mfa.md)) but
-**unshipped**; the only risk surface is the **spoofable client no-op seam**.
+**Current:** **Rec 13 SHIPPED (2026-07-04)** — TOTP MFA (RFC 6238, AES-GCM seed
+at rest, hashed one-time recovery codes, DB-side lockout), `mfa_required` login
+branch + `/auth/mfa/verify`, `amr`/`auth_time` claims, and the 403
+`step_up_required` gate on high-value/new-payee transfers (same-key retry). The
+planning spec (spec-step-up-mfa.md) is retired; as-built in ../06-client-api.md §6.
 
 **Gaps:** no second factor; even once the spec ships, bare TOTP is **not
 dynamically linked** (PSD2 RTS Art. 5 — the same 6 digits authorise any
@@ -187,7 +188,7 @@ data but isn't wired to a gate.
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
-| 13 | **Implement `spec-step-up-mfa.md` as written:** TOTP (RFC 6238, AES-256-GCM seed at rest, hashed recovery codes), `403 {error: step_up_required}` on `amount ≥ step_up_limit` OR new payee **before** `request_transfer` claims the key, `amr=[pwd,otp]` + `auth_time` in the JWT, freshness vs `step_up_max_age`, **same `Idempotency-Key` retry** (already fits `idempotency_keys`). Do not redesign. | P0 | L |
+| 13 | **SHIPPED — TOTP MFA + step-up as specced** (retired spec; as-built in ../06-client-api.md §6): RFC 6238, AES-256-GCM seed at rest, hashed recovery codes, 403 `step_up_required` before the key is claimed, `amr`/`auth_time`, same-key retry. | P0 | L |
 | 14 | **Bind the step-up challenge to `(debit│credit│amount)` for dynamic linking** (PSD2 RTS Art. 5 / WYSIWYS) — reuse the existing idempotency tuple so changing amount or payee invalidates the code. The reserved `webauthn` mfa_kind gives a future passkey-bound path. | P1 | M |
 | 15 | **Server-side TRA seam at `request_transfer` time** scoring prior pattern, velocity (count/value trailing 24h–90d), device/location anomaly, and known-mule lists (`guided_scenarios` already models a mule), emitting a risk decision the gate ORs into its trigger set. The client SDK is **advisory input only**; the authoritative decision lives server-side. *(TRA exemption ETV thresholds €500/€250/€100 → 0.005/0.010/0.015 % fraud-rate are conditional and revocable.)* | P1 | L |
 | 16 | **Gate beneficiary creation (RTS Art. 13) + expose `step_up_limit_minor`** so clients can pre-warn that an amount will demand step-up before submit. | P2 | S |

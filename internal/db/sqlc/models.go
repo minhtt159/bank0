@@ -358,6 +358,48 @@ func (ns NullIkStatus) Value() (driver.Value, error) {
 	return string(ns.IkStatus), nil
 }
 
+type MfaKind string
+
+const (
+	MfaKindTotp     MfaKind = "totp"
+	MfaKindWebauthn MfaKind = "webauthn"
+)
+
+func (e *MfaKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MfaKind(s)
+	case string:
+		*e = MfaKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MfaKind: %T", src)
+	}
+	return nil
+}
+
+type NullMfaKind struct {
+	MfaKind MfaKind `json:"mfa_kind"`
+	Valid   bool    `json:"valid"` // Valid is true if MfaKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMfaKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.MfaKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MfaKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMfaKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MfaKind), nil
+}
+
 type OnboardingStatus string
 
 const (
@@ -806,6 +848,31 @@ type LedgerEntry struct {
 	BalanceAfter int64          `json:"balance_after"`
 	Currency     string         `json:"currency"`
 	PostedAt     time.Time      `json:"posted_at"`
+}
+
+type MfaAttempt struct {
+	ID          uuid.UUID `json:"id"`
+	UserID      uuid.UUID `json:"user_id"`
+	Succeeded   bool      `json:"succeeded"`
+	Ip          *string   `json:"ip"`
+	AttemptedAt time.Time `json:"attempted_at"`
+}
+
+type MfaCredential struct {
+	ID          uuid.UUID  `json:"id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Kind        MfaKind    `json:"kind"`
+	SecretEnc   []byte     `json:"secret_enc"`
+	ConfirmedAt *time.Time `json:"confirmed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type MfaRecoveryCode struct {
+	ID        uuid.UUID  `json:"id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	CodeHash  string     `json:"code_hash"`
+	UsedAt    *time.Time `json:"used_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type RefreshToken struct {

@@ -156,11 +156,28 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 		return
 	}
+	// MFA-enabled users get a pending-login token instead of the real pair; the
+	// client exchanges it (+ a TOTP/recovery code) at /auth/mfa/verify.
+	if enabled, err := s.pg.MFAEnabled(r.Context(), id); err != nil {
+		s.mapDBError(w, r, err)
+		return
+	} else if enabled {
+		mfaTok, err := s.issueMFAToken(id, role, uname)
+		if err != nil {
+			s.logFor(r.Context()).Error("issue mfa token", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"user_id": id, "mfa_required": true, "mfa_token": mfaTok,
+		})
+		return
+	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
 		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), ""); err != nil {
 		s.mapDBError(w, r, err)
 		return
 	}
-	s.writeTokenPair(w, id, role, uname, refresh)
+	s.writeTokenPair(w, id, role, uname, refresh, []string{"pwd"})
 }

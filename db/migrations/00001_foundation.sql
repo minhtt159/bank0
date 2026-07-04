@@ -86,7 +86,12 @@ CREATE TYPE dispute_category AS ENUM ('unrecognised', 'fraud', 'wrong_amount', '
 -- Notification-feed taxonomy (per-user events projection; table in the features file).
 CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.new', 'dispute.updated');
 
+-- MFA credential kinds (tables in the users file). webauthn is the reserved
+-- passkey path for future dynamic linking.
+CREATE TYPE mfa_kind AS ENUM ('totp', 'webauthn');
+
 -- +goose Down
+DROP TYPE IF EXISTS mfa_kind;
 DROP TYPE IF EXISTS event_type;
 DROP TYPE IF EXISTS dispute_category;
 DROP TYPE IF EXISTS dispute_status;

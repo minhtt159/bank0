@@ -17,7 +17,6 @@
 >
 > | Spec | Covers | Relates to P3 § |
 > |------|--------|-----------------|
-> | [`spec-step-up-mfa.md`](spec-step-up-mfa.md) | TOTP MFA + step-up | §3 (card controls), §6 (FX confirm) |
 > | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
 >
 > **Already shipped** (no longer tracked here; as-built in the reference docs):
@@ -31,7 +30,8 @@
 > state — §1's KYC continuation below remains open), **customer account opening +
 > limit requests** (`POST /me/accounts`, server-minted ISO IBANs, the operator
 > limit-request queue), the **`/me/events` notification feed** (phase 1, poll) +
-> **warning-ack evidence** + the **server-side CoP verdict**, and the hardening
+> **warning-ack evidence** + the **server-side CoP verdict**, **TOTP MFA +
+> step-up** (as-built: [`../06-client-api.md`](../06-client-api.md) §6), and the hardening
 > roadmap's Wave-0 idempotency items (ERRCODE→HTTP map, replay header, stale-key
 > sweep, `uetr`/`end_to_end_id`). See
 > [`../06-client-api.md`](../06-client-api.md) / [`../05-admin-ui.md`](../05-admin-ui.md).

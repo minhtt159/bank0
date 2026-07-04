@@ -5,7 +5,7 @@
 > **fronted by a Cloudflare proxy** (see [`04-deployment.md`](04-deployment.md)).
 > The browser never calls this host directly — the PWA's Worker proxies `/api/*`
 > here ([`07-client-web-app.md`](07-client-web-app.md)). MFA and step-up auth are
-> a designed extension (§6).
+> shipped (§6).
 
 ---
 
@@ -26,6 +26,9 @@ JWT subject.
 | Onboarding | POST | `/auth/register` | public | self-registration → locked `pending_verification` customer; `Idempotency-Key` required (replay returns the original body + `Idempotency-Replayed: true`); code dispatched out-of-band |
 | Onboarding | POST | `/auth/verify-contact` | public | consume the 6-digit code via the opaque `verify_token`; unlocks login (401 wrong/expired, 422 after 5 attempts, 404 unknown token) |
 | Onboarding | POST | `/auth/resend-code` | public | re-dispatch (60s DB cooldown → 429; unknown token → silent 202) |
+| MFA | POST | `/auth/mfa/enroll` | bearer | begin TOTP enrollment → otpauth URI + base32 secret (shown once); 409 if already enabled |
+| MFA | POST | `/auth/mfa/confirm` | bearer | first live code → MFA on + 10 one-time recovery codes (shown once, stored hashed) |
+| MFA | POST | `/auth/mfa/verify` | public | exchange the login-issued `mfa_token` + TOTP/recovery code → real token pair (`amr=["pwd","otp"]`); lockout → 429 |
 | Profile | GET | `/me` | bearer | the caller's own `User` (no password hash) |
 | Profile | PATCH | `/me` | bearer | self-service edit of name/email/phone (password/status/role can't be set here) |
 | Profile | POST | `/me/password` | bearer | change password (verify current); revokes other refresh families, spares the current session |
@@ -169,12 +172,12 @@ behalf). One customer can never read or debit another's account.
 
 ---
 
-## 6. MFA & step-up (designed extension)
+## 6. MFA & step-up (SHIPPED)
 
 The MFA/step-up increment hardens login and money moves. Same DB-first discipline;
-the access-token path (`requireJWT`) barely changes. Its tables land in a new
-migration after the baseline; the full design is in
-[`specs/spec-step-up-mfa.md`](specs/spec-step-up-mfa.md).
+the access-token path (`requireJWT`) barely changes. As-built: tables + the
+mfa_* PL/pgSQL live in `00003_users.sql`; handlers in
+`internal/api/handlers_mfa.go`; the planning spec is retired.
 
 ### 6.1 TOTP MFA
 
@@ -183,17 +186,24 @@ migration after the baseline; the full design is in
   (throttle/lockout). "MFA enabled" = a confirmed credential exists.
 - Endpoints: `/auth/mfa/enroll` (→ otpauth URI), `/auth/mfa/confirm` (first code →
   recovery codes), `/auth/mfa/verify` (exchange a short-lived `mfa_token` + code →
-  tokens). The HMAC-SHA1 TOTP math lives in Go (`pquerna/otp`); the **seed is
-  encrypted at rest** with an app-side AEAD key (`auth.mfa_enc_key`).
+  tokens; public — the token, audience `bank0-mfa`, is the credential; shares the
+  login rate limiter). The HMAC-SHA1 TOTP math lives in Go (`pquerna/otp`,
+  SHA1/6/30s, ±1-step drift); the **seed is encrypted at rest** (AES-256-GCM,
+  `auth.mfa_enc_key`; unset key ⇒ MFA endpoints 503).
 - `LoginResponse` gains `mfa_required` + `mfa_token`; when required, **no** access
   token is issued until `/auth/mfa/verify`.
 
 ### 6.2 Step-up
 
-The access JWT carries `amr` (`["pwd","otp"]`) and `auth_time`. A transfer ≥
-`auth.step_up_limit_minor` with a stale `auth_time` returns **403
-`step_up_required`**; the client re-runs `/auth/mfa/verify` and retries with the
-**same `Idempotency-Key`**. Customer control, complementing the operator-side
+The access JWT carries `amr` (`["pwd","otp"]`) and `auth_time`. For an
+MFA-enabled caller, a transfer ≥ `auth.step_up_limit_minor` **or to a new payee**
+(not among their saved beneficiaries) without a fresh `otp` factor
+(`auth.step_up_max_age`, default 5m) returns **403 `step_up_required`**; the
+client re-runs `/auth/mfa/verify` and retries with the **same `Idempotency-Key`**
+(the gate runs before the key is claimed, so the retry posts exactly once).
+Freshness is per-verify — deliberately NOT preserved across `/auth/refresh`.
+Users without MFA are not gated (they could never satisfy it); limits +
+maker-checker still apply. Customer control, complementing the operator-side
 maker-checker.
 
 ### 6.3 Toward OIDC / asymmetric keys

@@ -140,6 +140,63 @@ paths:
         "422": { $ref: "#/components/responses/Error" }   # too many attempts
         "429": { $ref: "#/components/responses/Error" }
 
+  /auth/mfa/enroll:
+    post:
+      operationId: mfaEnroll
+      tags: [client]
+      summary: Begin TOTP enrollment — returns an otpauth:// URI + base32 secret
+      responses:
+        "200":
+          description: enrollment started (unconfirmed credential created)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaEnrollResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # already has a confirmed credential
+        "503": { $ref: "#/components/responses/Error" }   # mfa_enc_key not configured
+
+  /auth/mfa/confirm:
+    post:
+      operationId: mfaConfirm
+      tags: [client]
+      summary: Confirm TOTP enrollment with the first live code; returns one-time recovery codes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaConfirmRequest" }
+      responses:
+        "200":
+          description: MFA enabled; recovery codes (shown ONCE)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaRecoveryCodes" }
+        "401": { $ref: "#/components/responses/Error" }   # bad code
+        "404": { $ref: "#/components/responses/Error" }   # no pending enrollment
+        "429": { $ref: "#/components/responses/Error" }   # throttled/locked
+        "503": { $ref: "#/components/responses/Error" }
+
+  /auth/mfa/verify:
+    post:
+      operationId: mfaVerify
+      tags: [client]
+      summary: Exchange an mfa_token + TOTP/recovery code for an access + refresh pair
+      security: []                                         # the mfa_token IS the credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaVerifyRequest" }
+      responses:
+        "200":
+          description: verified; access + refresh issued (amr includes "otp")
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Error" }   # bad/expired mfa_token or code
+        "429": { $ref: "#/components/responses/Error" }   # throttled/locked
+        "503": { $ref: "#/components/responses/Error" }
+
   /auth/resend-code:
     post:
       operationId: resendCode
@@ -703,6 +760,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TransferResult" }
+        "403": { $ref: "#/components/responses/Error" }   # step_up_required — re-verify at /auth/mfa/verify, retry with the SAME Idempotency-Key
         "422": { $ref: "#/components/responses/Error" }
 
   /transfers/pending:
@@ -1064,10 +1122,12 @@ components:
       type: object
       properties:
         user_id: { type: string, format: uuid }
-        token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'." }
+        token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'. Absent when mfa_required." }
         token_type: { type: string, example: Bearer }
         expires_at: { type: string, format: date-time }
-        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair." }
+        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required." }
+        mfa_required: { type: boolean, description: "When true, no tokens are issued; exchange mfa_token + code at /auth/mfa/verify." }
+        mfa_token: { type: string, description: "Short-lived (5m) pending-login token. Present only when mfa_required." }
     RefreshRequest:
       type: object
       required: [refresh_token]
@@ -1171,6 +1231,29 @@ components:
       type: object
       properties:
         marked: { type: integer }
+    MfaEnrollResponse:
+      type: object
+      properties:
+        secret: { type: string, description: "base32 TOTP secret (also embedded in the URI). Shown ONCE." }
+        otpauth_uri: { type: string, description: "otpauth://totp/bank0:<username>?secret=...&issuer=bank0 (SHA1/6/30s)" }
+    MfaConfirmRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "6-digit TOTP from the authenticator app" }
+    MfaRecoveryCodes:
+      type: object
+      properties:
+        recovery_codes:
+          type: array
+          items: { type: string }
+          description: "One-time recovery codes; shown ONCE, stored hashed server-side."
+    MfaVerifyRequest:
+      type: object
+      required: [mfa_token, code]
+      properties:
+        mfa_token: { type: string }
+        code: { type: string, description: "6-digit TOTP, or a recovery code" }
     WarningAckRequest:
       type: object
       required: [category]

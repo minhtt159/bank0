@@ -563,10 +563,16 @@ type LoginRequest struct {
 type LoginResponse struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 
-	// RefreshToken Opaque refresh token. POST to /auth/refresh to rotate it for a new pair.
+	// MfaRequired When true, no tokens are issued; exchange mfa_token + code at /auth/mfa/verify.
+	MfaRequired *bool `json:"mfa_required,omitempty"`
+
+	// MfaToken Short-lived (5m) pending-login token. Present only when mfa_required.
+	MfaToken *string `json:"mfa_token,omitempty"`
+
+	// RefreshToken Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required.
 	RefreshToken *string `json:"refresh_token,omitempty"`
 
-	// Token JWT access token (HS256). Send as 'Authorization: Bearer <token>'.
+	// Token JWT access token (HS256). Send as 'Authorization: Bearer <token>'. Absent when mfa_required.
 	Token     *string             `json:"token,omitempty"`
 	TokenType *string             `json:"token_type,omitempty"`
 	UserId    *openapi_types.UUID `json:"user_id,omitempty"`
@@ -582,6 +588,34 @@ type MarkEventsReadRequest struct {
 // MarkedResponse defines model for MarkedResponse.
 type MarkedResponse struct {
 	Marked *int `json:"marked,omitempty"`
+}
+
+// MfaConfirmRequest defines model for MfaConfirmRequest.
+type MfaConfirmRequest struct {
+	// Code 6-digit TOTP from the authenticator app
+	Code string `json:"code"`
+}
+
+// MfaEnrollResponse defines model for MfaEnrollResponse.
+type MfaEnrollResponse struct {
+	// OtpauthUri otpauth://totp/bank0:<username>?secret=...&issuer=bank0 (SHA1/6/30s)
+	OtpauthUri *string `json:"otpauth_uri,omitempty"`
+
+	// Secret base32 TOTP secret (also embedded in the URI). Shown ONCE.
+	Secret *string `json:"secret,omitempty"`
+}
+
+// MfaRecoveryCodes defines model for MfaRecoveryCodes.
+type MfaRecoveryCodes struct {
+	// RecoveryCodes One-time recovery codes; shown ONCE, stored hashed server-side.
+	RecoveryCodes *[]string `json:"recovery_codes,omitempty"`
+}
+
+// MfaVerifyRequest defines model for MfaVerifyRequest.
+type MfaVerifyRequest struct {
+	// Code 6-digit TOTP, or a recovery code
+	Code     string `json:"code"`
+	MfaToken string `json:"mfa_token"`
 }
 
 // OpenAccountRequest defines model for OpenAccountRequest.
@@ -986,6 +1020,12 @@ type LoginJSONRequestBody = LoginRequest
 // LogoutJSONRequestBody defines body for Logout for application/json ContentType.
 type LogoutJSONRequestBody = RefreshRequest
 
+// MfaConfirmJSONRequestBody defines body for MfaConfirm for application/json ContentType.
+type MfaConfirmJSONRequestBody = MfaConfirmRequest
+
+// MfaVerifyJSONRequestBody defines body for MfaVerify for application/json ContentType.
+type MfaVerifyJSONRequestBody = MfaVerifyRequest
+
 // RefreshJSONRequestBody defines body for Refresh for application/json ContentType.
 type RefreshJSONRequestBody = RefreshRequest
 
@@ -1045,6 +1085,15 @@ type ServerInterface interface {
 	// Revoke all of the caller's refresh tokens (log out everywhere)
 	// (POST /auth/logout-all)
 	LogoutAll(w http.ResponseWriter, r *http.Request)
+	// Confirm TOTP enrollment with the first live code; returns one-time recovery codes
+	// (POST /auth/mfa/confirm)
+	MfaConfirm(w http.ResponseWriter, r *http.Request)
+	// Begin TOTP enrollment — returns an otpauth:// URI + base32 secret
+	// (POST /auth/mfa/enroll)
+	MfaEnroll(w http.ResponseWriter, r *http.Request)
+	// Exchange an mfa_token + TOTP/recovery code for an access + refresh pair
+	// (POST /auth/mfa/verify)
+	MfaVerify(w http.ResponseWriter, r *http.Request)
 	// Rotate a refresh token for a new access + refresh token pair
 	// (POST /auth/refresh)
 	Refresh(w http.ResponseWriter, r *http.Request)
@@ -1374,6 +1423,48 @@ func (siw *ServerInterfaceWrapper) LogoutAll(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.LogoutAll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MfaConfirm operation middleware
+func (siw *ServerInterfaceWrapper) MfaConfirm(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MfaConfirm(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MfaEnroll operation middleware
+func (siw *ServerInterfaceWrapper) MfaEnroll(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MfaEnroll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MfaVerify operation middleware
+func (siw *ServerInterfaceWrapper) MfaVerify(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MfaVerify(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2419,6 +2510,12 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/auth/logout", wrapper.Logout).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/auth/logout-all", wrapper.LogoutAll).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/mfa/confirm", wrapper.MfaConfirm).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/mfa/enroll", wrapper.MfaEnroll).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/mfa/verify", wrapper.MfaVerify).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/auth/refresh", wrapper.Refresh).Methods(http.MethodPost)
 

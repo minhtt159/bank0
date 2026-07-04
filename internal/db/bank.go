@@ -211,6 +211,10 @@ func (p *Postgres) RunMaintenance(ctx context.Context) (expired, cleaned, sessio
 	if err = tx.QueryRow(ctx, "SELECT expire_verification_challenges()").Scan(&verifExpired); err != nil {
 		return 0, 0, 0, 0, 0, false, err
 	}
+	var mfaCleaned int32
+	if err = tx.QueryRow(ctx, "SELECT cleanup_mfa_attempts()").Scan(&mfaCleaned); err != nil {
+		return 0, 0, 0, 0, 0, false, err
+	}
 	// Continuously assert the ledger/cache invariants (I1–I4): reconcile() returns
 	// one row per drift. Running it on the maintenance tick turns the correctness
 	// oracle from a manual spot-check into an automatic alarm, so a balance_minor /

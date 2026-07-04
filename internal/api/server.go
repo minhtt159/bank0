@@ -145,6 +145,10 @@ func (s *Server) Router() http.Handler {
 			}))).Methods(http.MethodPost)
 		r.Handle("/auth/verify-contact", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.VerifyContact))).Methods(http.MethodPost)
 		r.Handle("/auth/resend-code", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.ResendCode))).Methods(http.MethodPost)
+		// MFA verify is public (the short-lived mfa_token is the credential) and
+		// code-guessable, so it shares the strict login limiter. enroll/confirm
+		// stay behind requireJWT on the subrouter.
+		r.Handle("/auth/mfa/verify", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.MfaVerify))).Methods(http.MethodPost)
 		cr := r.PathPrefix("/").Subrouter()
 		cr.Use(s.requireJWT)
 		genclient.HandlerFromMux(s, cr)
