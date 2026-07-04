@@ -117,30 +117,45 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
 		return
 	}
-	// Step-up gate (SCA): an MFA-enabled caller moving high value OR paying a
-	// new payee must present a token with a FRESH otp factor. Runs BEFORE
-	// client_transfer, so a rejected step-up writes nothing and never claims the
-	// idempotency key — the client re-verifies and retries with the SAME key.
-	// Users without MFA are not gated (they could never satisfy it); the
-	// per-transfer limit + maker-checker still apply server-side.
-	if claims, ok := clientClaimsFrom(r.Context()); ok && !claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) {
-		highValue := s.cfg.Auth.StepUpLimitMinor > 0 && req.AmountMinor >= s.cfg.Auth.StepUpLimitMinor
-		gated := highValue
-		if !gated {
-			known, err := s.pg.Queries.IsKnownPayee(r.Context(), sqlc.IsKnownPayeeParams{Owner: subj, Credit: credit})
-			if err != nil {
-				s.mapDBError(w, r, err)
-				return
-			}
-			gated = !known
+	// Step-up gate (SCA + dynamic linking, Recs 13/14/15): an MFA-enabled caller
+	// on a gated transfer must present a FRESH otp factor whose txn_link commits
+	// to THIS exact (debit, credit, amount) — a generic fresh OTP no longer
+	// authorizes any payment in the window (PSD2 RTS Art. 5 / WYSIWYS). Gated =
+	// high value OR new payee OR the server-side TRA seam scores 'high'. Runs
+	// BEFORE client_transfer, so a rejected step-up writes nothing and never
+	// claims the idempotency key — the client verifies with the link and retries
+	// with the SAME key. Users without MFA are not gated (they could never
+	// satisfy it); the per-transfer limit + maker-checker still apply.
+	if claims, ok := clientClaimsFrom(r.Context()); ok &&
+		!(claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) &&
+			claims.TxnLink == transferLinkHash(debit, credit, req.AmountMinor)) {
+		enabled, err := s.pg.MFAEnabled(r.Context(), subj)
+		if err != nil {
+			s.mapDBError(w, r, err)
+			return
 		}
-		if gated {
-			if enabled, err := s.pg.MFAEnabled(r.Context(), subj); err != nil {
-				s.mapDBError(w, r, err)
-				return
-			} else if enabled {
+		if enabled {
+			gated := s.cfg.Auth.StepUpLimitMinor > 0 && req.AmountMinor >= s.cfg.Auth.StepUpLimitMinor
+			if !gated {
+				known, err := s.pg.Queries.IsKnownPayee(r.Context(), sqlc.IsKnownPayeeParams{Owner: subj, Credit: credit})
+				if err != nil {
+					s.mapDBError(w, r, err)
+					return
+				}
+				gated = !known
+			}
+			if !gated {
+				// TRA seam (Rec 15): the authoritative risk decision ORs in.
+				risk, err := s.pg.AssessTransferRisk(r.Context(), subj, debit, credit, req.AmountMinor)
+				if err != nil {
+					s.mapDBError(w, r, err)
+					return
+				}
+				gated = risk.Band == "high"
+			}
+			if gated {
 				writeError(w, http.StatusForbidden, "step_up_required",
-					"this transfer requires re-verification (high value or new payee)")
+					"this transfer requires re-verification linked to this exact payment (high value, new payee, or elevated risk)")
 				return
 			}
 		}

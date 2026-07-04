@@ -142,6 +142,50 @@ func (ns NullDisputeCategory) Value() (driver.Value, error) {
 	return string(ns.DisputeCategory), nil
 }
 
+type DisputeDecision string
+
+const (
+	DisputeDecisionPending             DisputeDecision = "pending"
+	DisputeDecisionReimbursed          DisputeDecision = "reimbursed"
+	DisputeDecisionPartiallyReimbursed DisputeDecision = "partially_reimbursed"
+	DisputeDecisionDeclined            DisputeDecision = "declined"
+)
+
+func (e *DisputeDecision) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DisputeDecision(s)
+	case string:
+		*e = DisputeDecision(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DisputeDecision: %T", src)
+	}
+	return nil
+}
+
+type NullDisputeDecision struct {
+	DisputeDecision DisputeDecision `json:"dispute_decision"`
+	Valid           bool            `json:"valid"` // Valid is true if DisputeDecision is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDisputeDecision) Scan(value interface{}) error {
+	if value == nil {
+		ns.DisputeDecision, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DisputeDecision.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDisputeDecision) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DisputeDecision), nil
+}
+
 type DisputeStatus string
 
 const (
@@ -444,6 +488,97 @@ func (ns NullOnboardingStatus) Value() (driver.Value, error) {
 	return string(ns.OnboardingStatus), nil
 }
 
+type RecallStatus string
+
+const (
+	RecallStatusNone          RecallStatus = "none"
+	RecallStatusRequested     RecallStatus = "requested"
+	RecallStatusFundsReturned RecallStatus = "funds_returned"
+	RecallStatusRefused       RecallStatus = "refused"
+)
+
+func (e *RecallStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RecallStatus(s)
+	case string:
+		*e = RecallStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RecallStatus: %T", src)
+	}
+	return nil
+}
+
+type NullRecallStatus struct {
+	RecallStatus RecallStatus `json:"recall_status"`
+	Valid        bool         `json:"valid"` // Valid is true if RecallStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRecallStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.RecallStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RecallStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRecallStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RecallStatus), nil
+}
+
+type ScamType string
+
+const (
+	ScamTypeImpersonation ScamType = "impersonation"
+	ScamTypePurchase      ScamType = "purchase"
+	ScamTypeInvestment    ScamType = "investment"
+	ScamTypeRomance       ScamType = "romance"
+	ScamTypeInvoice       ScamType = "invoice"
+	ScamTypeAdvanceFee    ScamType = "advance_fee"
+	ScamTypeOther         ScamType = "other"
+)
+
+func (e *ScamType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ScamType(s)
+	case string:
+		*e = ScamType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ScamType: %T", src)
+	}
+	return nil
+}
+
+type NullScamType struct {
+	ScamType ScamType `json:"scam_type"`
+	Valid    bool     `json:"valid"` // Valid is true if ScamType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullScamType) Scan(value interface{}) error {
+	if value == nil {
+		ns.ScamType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ScamType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullScamType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ScamType), nil
+}
+
 type TransferKind string
 
 const (
@@ -743,6 +878,8 @@ type BankSetting struct {
 	UpdatedBy                  *uuid.UUID `json:"updated_by"`
 	DefaultPageLimit           int32      `json:"default_page_limit"`
 	MaxAccountsPerUser         int32      `json:"max_accounts_per_user"`
+	ReimbursementCapMinor      int64      `json:"reimbursement_cap_minor"`
+	ReimbursementExcessMinor   int64      `json:"reimbursement_excess_minor"`
 }
 
 type Beneficiary struct {
@@ -756,16 +893,23 @@ type Beneficiary struct {
 }
 
 type Dispute struct {
-	ID             uuid.UUID       `json:"id"`
-	TransferID     uuid.UUID       `json:"transfer_id"`
-	RaisedByUserID uuid.UUID       `json:"raised_by_user_id"`
-	Status         DisputeStatus   `json:"status"`
-	Category       DisputeCategory `json:"category"`
-	Reason         string          `json:"reason"`
-	ResolverUserID *uuid.UUID      `json:"resolver_user_id"`
-	ResolutionNote string          `json:"resolution_note"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                    uuid.UUID       `json:"id"`
+	TransferID            uuid.UUID       `json:"transfer_id"`
+	RaisedByUserID        uuid.UUID       `json:"raised_by_user_id"`
+	Status                DisputeStatus   `json:"status"`
+	Category              DisputeCategory `json:"category"`
+	Reason                string          `json:"reason"`
+	ResolverUserID        *uuid.UUID      `json:"resolver_user_id"`
+	ResolutionNote        string          `json:"resolution_note"`
+	ScamType              *string         `json:"scam_type"`
+	SlaDueAt              *time.Time      `json:"sla_due_at"`
+	Decision              DisputeDecision `json:"decision"`
+	ReimbursedAmountMinor *int64          `json:"reimbursed_amount_minor"`
+	VulnerableFlag        bool            `json:"vulnerable_flag"`
+	RecallStatus          RecallStatus    `json:"recall_status"`
+	RecallReason          string          `json:"recall_reason"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 type EnrichedLedger struct {

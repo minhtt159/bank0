@@ -50,7 +50,12 @@ CREATE TABLE bank_settings (
     default_page_limit            INT         NOT NULL DEFAULT 15 CHECK (default_page_limit BETWEEN 1 AND 200),
     -- cap on non-closed accounts a customer may hold (bounds self-open abuse;
     -- staff createAccount is uncapped). Bank policy, so it lives here, not in code.
-    max_accounts_per_user         INT         NOT NULL DEFAULT 5 CHECK (max_accounts_per_user BETWEEN 1 AND 50)
+    max_accounts_per_user         INT         NOT NULL DEFAULT 5 CHECK (max_accounts_per_user BETWEEN 1 AND 50),
+    -- APP-scam reimbursement policy (PSR-style, Rec 12): per-claim cap (€85,000
+    -- stand-in for the UK £85k) and the claim excess deducted unless the customer
+    -- is flagged vulnerable (the PSR waives it for them).
+    reimbursement_cap_minor       BIGINT      NOT NULL DEFAULT 8500000 CHECK (reimbursement_cap_minor >= 0),
+    reimbursement_excess_minor    BIGINT      NOT NULL DEFAULT 10000   CHECK (reimbursement_excess_minor >= 0)
 );
 INSERT INTO bank_settings (id) VALUES (TRUE);  -- the one row, all defaults
 
