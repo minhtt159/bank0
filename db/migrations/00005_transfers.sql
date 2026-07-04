@@ -272,7 +272,10 @@ $$ LANGUAGE plpgsql;
 -- trigger does the rest), captures the hold. Idempotent on an already-posted row.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION post_transfer(p_transfer_id UUID) RETURNS transfer_status AS $$
-DECLARE v_t transfers%ROWTYPE;
+DECLARE
+    v_t      transfers%ROWTYPE;
+    v_debit  accounts%ROWTYPE;
+    v_credit accounts%ROWTYPE;
 BEGIN
     SELECT * INTO v_t FROM transfers WHERE id = p_transfer_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
@@ -291,6 +294,33 @@ BEGIN
      WHERE transfer_id = p_transfer_id AND status = 'active';
 
     UPDATE transfers SET status = 'posted', posted_at = now() WHERE id = p_transfer_id;
+
+    -- Notify both HUMAN parties in the same txn (events, 00008): the payer gets
+    -- transfer.posted, the payee payment.incoming. System/GL sides (NULL user_id)
+    -- emit nothing. Replays never reach here (idempotent no-op above), and the
+    -- partial unique index absorbs any double emission. Counterparty is labelled
+    -- by IBAN/system code only — never a name (no new disclosure).
+    SELECT * INTO v_debit  FROM accounts WHERE id = v_t.debit_account_id;
+    SELECT * INTO v_credit FROM accounts WHERE id = v_t.credit_account_id;
+    IF v_debit.user_id IS NOT NULL THEN
+        PERFORM emit_event(v_debit.user_id, 'transfer.posted',
+            'Payment sent',
+            'Your payment to ' || COALESCE(v_credit.iban, v_credit.system_code, 'account') || ' completed.',
+            p_transfer_id, v_t.debit_account_id,
+            jsonb_build_object('amount_minor', v_t.amount_minor, 'currency', v_t.currency,
+                               'counterparty_iban', COALESCE(v_credit.iban, v_credit.system_code, ''),
+                               'kind', v_t.kind));
+    END IF;
+    IF v_credit.user_id IS NOT NULL THEN
+        PERFORM emit_event(v_credit.user_id, 'payment.incoming',
+            'Payment received',
+            'You received a payment from ' || COALESCE(v_debit.iban, v_debit.system_code, 'account') || '.',
+            p_transfer_id, v_t.credit_account_id,
+            jsonb_build_object('amount_minor', v_t.amount_minor, 'currency', v_t.currency,
+                               'counterparty_iban', COALESCE(v_debit.iban, v_debit.system_code, ''),
+                               'kind', v_t.kind));
+    END IF;
+
     RETURN 'posted';
 END;
 $$ LANGUAGE plpgsql;

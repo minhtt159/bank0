@@ -1,7 +1,14 @@
 # Spec — Banking-grade hardening & guided-transfer v2
 
-> **Status: recommendation spec / roadmap. Wave 0 + the Rec-18 pre-work are
-> SHIPPED (2026-07-04); the rest is open.** Shipped as-built: Rec 1 (ERRCODE →
+> **Status: recommendation spec / roadmap. Waves 0 AND 1 + the Rec-18 pre-work
+> are SHIPPED (2026-07-04); the rest is open.** Wave 1 as-built: Rec 21 (the
+> `GET /me/events` feed + unread badge + mark-read, per spec-notifications-events
+> — emissions ride the source txns in post_transfer / issue_refresh_token /
+> resolve_dispute; append-only), Rec 9 (server-side CoP verdict on
+> `/beneficiaries/resolve?name=` — match/close_match/no_match/unable +
+> reason_code + suggested_name on close_match + server gate), and Rec 10
+> (`POST /me/warning-acks` — append-only warned-and-proceeded evidence).
+> Wave 0 as-built: Rec 1 (ERRCODE →
 > HTTP map incl. 55006→409 / fingerprint→422 / 42501→403 / 28000→401, replay
 > honoured + `Idempotency-Replayed: true` on `/transfers`, `/auth/register`,
 > `/me/accounts`), Rec 2/29 (`cleanup_idempotency_keys` reaps committed
@@ -19,7 +26,7 @@
 > goose migration (DDL + PL/pgSQL) consistent with the DB-first architecture —
 > **not a re-architecture**. The companion line-level specs it leans on are
 > [`spec-step-up-mfa.md`](spec-step-up-mfa.md) and
-> [`spec-notifications-events.md`](spec-notifications-events.md); the shipped
+> the retired spec-notifications-events (now as-built); the shipped
 > guided endpoint it evolves (v1) is documented as-built in [`../06-client-api.md`](../06-client-api.md) §1.
 >
 > **Confidence & hedges.** Facts from EUR-Lex, IETF, the UK PSR and the EU Instant
@@ -213,7 +220,7 @@ the **events feed is spec'd but unbuilt** (clients poll-on-focus and diff).
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
-| 21 | **Build the already-specced `GET /me/events` feed** ([`spec-notifications-events.md`](spec-notifications-events.md)): per-user append-only (`transfer.posted\|payment.incoming\|device.new\|dispute.updated` + `fraud-alert\|hold`), keyset-paginated, `unread_count` + `/me/events/read`, **written in the same txn as the cause** so a notification never exists without its cause. Replaces poll-on-focus; enables a badge + "new sign-in" alert. | P0 | M |
+| 21 | **SHIPPED — the `GET /me/events` feed** (spec retired; as-built in ../06-client-api.md §1): per-user append-only (`transfer.posted\|payment.incoming\|device.new\|dispute.updated` + `fraud-alert\|hold`), keyset-paginated, `unread_count` + `/me/events/read`, **written in the same txn as the cause** so a notification never exists without its cause. Replaces poll-on-focus; enables a badge + "new sign-in" alert. | P0 | M |
 | 22 | **Warning/decision endpoint backed by server-driven copy:** `POST /transfers/intent` (preflight) → `{decision: allow\|step_up\|review\|block\|warn, risk_band, reason_codes[], warning:{warning_id, category, severity, headline, body, required_ack, cooling_off_seconds}, step_up_method}`. Generalise `guided_scenarios` into a rule table. **Plain-language copy + machine outcome codes let clients attach correct ARIA labels** (the client audit found the dictated IBAN was `aria-hidden` on web and colour-only on iOS/Android). **Do not** expose a raw numeric score. | P1 | L |
 | 23 | **Held / under-review transfer lifecycle state:** add `held` + `under_review` with `hold_reason`, `hold_expires_at` (a risk-based delay clock, cf. FCA FG24/6 up-to-4-business-day delay), `action_required`, and a customer release/confirm action, routed to the existing maker-checker queue. Enables a demo payment-hold / cooling-off. | P1 | M |
 | 24 | **Velocity/daily-limit + new-payee cooling fields:** a limits endpoint (`daily_limit_minor/daily_used_minor/daily_remaining_minor/count_today` + the existing per-txn cap) and `beneficiaries.{added_at, payment_count, first_payment_completed, cooling_off_until}` so clients render limit meters + first-payment friction. | P2 | M |

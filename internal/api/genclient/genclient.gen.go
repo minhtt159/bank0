@@ -65,6 +65,30 @@ func (e DisputeStatus) Valid() bool {
 	}
 }
 
+// Defines values for EventType.
+const (
+	EventTypeDeviceNew       EventType = "device.new"
+	EventTypeDisputeUpdated  EventType = "dispute.updated"
+	EventTypePaymentIncoming EventType = "payment.incoming"
+	EventTypeTransferPosted  EventType = "transfer.posted"
+)
+
+// Valid indicates whether the value is a known member of the EventType enum.
+func (e EventType) Valid() bool {
+	switch e {
+	case EventTypeDeviceNew:
+		return true
+	case EventTypeDisputeUpdated:
+		return true
+	case EventTypePaymentIncoming:
+		return true
+	case EventTypeTransferPosted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OpenAccountRequestKind.
 const (
 	Customer OpenAccountRequestKind = "customer"
@@ -125,6 +149,69 @@ func (e RegisterResponseVerifyChannel) Valid() bool {
 	}
 }
 
+// Defines values for ResolvedAccountAccountType.
+const (
+	Business ResolvedAccountAccountType = "business"
+	Personal ResolvedAccountAccountType = "personal"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedAccountAccountType enum.
+func (e ResolvedAccountAccountType) Valid() bool {
+	switch e {
+	case Business:
+		return true
+	case Personal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolvedAccountGate.
+const (
+	AwaitingAcknowledgement ResolvedAccountGate = "awaiting_acknowledgement"
+	Blocked                 ResolvedAccountGate = "blocked"
+	Ok                      ResolvedAccountGate = "ok"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedAccountGate enum.
+func (e ResolvedAccountGate) Valid() bool {
+	switch e {
+	case AwaitingAcknowledgement:
+		return true
+	case Blocked:
+		return true
+	case Ok:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolvedAccountMatchResult.
+const (
+	CloseMatch ResolvedAccountMatchResult = "close_match"
+	Match      ResolvedAccountMatchResult = "match"
+	NoMatch    ResolvedAccountMatchResult = "no_match"
+	Unable     ResolvedAccountMatchResult = "unable"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedAccountMatchResult enum.
+func (e ResolvedAccountMatchResult) Valid() bool {
+	switch e {
+	case CloseMatch:
+		return true
+	case Match:
+		return true
+	case NoMatch:
+		return true
+	case Unable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransferListItemDirection.
 const (
 	TransferListItemDirectionIn  TransferListItemDirection = "in"
@@ -176,6 +263,36 @@ func (e VerifyContactResponseChannel) Valid() bool {
 	}
 }
 
+// Defines values for WarningAckRequestCategory.
+const (
+	CopCloseMatch WarningAckRequestCategory = "cop_close_match"
+	CopNoMatch    WarningAckRequestCategory = "cop_no_match"
+	CopUnable     WarningAckRequestCategory = "cop_unable"
+	GuidedSteer   WarningAckRequestCategory = "guided_steer"
+	HighValue     WarningAckRequestCategory = "high_value"
+	Other         WarningAckRequestCategory = "other"
+)
+
+// Valid indicates whether the value is a known member of the WarningAckRequestCategory enum.
+func (e WarningAckRequestCategory) Valid() bool {
+	switch e {
+	case CopCloseMatch:
+		return true
+	case CopNoMatch:
+		return true
+	case CopUnable:
+		return true
+	case GuidedSteer:
+		return true
+	case HighValue:
+		return true
+	case Other:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetAccountLedgerParamsDirection.
 const (
 	Credit GetAccountLedgerParamsDirection = "credit"
@@ -188,6 +305,30 @@ func (e GetAccountLedgerParamsDirection) Valid() bool {
 	case Credit:
 		return true
 	case Debit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListMyEventsParamsType.
+const (
+	ListMyEventsParamsTypeDeviceNew       ListMyEventsParamsType = "device.new"
+	ListMyEventsParamsTypeDisputeUpdated  ListMyEventsParamsType = "dispute.updated"
+	ListMyEventsParamsTypePaymentIncoming ListMyEventsParamsType = "payment.incoming"
+	ListMyEventsParamsTypeTransferPosted  ListMyEventsParamsType = "transfer.posted"
+)
+
+// Valid indicates whether the value is a known member of the ListMyEventsParamsType enum.
+func (e ListMyEventsParamsType) Valid() bool {
+	switch e {
+	case ListMyEventsParamsTypeDeviceNew:
+		return true
+	case ListMyEventsParamsTypeDisputeUpdated:
+		return true
+	case ListMyEventsParamsTypePaymentIncoming:
+		return true
+	case ListMyEventsParamsTypeTransferPosted:
 		return true
 	default:
 		return false
@@ -343,6 +484,26 @@ type Error struct {
 	Message *string `json:"message,omitempty"`
 }
 
+// Event defines model for Event.
+type Event struct {
+	Body      *string   `json:"body,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Data Type-specific payload (amount_minor, counterparty_iban, user_agent, …).
+	Data              *map[string]interface{} `json:"data,omitempty"`
+	Id                openapi_types.UUID      `json:"id"`
+	ReadAt            *time.Time              `json:"read_at,omitempty"`
+	RelatedAccountId  *openapi_types.UUID     `json:"related_account_id,omitempty"`
+	RelatedTransferId *openapi_types.UUID     `json:"related_transfer_id,omitempty"`
+
+	// Title Short human-readable summary (server-driven copy).
+	Title *string   `json:"title,omitempty"`
+	Type  EventType `json:"type"`
+}
+
+// EventType defines model for Event.Type.
+type EventType string
+
 // GuidedSuggestions Guided-transfer mule menu — up to 3 third-party candidates; the client picks one at random, or falls back to the caller's own account when options is empty.
 type GuidedSuggestions struct {
 	Options []TransferSuggestion `json:"options"`
@@ -352,6 +513,11 @@ type GuidedSuggestions struct {
 type Health struct {
 	Status  *string `json:"status,omitempty"`
 	Version *string `json:"version,omitempty"`
+}
+
+// IdResponse defines model for IdResponse.
+type IdResponse struct {
+	Id *openapi_types.UUID `json:"id,omitempty"`
 }
 
 // LedgerEntry defines model for LedgerEntry.
@@ -404,6 +570,18 @@ type LoginResponse struct {
 	Token     *string             `json:"token,omitempty"`
 	TokenType *string             `json:"token_type,omitempty"`
 	UserId    *openapi_types.UUID `json:"user_id,omitempty"`
+}
+
+// MarkEventsReadRequest Omit the cursor to mark everything read.
+type MarkEventsReadRequest struct {
+	// UpToCursor created_at of the newest event to mark (inclusive).
+	UpToCursor   *time.Time          `json:"up_to_cursor,omitempty"`
+	UpToCursorId *openapi_types.UUID `json:"up_to_cursor_id,omitempty"`
+}
+
+// MarkedResponse defines model for MarkedResponse.
+type MarkedResponse struct {
+	Marked *int `json:"marked,omitempty"`
 }
 
 // OpenAccountRequest defines model for OpenAccountRequest.
@@ -467,10 +645,33 @@ type ResendCodeRequest struct {
 
 // ResolvedAccount defines model for ResolvedAccount.
 type ResolvedAccount struct {
-	AccountId       *openapi_types.UUID `json:"account_id,omitempty"`
-	Iban            *string             `json:"iban,omitempty"`
-	OwnerNameMasked *string             `json:"owner_name_masked,omitempty"`
+	AccountId   *openapi_types.UUID         `json:"account_id,omitempty"`
+	AccountType *ResolvedAccountAccountType `json:"account_type,omitempty"`
+	CheckedAt   *time.Time                  `json:"checked_at,omitempty"`
+
+	// Gate Server-driven continue gate; clients must not compute their own.
+	Gate *ResolvedAccountGate `json:"gate,omitempty"`
+	Iban *string              `json:"iban,omitempty"`
+
+	// MatchResult Server-side CoP/VOP verdict against the supplied name.
+	MatchResult     *ResolvedAccountMatchResult `json:"match_result,omitempty"`
+	OwnerNameMasked *string                     `json:"owner_name_masked,omitempty"`
+
+	// ReasonCode Stable machine token (MATCH/CLOSE_MATCH/NO_MATCH/NAME_NOT_SUPPLIED).
+	ReasonCode *string `json:"reason_code,omitempty"`
+
+	// SuggestedName The registered name — present ONLY on close_match (the CoP-mandated disclosure).
+	SuggestedName *string `json:"suggested_name,omitempty"`
 }
+
+// ResolvedAccountAccountType defines model for ResolvedAccount.AccountType.
+type ResolvedAccountAccountType string
+
+// ResolvedAccountGate Server-driven continue gate; clients must not compute their own.
+type ResolvedAccountGate string
+
+// ResolvedAccountMatchResult Server-side CoP/VOP verdict against the supplied name.
+type ResolvedAccountMatchResult string
 
 // Session One active refresh-token family (a device/login). No token material.
 type Session struct {
@@ -565,6 +766,11 @@ type TransferSuggestion struct {
 // TransferSuggestionSource Always 'scenario' from the backend; the client synthesises 'own_account' for its empty-menu fallback.
 type TransferSuggestionSource string
 
+// UnreadCount defines model for UnreadCount.
+type UnreadCount struct {
+	UnreadCount *int `json:"unread_count,omitempty"`
+}
+
 // UpdateMeRequest defines model for UpdateMeRequest.
 type UpdateMeRequest struct {
 	Email       *string `json:"email,omitempty"`
@@ -607,6 +813,25 @@ type VerifyContactResponse struct {
 
 // VerifyContactResponseChannel defines model for VerifyContactResponse.Channel.
 type VerifyContactResponseChannel string
+
+// WarningAckRequest defines model for WarningAckRequest.
+type WarningAckRequest struct {
+	// Acknowledged true = customer proceeded past the warning; false = shown but backed out.
+	Acknowledged     *bool                     `json:"acknowledged,omitempty"`
+	AmountMinor      *int64                    `json:"amount_minor,omitempty"`
+	Category         WarningAckRequestCategory `json:"category"`
+	CounterpartyIban *string                   `json:"counterparty_iban,omitempty"`
+	DebitAccountId   *openapi_types.UUID       `json:"debit_account_id,omitempty"`
+
+	// Device Client platform/device label.
+	Device *string `json:"device,omitempty"`
+
+	// ReasonCode Machine token echoed from the warning (e.g. NO_MATCH).
+	ReasonCode *string `json:"reason_code,omitempty"`
+}
+
+// WarningAckRequestCategory defines model for WarningAckRequest.Category.
+type WarningAckRequestCategory string
 
 // Cursor defines model for Cursor.
 type Cursor = time.Time
@@ -668,6 +893,9 @@ type RegisterParams struct {
 // ResolveBeneficiaryParams defines parameters for ResolveBeneficiary.
 type ResolveBeneficiaryParams struct {
 	Iban string `form:"iban" json:"iban"`
+
+	// Name The payee name as typed by the customer.
+	Name *string `form:"name,omitempty" json:"name,omitempty"`
 }
 
 // ListMyDisputesParams defines parameters for ListMyDisputes.
@@ -680,6 +908,22 @@ type ListMyDisputesParams struct {
 type OpenMyAccountParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 }
+
+// ListMyEventsParams defines parameters for ListMyEvents.
+type ListMyEventsParams struct {
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// CursorId id of the last row seen; with `cursor` forms the composite keyset tie-break.
+	CursorId *openapi_types.UUID `form:"cursor_id,omitempty" json:"cursor_id,omitempty"`
+	Limit    *Limit              `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Type Filter to one event type.
+	Type       *ListMyEventsParamsType `form:"type,omitempty" json:"type,omitempty"`
+	UnreadOnly *bool                   `form:"unread_only,omitempty" json:"unread_only,omitempty"`
+}
+
+// ListMyEventsParamsType defines parameters for ListMyEvents.
+type ListMyEventsParamsType string
 
 // ListSessionsParams defines parameters for ListSessions.
 type ListSessionsParams struct {
@@ -763,8 +1007,14 @@ type UpdateMeJSONRequestBody = UpdateMeRequest
 // OpenMyAccountJSONRequestBody defines body for OpenMyAccount for application/json ContentType.
 type OpenMyAccountJSONRequestBody = OpenAccountRequest
 
+// MarkEventsReadJSONRequestBody defines body for MarkEventsRead for application/json ContentType.
+type MarkEventsReadJSONRequestBody = MarkEventsReadRequest
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
+
+// RecordWarningAckJSONRequestBody defines body for RecordWarningAck for application/json ContentType.
+type RecordWarningAckJSONRequestBody = WarningAckRequest
 
 // CreateTransferJSONRequestBody defines body for CreateTransfer for application/json ContentType.
 type CreateTransferJSONRequestBody = CreateTransferRequest
@@ -813,7 +1063,7 @@ type ServerInterface interface {
 	// Save a beneficiary by IBAN (resolves it to a destination account)
 	// (POST /beneficiaries)
 	AddBeneficiary(w http.ResponseWriter, r *http.Request)
-	// Confirmation of payee — resolve an IBAN to a masked owner name
+	// Confirmation of payee — masked owner name + the server-side match verdict
 	// (GET /beneficiaries/resolve)
 	ResolveBeneficiary(w http.ResponseWriter, r *http.Request, params ResolveBeneficiaryParams)
 	// Remove a saved beneficiary (scoped to the caller)
@@ -837,6 +1087,15 @@ type ServerInterface interface {
 	// Open a new account for the caller (server allocates the IBAN). Idempotent.
 	// (POST /me/accounts)
 	OpenMyAccount(w http.ResponseWriter, r *http.Request, params OpenMyAccountParams)
+	// The caller's notification feed (money + security events), newest first
+	// (GET /me/events)
+	ListMyEvents(w http.ResponseWriter, r *http.Request, params ListMyEventsParams)
+	// Mark events read up to and including a cursor (or all when omitted)
+	// (POST /me/events/read)
+	MarkEventsRead(w http.ResponseWriter, r *http.Request)
+	// Unread-event count for the caller (notification badge)
+	// (GET /me/events/unread)
+	CountUnreadEvents(w http.ResponseWriter, r *http.Request)
 	// Change the authenticated customer's password (revokes other sessions)
 	// (POST /me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
@@ -846,6 +1105,9 @@ type ServerInterface interface {
 	// Revoke one session/device (selective sign-out). Idempotent.
 	// (DELETE /me/sessions/{family_id})
 	RevokeSession(w http.ResponseWriter, r *http.Request, familyId FamilyId)
+	// Record fraud-warning evidence ("warned and chose to proceed / backed out")
+	// (POST /me/warning-acks)
+	RecordWarningAck(w http.ResponseWriter, r *http.Request)
 	// List the caller's transfers across all their accounts (keyset-paginated)
 	// (GET /transfers)
 	ListMyTransfers(w http.ResponseWriter, r *http.Request, params ListMyTransfersParams)
@@ -1258,6 +1520,19 @@ func (siw *ServerInterfaceWrapper) ResolveBeneficiary(w http.ResponseWriter, r *
 		return
 	}
 
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResolveBeneficiary(w, r, params)
 	}))
@@ -1454,6 +1729,119 @@ func (siw *ServerInterfaceWrapper) OpenMyAccount(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListMyEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMyEventsParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor_id", r.URL.Query(), &params.CursorId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "unread_only" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "unread_only", r.URL.Query(), &params.UnreadOnly, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "unread_only"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "unread_only", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MarkEventsRead operation middleware
+func (siw *ServerInterfaceWrapper) MarkEventsRead(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkEventsRead(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CountUnreadEvents operation middleware
+func (siw *ServerInterfaceWrapper) CountUnreadEvents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CountUnreadEvents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangePassword operation middleware
 func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
@@ -1526,6 +1914,20 @@ func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeSession(w, r, familyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RecordWarningAck operation middleware
+func (siw *ServerInterfaceWrapper) RecordWarningAck(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecordWarningAck(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2046,11 +2448,19 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 
 	r.HandleFunc(options.BaseURL+"/me/accounts", wrapper.OpenMyAccount).Methods(http.MethodPost)
 
+	r.HandleFunc(options.BaseURL+"/me/events", wrapper.ListMyEvents).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/me/events/read", wrapper.MarkEventsRead).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/me/events/unread", wrapper.CountUnreadEvents).Methods(http.MethodGet)
+
 	r.HandleFunc(options.BaseURL+"/me/password", wrapper.ChangePassword).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/me/sessions", wrapper.ListSessions).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/me/sessions/{family_id}", wrapper.RevokeSession).Methods(http.MethodDelete)
+
+	r.HandleFunc(options.BaseURL+"/me/warning-acks", wrapper.RecordWarningAck).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.ListMyTransfers).Methods(http.MethodGet)
 

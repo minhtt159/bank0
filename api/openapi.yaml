@@ -271,6 +271,102 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }   # negative / unchanged limit
 
+  /me/events:
+    get:
+      operationId: listMyEvents
+      tags: [client]
+      summary: The caller's notification feed (money + security events), newest first
+      description: >-
+        Per-user append-only feed, written in the same DB transaction as its cause
+        (a posted transfer, an incoming payment, a new sign-in, a dispute update).
+        Bare array (always [], never null; end of data = a short page). Paginate
+        with `cursor` (last row's created_at) + `cursor_id` (last row's id).
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: cursor_id
+          in: query
+          required: false
+          description: id of the last row seen; with `cursor` forms the composite keyset tie-break.
+          schema: { type: string, format: uuid }
+        - { $ref: "#/components/parameters/Limit" }
+        - name: type
+          in: query
+          required: false
+          description: Filter to one event type.
+          schema:
+            type: string
+            enum: [transfer.posted, payment.incoming, device.new, dispute.updated]
+        - name: unread_only
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Event" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/events/unread:
+    get:
+      operationId: countUnreadEvents
+      tags: [client]
+      summary: Unread-event count for the caller (notification badge)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UnreadCount" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/events/read:
+    post:
+      operationId: markEventsRead
+      tags: [client]
+      summary: Mark events read up to and including a cursor (or all when omitted)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MarkEventsReadRequest" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarkedResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/warning-acks:
+    post:
+      operationId: recordWarningAck
+      tags: [client]
+      summary: Record fraud-warning evidence ("warned and chose to proceed / backed out")
+      description: >-
+        The client posts one row per warning interaction, BEFORE submitting the
+        transfer. This is the CoP/VOP liability evidence — append-only, tied to the
+        caller; the referenced debit account must be theirs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WarningAckRequest" }
+      responses:
+        "201":
+          description: recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # debit account not the caller's
+        "422": { $ref: "#/components/responses/Error" }
+
   /beneficiaries:
     get:
       operationId: listBeneficiaries
@@ -307,11 +403,21 @@ paths:
     get:
       operationId: resolveBeneficiary
       tags: [client]
-      summary: Confirmation of payee — resolve an IBAN to a masked owner name
+      summary: Confirmation of payee — masked owner name + the server-side match verdict
+      description: >-
+        Pass `name` (what the customer typed) to get the CoP/VOP verdict computed
+        server-side; all clients then gate identically by construction. Without
+        `name` the verdict is `unable`. On a close_match the actual registered
+        name is returned (suggested_name) so a typo can be corrected.
       parameters:
         - name: iban
           in: query
           required: true
+          schema: { type: string }
+        - name: name
+          in: query
+          required: false
+          description: The payee name as typed by the customer.
           schema: { type: string }
       responses:
         "200":
@@ -1033,6 +1139,49 @@ components:
       type: object
       properties:
         kind: { type: string, enum: [customer], default: customer, description: "reserved for future kinds (savings); only 'customer' is accepted today" }
+    Event:
+      type: object
+      required: [id, type, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [transfer.posted, payment.incoming, device.new, dispute.updated]
+        title: { type: string, description: "Short human-readable summary (server-driven copy)." }
+        body: { type: string }
+        related_transfer_id: { type: string, format: uuid }
+        related_account_id: { type: string, format: uuid }
+        data:
+          type: object
+          additionalProperties: true
+          description: "Type-specific payload (amount_minor, counterparty_iban, user_agent, …)."
+        read_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    UnreadCount:
+      type: object
+      properties:
+        unread_count: { type: integer }
+    MarkEventsReadRequest:
+      type: object
+      description: Omit the cursor to mark everything read.
+      properties:
+        up_to_cursor:    { type: string, format: date-time, description: "created_at of the newest event to mark (inclusive)." }
+        up_to_cursor_id: { type: string, format: uuid }
+    MarkedResponse:
+      type: object
+      properties:
+        marked: { type: integer }
+    WarningAckRequest:
+      type: object
+      required: [category]
+      properties:
+        category:          { type: string, enum: [cop_no_match, cop_close_match, cop_unable, guided_steer, high_value, other] }
+        reason_code:       { type: string, description: "Machine token echoed from the warning (e.g. NO_MATCH)." }
+        acknowledged:      { type: boolean, default: true, description: "true = customer proceeded past the warning; false = shown but backed out." }
+        debit_account_id:  { type: string, format: uuid }
+        counterparty_iban: { type: string }
+        amount_minor:      { type: integer, format: int64 }
+        device:            { type: string, description: "Client platform/device label." }
     LimitRequest:
       type: object
       required: [transfer_limit_minor]
@@ -1280,6 +1429,12 @@ components:
         account_id: { type: string, format: uuid }
         iban: { type: string }
         owner_name_masked: { type: string }
+        match_result: { type: string, enum: [match, close_match, no_match, unable], description: "Server-side CoP/VOP verdict against the supplied name." }
+        reason_code: { type: string, description: "Stable machine token (MATCH/CLOSE_MATCH/NO_MATCH/NAME_NOT_SUPPLIED)." }
+        suggested_name: { type: string, description: "The registered name — present ONLY on close_match (the CoP-mandated disclosure)." }
+        account_type: { type: string, enum: [personal, business] }
+        gate: { type: string, enum: [ok, awaiting_acknowledgement, blocked], description: "Server-driven continue gate; clients must not compute their own." }
+        checked_at: { type: string, format: date-time }
     LedgerEntry:
       type: object
       properties:

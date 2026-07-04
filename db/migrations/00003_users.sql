@@ -528,7 +528,9 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- issue_refresh_token: open a new family at login, carrying the optional device
--- label. Returns the family id.
+-- label. Returns the family id. Emits the 'device.new' security event in the
+-- same txn (events, 00008) — one per family, deduped by the family-id partial
+-- unique index, so an intrusion can't sign in silently.
 CREATE OR REPLACE FUNCTION issue_refresh_token(
     p_user_id      UUID,
     p_token_hash   TEXT,
@@ -543,6 +545,16 @@ BEGIN
     VALUES (p_token_hash, p_user_id, now() + make_interval(secs => p_idle_seconds),
             p_user_agent, p_ip, p_device_label)
     RETURNING family_id INTO v_family;
+
+    INSERT INTO events (user_id, type, title, body, data)
+    VALUES (p_user_id, 'device.new', 'New sign-in',
+            'A new device signed in to your account.',
+            jsonb_build_object('family_id', v_family,
+                               'user_agent', COALESCE(p_user_agent, ''),
+                               'ip', COALESCE(p_ip, ''),
+                               'device_label', COALESCE(p_device_label, '')))
+    ON CONFLICT ((data->>'family_id')) WHERE type = 'device.new' DO NOTHING;
+
     RETURN v_family;
 END;
 $$ LANGUAGE plpgsql;

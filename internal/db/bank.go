@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
@@ -104,21 +105,31 @@ func (p *Postgres) RequiresApproval(ctx context.Context, amountMinor int64) (App
 	return a, err
 }
 
-// ResolvedAccount mirrors resolve_account_by_iban()'s RETURNS TABLE. Used by the
-// customer app's confirmation-of-payee: a masked owner name, never the balance.
+// ResolvedAccount mirrors resolve_account_by_iban()'s RETURNS TABLE: the masked
+// owner name plus the SERVER-SIDE CoP verdict (match/close_match/no_match/unable,
+// gate, and — only on close_match — the actual registered name). Never the balance.
 type ResolvedAccount struct {
 	AccountID       uuid.UUID `json:"account_id"`
 	Iban            string    `json:"iban"`
 	OwnerNameMasked string    `json:"owner_name_masked"`
+	MatchResult     string    `json:"match_result"`
+	ReasonCode      string    `json:"reason_code"`
+	SuggestedName   *string   `json:"suggested_name,omitempty"`
+	AccountType     string    `json:"account_type"`
+	Gate            string    `json:"gate"`
+	CheckedAt       time.Time `json:"checked_at"`
 }
 
-// ResolveAccountByIban looks up an active customer account by IBAN. The function
-// RAISEs (mapped to 404) when no active account matches, so a not-found surfaces
-// as a PgError rather than ErrNoRows.
-func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string) (ResolvedAccount, error) {
-	const q = `SELECT account_id, iban, owner_name_masked FROM resolve_account_by_iban($1::varchar)`
+// ResolveAccountByIban looks up an active customer account by IBAN and computes
+// the CoP verdict against the customer-typed nameHint (nil = 'unable'). The
+// function RAISEs (mapped to 404) when no active account matches.
+func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string, nameHint *string) (ResolvedAccount, error) {
+	const q = `SELECT account_id, iban, owner_name_masked, match_result, reason_code,
+	                  suggested_name, account_type, gate, checked_at
+	           FROM resolve_account_by_iban($1::varchar, $2::text)`
 	var a ResolvedAccount
-	err := p.Pool.QueryRow(ctx, q, iban).Scan(&a.AccountID, &a.Iban, &a.OwnerNameMasked)
+	err := p.Pool.QueryRow(ctx, q, iban, nameHint).Scan(&a.AccountID, &a.Iban, &a.OwnerNameMasked,
+		&a.MatchResult, &a.ReasonCode, &a.SuggestedName, &a.AccountType, &a.Gate, &a.CheckedAt)
 	return a, err
 }
 

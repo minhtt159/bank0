@@ -37,7 +37,7 @@ JWT subject.
 | Accounts | POST | `/accounts/{id}/limit-requests` | bearer | ask for a transfer-limit change on an OWNED account (403 otherwise); lands in the operator maker-checker queue — never self-applied |
 | Statement | GET | `/accounts/{id}/ledger?cursor&cursor_id&limit&from&to&direction&q&min_minor&max_minor` | bearer | composite-keyset cursor (`cursor`+`cursor_id`, fixes same-timestamp tie-skip), running balance, counterparty; server-side filters (date range, direction, free text, amount range) |
 | Beneficiaries | GET | `/beneficiaries` | bearer | saved payees (fuzzy search is client-side) |
-| Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
+| Beneficiaries | GET | `/beneficiaries/resolve?iban=&name=` | bearer | confirmation-of-payee: masked owner name + the **server-side CoP/VOP verdict** (`match_result`, `reason_code`, `suggested_name` on close_match only, `gate`) — clients render, never decide |
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
@@ -45,6 +45,10 @@ JWT subject.
 | Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true` |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |
+| Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
+| Notifications | GET | `/me/events/unread` | bearer | unread count (badge) |
+| Notifications | POST | `/me/events/read` | bearer | mark read up to a cursor (or all); idempotent |
+| Fraud evidence | POST | `/me/warning-acks` | bearer | "warned and proceeded / backed out" liability evidence (CoP/VOP pivot); append-only, debit account must be the caller's |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" — party-only, one open per (transfer, caller) |
 | Disputes | GET | `/disputes` · `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id → 404) |
 | Health | GET | `/health` | public | DB-blind liveness/version |

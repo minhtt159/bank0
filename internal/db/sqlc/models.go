@@ -228,6 +228,50 @@ func (ns NullEntryDirection) Value() (driver.Value, error) {
 	return string(ns.EntryDirection), nil
 }
 
+type EventType string
+
+const (
+	EventTypeTransferposted  EventType = "transfer.posted"
+	EventTypePaymentincoming EventType = "payment.incoming"
+	EventTypeDevicenew       EventType = "device.new"
+	EventTypeDisputeupdated  EventType = "dispute.updated"
+)
+
+func (e *EventType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = EventType(s)
+	case string:
+		*e = EventType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for EventType: %T", src)
+	}
+	return nil
+}
+
+type NullEventType struct {
+	EventType EventType `json:"event_type"`
+	Valid     bool      `json:"valid"` // Valid is true if EventType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullEventType) Scan(value interface{}) error {
+	if value == nil {
+		ns.EventType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.EventType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullEventType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.EventType), nil
+}
+
 type HoldStatus string
 
 const (
@@ -705,6 +749,19 @@ type EnrichedLedger struct {
 	CounterpartyOwner      *string        `json:"counterparty_owner"`
 }
 
+type Event struct {
+	ID                uuid.UUID  `json:"id"`
+	UserID            uuid.UUID  `json:"user_id"`
+	Type              EventType  `json:"type"`
+	Title             string     `json:"title"`
+	Body              string     `json:"body"`
+	RelatedTransferID *uuid.UUID `json:"related_transfer_id"`
+	RelatedAccountID  *uuid.UUID `json:"related_account_id"`
+	Data              []byte     `json:"data"`
+	ReadAt            *time.Time `json:"read_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+}
+
 type GuidedScenario struct {
 	ID              uuid.UUID  `json:"id"`
 	Name            string     `json:"name"`
@@ -826,4 +883,17 @@ type VerificationChallenge struct {
 	ExpiresAt   time.Time           `json:"expires_at"`
 	CreatedAt   time.Time           `json:"created_at"`
 	VerifiedAt  *time.Time          `json:"verified_at"`
+}
+
+type WarningAck struct {
+	ID               uuid.UUID  `json:"id"`
+	UserID           uuid.UUID  `json:"user_id"`
+	Category         string     `json:"category"`
+	ReasonCode       string     `json:"reason_code"`
+	Acknowledged     bool       `json:"acknowledged"`
+	DebitAccountID   *uuid.UUID `json:"debit_account_id"`
+	CounterpartyIban string     `json:"counterparty_iban"`
+	AmountMinor      *int64     `json:"amount_minor"`
+	Device           string     `json:"device"`
+	CreatedAt        time.Time  `json:"created_at"`
 }

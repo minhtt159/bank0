@@ -83,7 +83,11 @@ CREATE TYPE ik_status       AS ENUM ('in_progress', 'completed');
 CREATE TYPE dispute_status   AS ENUM ('open', 'under_review', 'resolved', 'rejected');
 CREATE TYPE dispute_category AS ENUM ('unrecognised', 'fraud', 'wrong_amount', 'duplicate', 'other');
 
+-- Notification-feed taxonomy (per-user events projection; table in the features file).
+CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.new', 'dispute.updated');
+
 -- +goose Down
+DROP TYPE IF EXISTS event_type;
 DROP TYPE IF EXISTS dispute_category;
 DROP TYPE IF EXISTS dispute_status;
 DROP TYPE IF EXISTS verification_status;
