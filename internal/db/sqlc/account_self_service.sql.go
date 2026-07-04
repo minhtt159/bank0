@@ -29,39 +29,45 @@ func (q *Queries) ApproveLimitChange(ctx context.Context, arg ApproveLimitChange
 }
 
 const listLimitRequests = `-- name: ListLimitRequests :many
-SELECT aa.id AS request_id, aa.target_id AS account_id, a.iban AS account_iban,
-       a.user_id, u.username,
+SELECT aa.id AS request_id, aa.target_id AS account_id,
+       COALESCE(a.iban, '')::text AS account_iban,
+       a.user_id, u.username::text AS username,
        (aa.detail->>'current_limit_minor')::bigint   AS current_limit_minor,
        (aa.detail->>'requested_limit_minor')::bigint AS requested_limit_minor,
-       COALESCE(aa.detail->>'reason','') AS reason, aa.created_at AS requested_at
+       COALESCE(aa.detail->>'reason','')::text AS reason, aa.created_at AS requested_at
 FROM admin_actions aa
 JOIN accounts a ON a.id = aa.target_id
 JOIN users u    ON u.id = a.user_id
 WHERE aa.action = 'limit_request' AND aa.approved_by IS NULL
-  AND ($1::timestamptz IS NULL OR aa.created_at < $1::timestamptz)
-ORDER BY aa.created_at DESC
-LIMIT $2::int
+  -- NULL cursor_id (the JSON surface sends only the timestamp) coalesces to the
+  -- max uuid so the row-value compare degrades to created_at <= cursor.
+  AND ($1::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < ($1::timestamptz,
+                                    COALESCE($2::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff')))
+ORDER BY aa.created_at DESC, aa.id DESC
+LIMIT $3::int
 `
 
 type ListLimitRequestsParams struct {
 	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
 	PageLimit int32      `json:"page_limit"`
 }
 
 type ListLimitRequestsRow struct {
-	RequestID           uuid.UUID   `json:"request_id"`
-	AccountID           *uuid.UUID  `json:"account_id"`
-	AccountIban         *string     `json:"account_iban"`
-	UserID              *uuid.UUID  `json:"user_id"`
-	Username            string      `json:"username"`
-	CurrentLimitMinor   int64       `json:"current_limit_minor"`
-	RequestedLimitMinor int64       `json:"requested_limit_minor"`
-	Reason              interface{} `json:"reason"`
-	RequestedAt         time.Time   `json:"requested_at"`
+	RequestID           uuid.UUID  `json:"request_id"`
+	AccountID           *uuid.UUID `json:"account_id"`
+	AccountIban         string     `json:"account_iban"`
+	UserID              *uuid.UUID `json:"user_id"`
+	Username            string     `json:"username"`
+	CurrentLimitMinor   int64      `json:"current_limit_minor"`
+	RequestedLimitMinor int64      `json:"requested_limit_minor"`
+	Reason              string     `json:"reason"`
+	RequestedAt         time.Time  `json:"requested_at"`
 }
 
 func (q *Queries) ListLimitRequests(ctx context.Context, arg ListLimitRequestsParams) ([]ListLimitRequestsRow, error) {
-	rows, err := q.db.Query(ctx, listLimitRequests, arg.Cursor, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listLimitRequests, arg.Cursor, arg.CursorID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}

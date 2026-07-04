@@ -228,6 +228,49 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }   # family not owned by caller
 
+  /me/accounts:
+    post:
+      operationId: openMyAccount
+      tags: [client]
+      summary: Open a new account for the caller (server allocates the IBAN). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenAccountRequest" }
+      responses:
+        "201":
+          description: opened
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # per-user account cap reached
+        "422": { $ref: "#/components/responses/Error" }
+
+  /accounts/{id}/limit-requests:
+    post:
+      operationId: requestLimitChange
+      tags: [client]
+      summary: Request a transfer-limit change on an owned account (an operator approves)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LimitRequest" }
+      responses:
+        "201":
+          description: pending approval
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LimitRequestResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # not the caller's account
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }   # negative / unchanged limit
+
   /beneficiaries:
     get:
       operationId: listBeneficiaries
@@ -785,6 +828,59 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExpireHoldsResponse" }
 
+  /admin/limit-requests:
+    get:
+      operationId: listLimitRequests
+      tags: [admin]
+      summary: Pending transfer-limit-change requests (cursor-paginated)
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LimitRequestItem" }
+
+  /admin/limit-requests/{id}/approve:
+    post:
+      operationId: approveLimitRequest
+      tags: [admin]
+      summary: Approve a limit request (applies the new limit; 4-eyes — not your own)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: applied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "403": { $ref: "#/components/responses/Error" }   # own request / not operator
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # already handled
+
+  /admin/limit-requests/{id}/reject:
+    post:
+      operationId: rejectLimitRequest
+      tags: [admin]
+      summary: Reject a pending limit request
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonRequest" }
+      responses:
+        "200":
+          description: rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     # client surface (api.bank0.hnimn.art): JWT bearer from POST /auth/login
@@ -933,6 +1029,35 @@ components:
       required: [verify_token]
       properties:
         verify_token: { type: string }
+    OpenAccountRequest:
+      type: object
+      properties:
+        kind: { type: string, enum: [customer], default: customer, description: "reserved for future kinds (savings); only 'customer' is accepted today" }
+    LimitRequest:
+      type: object
+      required: [transfer_limit_minor]
+      properties:
+        transfer_limit_minor: { type: integer, format: int64, minimum: 0 }
+        reason:               { type: string }
+    LimitRequestResponse:
+      type: object
+      properties:
+        request_id:            { type: string, format: uuid }
+        account_id:            { type: string, format: uuid }
+        requested_limit_minor: { type: integer, format: int64 }
+        status:                { type: string, example: pending }
+    LimitRequestItem:
+      type: object
+      properties:
+        request_id:            { type: string, format: uuid }
+        account_id:            { type: string, format: uuid }
+        account_iban:          { type: string }
+        user_id:               { type: string, format: uuid }
+        username:              { type: string }
+        current_limit_minor:   { type: integer, format: int64 }
+        requested_limit_minor: { type: integer, format: int64 }
+        reason:                { type: string }
+        requested_at:          { type: string, format: date-time }
     UpdateMeRequest:
       type: object
       # All optional; absent field => unchanged (COALESCE in update_user_info).
@@ -1085,6 +1210,13 @@ components:
         credit_account: { type: string, format: uuid }
         amount_minor: { type: integer, format: int64 }
         description: { type: string }
+        end_to_end_id:
+          type: string
+          maxLength: 35
+          description: >-
+            Optional originator-supplied reference (ISO 20022 pain.001 EndToEndId,
+            <= 35 chars of the ISO restricted charset). Echoed on the Transfer;
+            part of the idempotency fingerprint.
     TransferResult:
       type: object
       properties:
@@ -1103,6 +1235,8 @@ components:
         kind: { type: string }
         reverses_id: { type: string, format: uuid }
         description: { type: string }
+        uetr: { type: string, format: uuid, description: "Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays." }
+        end_to_end_id: { type: string, description: "Originator-supplied ISO 20022 EndToEndId, when given." }
         failure_reason: { type: string }
         requested_at: { type: string, format: date-time }
         posted_at: { type: string, format: date-time }

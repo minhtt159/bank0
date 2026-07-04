@@ -133,6 +133,33 @@ func TestExpireHoldsCountsHoldsNotTransfers(t *testing.T) {
 	}
 }
 
+// cleanup_idempotency_keys reaps committed in_progress orphans (>15 min) as well
+// as expired completed keys. Orphans are unreachable via the single-txn claim
+// paths today, so the test manufactures one directly.
+func TestCleanupReapsStaleInProgressKeys(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	stale, fresh := "stale-"+uuid.NewString(), "fresh-"+uuid.NewString()
+	if _, err := pg.Pool.Exec(ctx,
+		`INSERT INTO idempotency_keys (key, scope, request_hash, status, created_at)
+		 VALUES ($1, 'transfer', 'h', 'in_progress', now() - interval '16 minutes'),
+		        ($2, 'transfer', 'h', 'in_progress', now())`, stale, fresh); err != nil {
+		t.Fatalf("seed keys: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `SELECT cleanup_idempotency_keys()`); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	var staleLeft, freshLeft int
+	_ = pg.Pool.QueryRow(ctx, `SELECT count(*) FROM idempotency_keys WHERE key = $1`, stale).Scan(&staleLeft)
+	_ = pg.Pool.QueryRow(ctx, `SELECT count(*) FROM idempotency_keys WHERE key = $1`, fresh).Scan(&freshLeft)
+	if staleLeft != 0 {
+		t.Error("stale in_progress key must be reaped")
+	}
+	if freshLeft != 1 {
+		t.Error("fresh in_progress key must survive (a live claim window)")
+	}
+}
+
 // ─── disputes (00020) ────────────────────────────────────────────────────────
 
 // postedTransfer creates a posted transfer a->b (a owned by ownerA, b by ownerB).

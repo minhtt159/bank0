@@ -65,6 +65,21 @@ func (e DisputeStatus) Valid() bool {
 	}
 }
 
+// Defines values for OpenAccountRequestKind.
+const (
+	Customer OpenAccountRequestKind = "customer"
+)
+
+// Valid indicates whether the value is a known member of the OpenAccountRequestKind enum.
+func (e OpenAccountRequestKind) Valid() bool {
+	switch e {
+	case Customer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RaiseDisputeRequestCategory.
 const (
 	RaiseDisputeRequestCategoryDuplicate    RaiseDisputeRequestCategory = "duplicate"
@@ -299,6 +314,9 @@ type CreateTransferRequest struct {
 	CreditAccount openapi_types.UUID `json:"credit_account"`
 	DebitAccount  openapi_types.UUID `json:"debit_account"`
 	Description   *string            `json:"description,omitempty"`
+
+	// EndToEndId Optional originator-supplied reference (ISO 20022 pain.001 EndToEndId, <= 35 chars of the ISO restricted charset). Echoed on the Transfer; part of the idempotency fingerprint.
+	EndToEndId *string `json:"end_to_end_id,omitempty"`
 }
 
 // Dispute defines model for Dispute.
@@ -355,6 +373,20 @@ type LedgerEntry struct {
 	TransferStatus    *string             `json:"transfer_status,omitempty"`
 }
 
+// LimitRequest defines model for LimitRequest.
+type LimitRequest struct {
+	Reason             *string `json:"reason,omitempty"`
+	TransferLimitMinor int64   `json:"transfer_limit_minor"`
+}
+
+// LimitRequestResponse defines model for LimitRequestResponse.
+type LimitRequestResponse struct {
+	AccountId           *openapi_types.UUID `json:"account_id,omitempty"`
+	RequestId           *openapi_types.UUID `json:"request_id,omitempty"`
+	RequestedLimitMinor *int64              `json:"requested_limit_minor,omitempty"`
+	Status              *string             `json:"status,omitempty"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password string `json:"password"`
@@ -373,6 +405,15 @@ type LoginResponse struct {
 	TokenType *string             `json:"token_type,omitempty"`
 	UserId    *openapi_types.UUID `json:"user_id,omitempty"`
 }
+
+// OpenAccountRequest defines model for OpenAccountRequest.
+type OpenAccountRequest struct {
+	// Kind reserved for future kinds (savings); only 'customer' is accepted today
+	Kind *OpenAccountRequestKind `json:"kind,omitempty"`
+}
+
+// OpenAccountRequestKind reserved for future kinds (savings); only 'customer' is accepted today
+type OpenAccountRequestKind string
 
 // RaiseDisputeRequest defines model for RaiseDisputeRequest.
 type RaiseDisputeRequest struct {
@@ -457,13 +498,19 @@ type Transfer struct {
 	Currency        *string             `json:"currency,omitempty"`
 	DebitAccountId  *openapi_types.UUID `json:"debit_account_id,omitempty"`
 	Description     *string             `json:"description,omitempty"`
-	FailureReason   *string             `json:"failure_reason,omitempty"`
-	Id              *openapi_types.UUID `json:"id,omitempty"`
-	Kind            *string             `json:"kind,omitempty"`
-	PostedAt        *time.Time          `json:"posted_at,omitempty"`
-	RequestedAt     *time.Time          `json:"requested_at,omitempty"`
-	ReversesId      *openapi_types.UUID `json:"reverses_id,omitempty"`
-	Status          *string             `json:"status,omitempty"`
+
+	// EndToEndId Originator-supplied ISO 20022 EndToEndId, when given.
+	EndToEndId    *string             `json:"end_to_end_id,omitempty"`
+	FailureReason *string             `json:"failure_reason,omitempty"`
+	Id            *openapi_types.UUID `json:"id,omitempty"`
+	Kind          *string             `json:"kind,omitempty"`
+	PostedAt      *time.Time          `json:"posted_at,omitempty"`
+	RequestedAt   *time.Time          `json:"requested_at,omitempty"`
+	ReversesId    *openapi_types.UUID `json:"reverses_id,omitempty"`
+	Status        *string             `json:"status,omitempty"`
+
+	// Uetr Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays.
+	Uetr *openapi_types.UUID `json:"uetr,omitempty"`
 }
 
 // TransferListItem A transfer in the caller's cross-account history (direction is caller-relative).
@@ -629,6 +676,11 @@ type ListMyDisputesParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// OpenMyAccountParams defines parameters for OpenMyAccount.
+type OpenMyAccountParams struct {
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
+
 // ListSessionsParams defines parameters for ListSessions.
 type ListSessionsParams struct {
 	// XRefreshToken The caller's current refresh token. Optional; when present, the matching family is flagged current:true in GET /me/sessions. Never logged.
@@ -681,6 +733,9 @@ type SuggestTransferDestinationsParams struct {
 	AmountMinor *int64 `form:"amount_minor,omitempty" json:"amount_minor,omitempty"`
 }
 
+// RequestLimitChangeJSONRequestBody defines body for RequestLimitChange for application/json ContentType.
+type RequestLimitChangeJSONRequestBody = LimitRequest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -705,6 +760,9 @@ type AddBeneficiaryJSONRequestBody = AddBeneficiaryRequest
 // UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
 type UpdateMeJSONRequestBody = UpdateMeRequest
 
+// OpenMyAccountJSONRequestBody defines body for OpenMyAccount for application/json ContentType.
+type OpenMyAccountJSONRequestBody = OpenAccountRequest
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
@@ -725,6 +783,9 @@ type ServerInterface interface {
 	// Account statement (composite-keyset cursor, running balance, filterable)
 	// (GET /accounts/{id}/ledger)
 	GetAccountLedger(w http.ResponseWriter, r *http.Request, id Id, params GetAccountLedgerParams)
+	// Request a transfer-limit change on an owned account (an operator approves)
+	// (POST /accounts/{id}/limit-requests)
+	RequestLimitChange(w http.ResponseWriter, r *http.Request, id Id)
 	// Verify credentials (bcrypt). Establishes a session in the portal.
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -773,6 +834,9 @@ type ServerInterface interface {
 	// Update the caller's own profile (partial; name/email/phone only)
 	// (PATCH /me)
 	UpdateMe(w http.ResponseWriter, r *http.Request)
+	// Open a new account for the caller (server allocates the IBAN). Idempotent.
+	// (POST /me/accounts)
+	OpenMyAccount(w http.ResponseWriter, r *http.Request, params OpenMyAccountParams)
 	// Change the authenticated customer's password (revokes other sessions)
 	// (POST /me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
@@ -980,6 +1044,32 @@ func (siw *ServerInterfaceWrapper) GetAccountLedger(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAccountLedger(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestLimitChange operation middleware
+func (siw *ServerInterfaceWrapper) RequestLimitChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestLimitChange(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1310,6 +1400,51 @@ func (siw *ServerInterfaceWrapper) UpdateMe(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OpenMyAccount operation middleware
+func (siw *ServerInterfaceWrapper) OpenMyAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OpenMyAccountParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err = fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OpenMyAccount(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1875,6 +2010,8 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 
 	r.HandleFunc(options.BaseURL+"/accounts/{id}/ledger", wrapper.GetAccountLedger).Methods(http.MethodGet)
 
+	r.HandleFunc(options.BaseURL+"/accounts/{id}/limit-requests", wrapper.RequestLimitChange).Methods(http.MethodPost)
+
 	r.HandleFunc(options.BaseURL+"/auth/login", wrapper.Login).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/auth/logout", wrapper.Logout).Methods(http.MethodPost)
@@ -1906,6 +2043,8 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/me", wrapper.GetMe).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/me", wrapper.UpdateMe).Methods(http.MethodPatch)
+
+	r.HandleFunc(options.BaseURL+"/me/accounts", wrapper.OpenMyAccount).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/me/password", wrapper.ChangePassword).Methods(http.MethodPost)
 
