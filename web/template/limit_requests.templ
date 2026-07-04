@@ -1,0 +1,58 @@
+package template
+
+import (
+	"github.com/minhtt159/bank0/internal/money"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// LimitRequestsPanel: customer-initiated transfer-limit changes. The customer is
+// the maker; an admin applies or rejects (a raise is never self-applied).
+templ LimitRequestsPanel(canApprove bool) {
+	@consolePanel("Limit requests", "limit-requests-results", "/console/limit-requests/results", ", every 15s") {
+		<span class="muted small">Customer-requested transfer-limit changes; an admin applies or rejects.</span>
+	}
+}
+
+templ LimitRequestRows(rows []sqlc.ListLimitRequestsRow, canApprove bool, prevURL string, nextURL string, flash string) {
+	if flash != "" {
+		<div class="flash">{ flash }</div>
+	}
+	if len(rows) == 0 {
+		<p class="muted">No limit requests waiting 🎉</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Requested</th>
+					<th>Customer</th>
+					<th>Account</th>
+					<th class="num">Current</th>
+					<th class="num">Requested</th>
+					<th>Reason</th>
+					if canApprove {
+						<th>Decision</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, q := range rows {
+					<tr>
+						<td class="muted">{ q.RequestedAt.Format("2006-01-02 15:04") }</td>
+						<td>{ q.Username }</td>
+						<td class="mono">{ q.AccountIban }</td>
+						<td class="num">{ money.FormatMinor(q.CurrentLimitMinor) }</td>
+						<td class="num"><strong>{ money.FormatMinor(q.RequestedLimitMinor) }</strong></td>
+						<td class="muted">{ q.Reason }</td>
+						if canApprove {
+							<td class="actions">
+								<button class="btn ok" hx-post={ "/console/limit-requests/" + q.RequestID.String() + "/approve" } hx-target="#limit-requests-results" hx-disabled-elt="this" hx-confirm="Apply this transfer limit? You must not be the requester.">Apply</button>
+								<button class="btn danger" hx-post={ "/console/limit-requests/" + q.RequestID.String() + "/reject" } hx-target="#limit-requests-results" hx-disabled-elt="this" hx-confirm="Reject this limit request?">Reject</button>
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+	@pager(prevURL, nextURL, "limit-requests-results")
+}

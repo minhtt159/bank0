@@ -142,20 +142,24 @@ erDiagram
 ### 3.1 `users`
 
 ```sql
-CREATE TYPE user_role   AS ENUM ('customer', 'operator', 'admin', 'auditor');
-CREATE TYPE user_status AS ENUM ('active', 'locked', 'closed');
+CREATE TYPE user_role         AS ENUM ('customer', 'operator', 'admin', 'auditor');
+CREATE TYPE user_status       AS ENUM ('active', 'locked', 'closed');
+CREATE TYPE onboarding_status AS ENUM ('pending_verification', 'verified', 'active', 'rejected');
 
 CREATE TABLE users (
-    id            UUID PRIMARY KEY DEFAULT uuidv7(),
-    username      CITEXT NOT NULL UNIQUE,            -- case-insensitive
-    password_hash TEXT   NOT NULL,                   -- bcrypt via pgcrypto
-    full_name     TEXT   NOT NULL,
-    email         CITEXT UNIQUE,                     -- NULL allowed; NULLs don't collide
-    phone_number  VARCHAR(16) UNIQUE,
-    role          user_role   NOT NULL DEFAULT 'customer',
-    status        user_status NOT NULL DEFAULT 'active',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id                UUID PRIMARY KEY DEFAULT uuidv7(),
+    username          CITEXT NOT NULL UNIQUE,            -- case-insensitive
+    password_hash     TEXT   NOT NULL,                   -- bcrypt via pgcrypto
+    full_name         TEXT   NOT NULL,
+    email             CITEXT UNIQUE,                     -- NULL allowed; NULLs don't collide
+    phone_number      VARCHAR(16) UNIQUE,
+    role              user_role   NOT NULL DEFAULT 'customer',
+    status            user_status NOT NULL DEFAULT 'active',
+    onboarding_status onboarding_status NOT NULL DEFAULT 'active',  -- self-reg lifecycle
+    email_verified_at TIMESTAMPTZ,
+    phone_verified_at TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (email IS NULL OR email ~* '^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
 );
 ```
@@ -165,6 +169,14 @@ console; `status` locks or closes an account without deleting it — banks don't
 hard-delete people. `CITEXT` makes `Alice` == `alice` for login and email.
 Optional `email`/`phone` are genuinely `NULL` (not `''`), so the unique
 constraints behave: distinct NULLs never collide.
+
+**Self-registration** (`register_user`) creates `status='locked'` +
+`onboarding_status='pending_verification'`; verifying a contact code flips both
+(`verified`/`active`), which is what makes login possible. Admin-created users
+are born `active` on both axes. The companion **`verification_challenges`**
+table (same file) holds one row per (user, channel) code dispatch — token and
+code stored as sha256 only, ≤5 attempts, 15-min TTL, 60-s resend cooldown, and a
+partial unique index allowing one *pending* challenge per (user, channel).
 
 ### 3.2 `accounts`
 
@@ -235,6 +247,8 @@ CREATE TABLE transfers (
     reverses_id       UUID REFERENCES transfers(id),     -- set on reversals
     description       TEXT NOT NULL DEFAULT '',
     idempotency_key   TEXT,                              -- -> idempotency_keys.key
+    uetr              UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),  -- bank-minted UUIDv4 (SWIFT UETR)
+    end_to_end_id     VARCHAR(35),                       -- originator ISO 20022 EndToEndId
     failure_reason    TEXT,
     requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     posted_at         TIMESTAMPTZ,
@@ -243,6 +257,7 @@ CREATE TABLE transfers (
 
     CHECK (amount_minor > 0),
     CHECK (debit_account_id <> credit_account_id),
+    CHECK (end_to_end_id IS NULL OR end_to_end_id ~ '^[A-Za-z0-9+?/:().,'' -]{1,35}$'),
     -- posted_at is set once a transfer hits the ledger; a reversed transfer was
     -- posted, so it keeps its posted_at:
     CHECK ((posted_at IS NOT NULL) = (status IN ('posted','reversed'))),
@@ -256,6 +271,12 @@ a transfer reaches `posted`. A normal customer transfer has
 `debit_account_id`/`credit_account_id` both being customer accounts; a deposit has
 `debit_account_id = external_clearing` (system) and `credit_account_id =`
 customer; a withdrawal is the reverse.
+
+The two **rail-ready identifiers** exist so the contract already speaks
+ISO 20022 before any real rail is attached: `uetr` is minted by the bank at
+insert (stable across idempotent replays — a replay never re-inserts), and
+`end_to_end_id` is the customer's own reference, folded into the idempotency
+fingerprint so the same key with a different reference is a 422 mismatch.
 
 ### 3.4 `ledger_entries` — the append-only source of truth
 

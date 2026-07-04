@@ -71,7 +71,9 @@ func (s *Server) AddBeneficiary(w http.ResponseWriter, r *http.Request) {
 }
 
 // ResolveBeneficiary implements genclient.ServerInterface: confirmation-of-payee
-// preview for an IBAN before saving it (masked owner name, no balance).
+// preview for an IBAN before saving/paying it (masked owner name, no balance).
+// The match VERDICT is computed in the DB against params.Name — clients render
+// the outcome + gate, they do not decide it.
 func (s *Server) ResolveBeneficiary(w http.ResponseWriter, r *http.Request, params genclient.ResolveBeneficiaryParams) {
 	if _, ok := clientSubject(r.Context()); !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
@@ -85,7 +87,7 @@ func (s *Server) ResolveBeneficiary(w http.ResponseWriter, r *http.Request, para
 		writeError(w, http.StatusUnprocessableEntity, "invalid_iban", "iban failed checksum/format validation")
 		return
 	}
-	a, err := s.pg.ResolveAccountByIban(r.Context(), iban.Normalize(params.Iban))
+	a, err := s.pg.ResolveAccountByIban(r.Context(), iban.Normalize(params.Iban), params.Name)
 	if err != nil {
 		s.mapDBError(w, r, err)
 		return

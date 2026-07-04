@@ -72,6 +72,12 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 				writeError(w, http.StatusUnprocessableEntity, "insufficient_funds", msg)
 			case strings.Contains(msg, "idempotency key"):
 				writeError(w, http.StatusUnprocessableEntity, "idempotency_key_conflict", "this request was already submitted with different parameters")
+			case strings.Contains(msg, "account limit"):
+				// self-open cap: a conflict with current state, not bad input
+				writeError(w, http.StatusConflict, "account_limit", msg)
+			case strings.Contains(msg, "already handled"):
+				// maker-checker double-resolve (approve/reject raced or repeated)
+				writeError(w, http.StatusConflict, "invalid_state", msg)
 			default: // raw constraint trip — don't leak the constraint name
 				writeError(w, http.StatusUnprocessableEntity, "unprocessable", "the request could not be processed")
 			}
@@ -81,6 +87,9 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 			return
 		case "55006": // object_in_use (idempotent request still in progress)
 			writeError(w, http.StatusConflict, "in_progress", "a previous request is still being processed")
+			return
+		case "53400": // configuration_limit_exceeded (verification resend cooldown)
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "please wait before requesting another code")
 			return
 		case "28000", "28P01": // refresh-token reuse/expiry/unknown -> re-authenticate
 			writeError(w, http.StatusUnauthorized, "unauthorized", "please sign in again")

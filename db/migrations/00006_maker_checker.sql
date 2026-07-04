@@ -47,9 +47,25 @@ CREATE TABLE bank_settings (
     -- operator-configurable console page size (default 15), bounded so a typo can't
     -- ask for a 0-row or absurd page. Kept as the trailing column to match the
     -- historical physical order (added by ALTER in the pre-split schema).
-    default_page_limit            INT         NOT NULL DEFAULT 15 CHECK (default_page_limit BETWEEN 1 AND 200)
+    default_page_limit            INT         NOT NULL DEFAULT 15 CHECK (default_page_limit BETWEEN 1 AND 200),
+    -- cap on non-closed accounts a customer may hold (bounds self-open abuse;
+    -- staff createAccount is uncapped). Bank policy, so it lives here, not in code.
+    max_accounts_per_user         INT         NOT NULL DEFAULT 5 CHECK (max_accounts_per_user BETWEEN 1 AND 50)
 );
 INSERT INTO bank_settings (id) VALUES (TRUE);  -- the one row, all defaults
+
+-- The singleton row is load-bearing (requires_approval / default_transfer_limit /
+-- max_accounts_per_user / create_account read it): deleting it would silently
+-- break maker-checker and account creation, so DELETE is blocked outright.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION bank_settings_block_delete() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'bank_settings is a singleton (DELETE blocked)'
+        USING ERRCODE = 'restrict_violation';
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+CREATE TRIGGER trg_bank_settings_singleton BEFORE DELETE ON bank_settings FOR EACH ROW EXECUTE FUNCTION bank_settings_block_delete();
 
 -- +goose StatementBegin
 
@@ -70,16 +86,24 @@ CREATE OR REPLACE FUNCTION default_transfer_limit() RETURNS BIGINT AS $$
     SELECT default_transfer_limit_minor FROM bank_settings WHERE id;
 $$ LANGUAGE sql STABLE;
 
+CREATE OR REPLACE FUNCTION max_accounts_per_user() RETURNS INT AS $$
+    SELECT max_accounts_per_user FROM bank_settings WHERE id;
+$$ LANGUAGE sql STABLE;
+
+-- p_max_accounts is optional (NULL = unchanged) so pre-existing callers of the
+-- 4-value form keep working.
 CREATE OR REPLACE FUNCTION update_bank_settings(
     p_threshold_minor     BIGINT,
     p_default_limit_minor BIGINT,
     p_page_limit          INT,
-    p_actor               UUID
+    p_actor               UUID,
+    p_max_accounts        INT DEFAULT NULL
 ) RETURNS VOID AS $$
     UPDATE bank_settings
        SET maker_checker_threshold_minor = p_threshold_minor,
            default_transfer_limit_minor  = p_default_limit_minor,
            default_page_limit            = p_page_limit,
+           max_accounts_per_user         = COALESCE(p_max_accounts, max_accounts_per_user),
            updated_at = now(), updated_by = p_actor
      WHERE id;
 $$ LANGUAGE sql;
@@ -176,16 +200,107 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Customer transfer-limit-change requests (maker-checker over admin_actions).
+-- The CUSTOMER is the maker (action = 'limit_request', requested limit in
+-- detail); an operator approves (applies update_transfer_limit) or rejects. A
+-- limit raise is never self-applied — a compromised customer token cannot lift
+-- its own ceiling. Reuses the approval-queue shape above; no new table.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- request_limit_change: record a pending limit-change for a customer account.
+CREATE OR REPLACE FUNCTION request_limit_change(
+    p_account_id UUID,
+    p_maker      UUID,                 -- requesting user (the customer)
+    p_new_limit  BIGINT,
+    p_reason     TEXT DEFAULT ''
+) RETURNS UUID AS $$
+DECLARE v_id UUID; v_cur BIGINT;
+BEGIN
+    IF p_new_limit < 0 THEN
+        RAISE EXCEPTION 'limit must be >= 0' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT transfer_limit_minor INTO v_cur FROM accounts
+     WHERE id = p_account_id AND kind = 'customer' AND status <> 'closed'
+     FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'account % not found', p_account_id; END IF;
+    IF p_new_limit = v_cur THEN
+        RAISE EXCEPTION 'requested limit equals the current limit'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    INSERT INTO admin_actions (actor_user_id, action, target_id, detail)
+    VALUES (p_maker, 'limit_request', p_account_id,
+            jsonb_build_object('current_limit_minor', v_cur,
+                               'requested_limit_minor', p_new_limit,
+                               'reason', COALESCE(p_reason, '')))
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- approve_limit_change: an operator applies the requested limit. 4-eyes: the
+-- approver must differ from the maker (42501 -> 403); an already-handled
+-- request raises check_violation (-> 409 in the handler's already-handled map).
+CREATE OR REPLACE FUNCTION approve_limit_change(p_request_id UUID, p_approver UUID)
+RETURNS UUID AS $$
+DECLARE v_req admin_actions%ROWTYPE; v_new BIGINT;
+BEGIN
+    SELECT * INTO v_req FROM admin_actions
+     WHERE id = p_request_id AND action = 'limit_request' FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'limit request % not found', p_request_id; END IF;
+    IF v_req.approved_by IS NOT NULL THEN
+        RAISE EXCEPTION 'request already handled' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_req.actor_user_id = p_approver THEN
+        RAISE EXCEPTION 'cannot approve your own request' USING ERRCODE = '42501';
+    END IF;
+    v_new := (v_req.detail->>'requested_limit_minor')::bigint;
+    PERFORM update_transfer_limit(v_req.target_id, v_new);
+    UPDATE admin_actions SET approved_by = p_approver WHERE id = p_request_id;
+    RETURN v_req.target_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- reject_limit_change: mark handled without applying. Mirrors reject_request.
+CREATE OR REPLACE FUNCTION reject_limit_change(p_request_id UUID, p_approver UUID, p_reason TEXT DEFAULT '')
+RETURNS UUID AS $$
+DECLARE v_req admin_actions%ROWTYPE;
+BEGIN
+    SELECT * INTO v_req FROM admin_actions
+     WHERE id = p_request_id AND action = 'limit_request' FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'limit request % not found', p_request_id; END IF;
+    IF v_req.approved_by IS NOT NULL THEN
+        RAISE EXCEPTION 'request already handled' USING ERRCODE = 'check_violation';
+    END IF;
+    UPDATE admin_actions
+       SET approved_by = p_approver,
+           detail = detail || jsonb_build_object('rejected', true, 'reject_reason', COALESCE(p_reason,''))
+     WHERE id = p_request_id;
+    RETURN v_req.target_id;
+END;
+$$ LANGUAGE plpgsql;
+
 -- +goose StatementEnd
+
+-- the pending limit-request queue (mirrors idx_admin_actions_pending_approvals).
+CREATE INDEX idx_admin_actions_pending_limit
+    ON admin_actions (created_at DESC)
+    WHERE action = 'limit_request' AND approved_by IS NULL;
 
 -- +goose Down
 -- +goose StatementBegin
+DROP FUNCTION IF EXISTS reject_limit_change(UUID, UUID, TEXT);
+DROP FUNCTION IF EXISTS approve_limit_change(UUID, UUID);
+DROP FUNCTION IF EXISTS request_limit_change(UUID, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS request_money_with_approval(UUID, TEXT, UUID, BIGINT, transfer_kind, TEXT, JSONB);
 DROP FUNCTION IF EXISTS reject_request(UUID, UUID, TEXT);
 DROP FUNCTION IF EXISTS approve_request(UUID, UUID);
-DROP FUNCTION IF EXISTS update_bank_settings(BIGINT, BIGINT, INT, UUID);
+DROP FUNCTION IF EXISTS update_bank_settings(BIGINT, BIGINT, INT, UUID, INT);
+DROP FUNCTION IF EXISTS max_accounts_per_user();
 DROP FUNCTION IF EXISTS default_transfer_limit();
 DROP FUNCTION IF EXISTS requires_approval(BIGINT);
+DROP FUNCTION IF EXISTS bank_settings_block_delete() CASCADE;
 -- +goose StatementEnd
 DROP TABLE IF EXISTS bank_settings;
 DROP TABLE IF EXISTS admin_actions;

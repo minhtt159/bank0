@@ -1,13 +1,15 @@
 -- +goose Up
 -- ─────────────────────────────────────────────────────────────────────────────
--- AUXILIARY FEATURES — payees, guided transfers & disputes
+-- AUXILIARY FEATURES — payees, guided transfers, disputes & the events feed
 -- Customer-facing extras layered on top of core banking, none of which hold money
 -- state: saved beneficiaries (with confirmation-of-payee), the guided-transfer
--- "mule menu" demo (fraudbank's APP-scam simulation), and the dispute case workflow.
+-- "mule menu" demo (fraudbank's APP-scam simulation), the dispute case workflow,
+-- and the per-user notification feed (events — an append-only projection written
+-- in the same txn as its cause; emitting sites in 00003/00005 and here).
 -- Their functions lean on the IBAN primitives (00002), the masking helper, and the
 -- core tables/functions (accounts 00004, transfers 00005, admin_actions 00006). The
--- dispute taxonomy enums live in 00001; the shared set_updated_at() trigger fn
--- (00004) backs trg_disputes_updated_at.
+-- dispute/event taxonomy enums live in 00001; the shared set_updated_at() trigger
+-- fn (00004) backs trg_disputes_updated_at.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -91,20 +93,58 @@ CREATE TRIGGER trg_disputes_updated_at
 -- Beneficiary / confirmation-of-payee functions
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- resolve_account_by_iban: confirmation-of-payee. Returns the destination account
--- id + a MASKED owner name for an active customer account. Never exposes the balance
--- or the full name. Raises (-> 404) if not found / inactive.
-CREATE OR REPLACE FUNCTION resolve_account_by_iban(p_iban VARCHAR)
-RETURNS TABLE (account_id UUID, iban VARCHAR, owner_name_masked TEXT) AS $$
+-- resolve_account_by_iban: confirmation-of-payee with the SERVER-SIDE verdict
+-- (CoP/VOP four-outcome model; spec-banking-grade-hardening Rec 9). The caller
+-- may supply the name the customer typed (p_name_hint); the DB — not each
+-- client — decides match / close_match / no_match / unable, so web/iOS/Android
+-- gate identically by construction. On a close_match the ACTUAL registered name
+-- is returned (suggested_name) so the customer can fix a typo — that disclosure
+-- is what CoP/VOP mandate; on no_match nothing is revealed beyond the mask.
+-- gate: ok = proceed; awaiting_acknowledgement = warn, customer may proceed
+-- (the VOP liability pivot); 'blocked' is reserved for the future risk seam.
+-- Matching: exact after whitespace/case normalization -> match; pg_trgm
+-- similarity >= 0.55 -> close_match (threshold is a product knob, hedged — the
+-- EPC wire tokens are not public). Raises (-> 404) if not found / inactive.
+CREATE OR REPLACE FUNCTION resolve_account_by_iban(p_iban VARCHAR, p_name_hint TEXT DEFAULT NULL)
+RETURNS TABLE (account_id UUID, iban VARCHAR, owner_name_masked TEXT,
+               match_result TEXT, reason_code TEXT, suggested_name TEXT,
+               account_type TEXT, gate TEXT, checked_at TIMESTAMPTZ) AS $$
+DECLARE
+    v_id      UUID;
+    v_iban    VARCHAR;
+    v_full    TEXT;
+    v_hint    TEXT;
+    v_reg     TEXT;
+    v_match   TEXT;
+    v_reason  TEXT;
+    v_suggest TEXT;
+    v_gate    TEXT;
 BEGIN
-    RETURN QUERY
-    SELECT a.id, a.iban, mask_name(u.full_name)
+    SELECT a.id, a.iban, u.full_name INTO v_id, v_iban, v_full
     FROM accounts a
     JOIN users u ON u.id = a.user_id
     WHERE a.iban = p_iban AND a.kind = 'customer' AND a.status = 'active';
     IF NOT FOUND THEN
         RAISE EXCEPTION 'account with iban % not found', p_iban;
     END IF;
+
+    IF p_name_hint IS NULL OR btrim(p_name_hint) = '' THEN
+        v_match := 'unable';  v_reason := 'NAME_NOT_SUPPLIED';  v_gate := 'awaiting_acknowledgement';
+    ELSE
+        v_hint := lower(regexp_replace(btrim(p_name_hint), '\s+', ' ', 'g'));
+        v_reg  := lower(regexp_replace(btrim(v_full),      '\s+', ' ', 'g'));
+        IF v_hint = v_reg THEN
+            v_match := 'match';       v_reason := 'MATCH';       v_gate := 'ok';
+        ELSIF similarity(v_hint, v_reg) >= 0.55 THEN
+            v_match := 'close_match'; v_reason := 'CLOSE_MATCH'; v_gate := 'awaiting_acknowledgement';
+            v_suggest := v_full;   -- the one deliberate disclosure (CoP close-match)
+        ELSE
+            v_match := 'no_match';    v_reason := 'NO_MATCH';    v_gate := 'awaiting_acknowledgement';
+        END IF;
+    END IF;
+
+    RETURN QUERY SELECT v_id, v_iban, mask_name(v_full), v_match, v_reason,
+                        v_suggest, 'personal'::text, v_gate, now();
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -275,9 +315,9 @@ CREATE OR REPLACE FUNCTION resolve_dispute(
     p_status     dispute_status,
     p_note       TEXT DEFAULT ''
 ) RETURNS dispute_status AS $$
-DECLARE v_cur dispute_status;
+DECLARE v_d disputes%ROWTYPE;
 BEGIN
-    SELECT status INTO v_cur FROM disputes WHERE id = p_dispute_id FOR UPDATE;
+    SELECT * INTO v_d FROM disputes WHERE id = p_dispute_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'dispute % not found', p_dispute_id;          -- -> 404
     END IF;
@@ -285,11 +325,11 @@ BEGIN
     IF p_status NOT IN ('under_review', 'resolved', 'rejected') THEN
         RAISE EXCEPTION 'cannot set dispute to %', p_status;          -- -> 409 (defensive; API enum-guards too)
     END IF;
-    IF v_cur IN ('resolved', 'rejected') THEN
-        RAISE EXCEPTION 'cannot transition a % dispute', v_cur;       -- -> 409
+    IF v_d.status IN ('resolved', 'rejected') THEN
+        RAISE EXCEPTION 'cannot transition a % dispute', v_d.status;  -- -> 409
     END IF;
-    IF v_cur = 'under_review' AND p_status = 'under_review' THEN
-        RETURN v_cur;  -- no-op
+    IF v_d.status = 'under_review' AND p_status = 'under_review' THEN
+        RETURN v_d.status;  -- no-op
     END IF;
 
     UPDATE disputes
@@ -304,20 +344,224 @@ BEGIN
     VALUES (p_resolver, 'dispute_' || p_status::text, p_dispute_id,
             jsonb_build_object('note', COALESCE(p_note,'')));
 
+    -- Notify the filer, in the same txn as the transition. Direct INSERT (not
+    -- emit_event): dispute events are one per STATUS CHANGE, so they are exempt
+    -- from the money events' one-per-transfer uniqueness (partial index below).
+    INSERT INTO events (user_id, type, title, body, related_transfer_id, data)
+    VALUES (v_d.raised_by_user_id, 'dispute.updated', 'Dispute updated',
+            'Your dispute is now ' || p_status::text || '.',
+            v_d.transfer_id,
+            jsonb_build_object('dispute_id', p_dispute_id, 'status', p_status));
+
     RETURN p_status;
 END;
 $$ LANGUAGE plpgsql;
 
 -- +goose StatementEnd
 
--- +goose Down
+-- ─────────────────────────────────────────────────────────────────────────────
+-- events  (per-user notification feed — an append-only PROJECTION, not a second
+-- source of truth for money; a lost event never corrupts the ledger)
+-- Rows are written INSIDE the transaction that owns the source transition:
+-- post_transfer (00005) emits transfer.posted / payment.incoming,
+-- issue_refresh_token (00003) emits device.new, resolve_dispute (above) emits
+-- dispute.updated. The event and its cause commit or roll back together.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE events (
+    id                  UUID PRIMARY KEY DEFAULT uuidv7(),      -- UUIDv7: time-ordered keyset tiebreak
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type                event_type NOT NULL,
+    title               TEXT NOT NULL DEFAULT '',
+    body                TEXT NOT NULL DEFAULT '',
+    related_transfer_id UUID REFERENCES transfers(id) ON DELETE SET NULL,
+    related_account_id  UUID REFERENCES accounts(id)  ON DELETE SET NULL,
+    data                JSONB NOT NULL DEFAULT '{}',
+    read_at             TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Feed read path: keyset (created_at, id) DESC per user.
+CREATE INDEX idx_events_user_created ON events (user_id, created_at DESC, id DESC);
+-- Unread badge / unread_only filter (partial: unread rows only).
+CREATE INDEX idx_events_user_unread  ON events (user_id) WHERE read_at IS NULL;
+-- Idempotent MONEY emission: at most one posted/incoming event per (user,
+-- transfer). Partial so dispute.updated (one per status change) and device.new
+-- (NULL transfer) are exempt.
+CREATE UNIQUE INDEX uq_events_money_once ON events (user_id, type, related_transfer_id)
+    WHERE type IN ('transfer.posted', 'payment.incoming');
+-- Idempotent DEVICE emission: one device.new per refresh-token family.
+CREATE UNIQUE INDEX uq_events_device_family ON events ((data->>'family_id'))
+    WHERE type = 'device.new';
+
 -- +goose StatementBegin
+
+-- events_block_mutation: the feed is a record of things that happened. Only
+-- read_at may ever change; deletes are blocked (user-cascade is the sole removal).
+-- Mirrors ledger_block_mutation (00005).
+CREATE OR REPLACE FUNCTION events_block_mutation() RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'events is append-only (DELETE blocked)' USING ERRCODE = 'restrict_violation';
+    END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.user_id IS DISTINCT FROM OLD.user_id
+       OR NEW.type IS DISTINCT FROM OLD.type
+       OR NEW.title IS DISTINCT FROM OLD.title
+       OR NEW.body IS DISTINCT FROM OLD.body
+       OR NEW.related_transfer_id IS DISTINCT FROM OLD.related_transfer_id
+       OR NEW.related_account_id IS DISTINCT FROM OLD.related_account_id
+       OR NEW.data IS DISTINCT FROM OLD.data
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'events rows are immutable except read_at' USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- emit_event: idempotent insert for the MONEY event types (the partial unique
+-- absorbs a re-emit; replays of the source move never reach post_transfer
+-- anyway). Returns the event id (new or existing). Same-txn safe.
+CREATE OR REPLACE FUNCTION emit_event(
+    p_user_id      UUID,
+    p_type         event_type,
+    p_title        TEXT,
+    p_body         TEXT,
+    p_transfer_id  UUID  DEFAULT NULL,
+    p_account_id   UUID  DEFAULT NULL,
+    p_data         JSONB DEFAULT '{}'
+) RETURNS UUID AS $$
+DECLARE v_id UUID;
+BEGIN
+    INSERT INTO events (user_id, type, title, body, related_transfer_id, related_account_id, data)
+    VALUES (p_user_id, p_type, COALESCE(p_title,''), COALESCE(p_body,''), p_transfer_id, p_account_id, COALESCE(p_data,'{}'::jsonb))
+    ON CONFLICT (user_id, type, related_transfer_id)
+        WHERE type IN ('transfer.posted', 'payment.incoming')
+        DO NOTHING
+    RETURNING id INTO v_id;
+    IF v_id IS NULL THEN
+        SELECT id INTO v_id FROM events
+         WHERE user_id = p_user_id AND type = p_type
+           AND related_transfer_id IS NOT DISTINCT FROM p_transfer_id
+         ORDER BY created_at DESC LIMIT 1;
+    END IF;
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mark_events_read: set read_at on the caller's unread events at/older than a
+-- cursor position, or all when p_cursor_ts is NULL. Returns the count touched.
+CREATE OR REPLACE FUNCTION mark_events_read(
+    p_user_id   UUID,
+    p_cursor_ts TIMESTAMPTZ DEFAULT NULL,
+    p_cursor_id UUID        DEFAULT NULL
+) RETURNS INT AS $$
+DECLARE v_n INT;
+BEGIN
+    UPDATE events SET read_at = now()
+     WHERE user_id = p_user_id AND read_at IS NULL
+       AND (p_cursor_ts IS NULL
+            OR (created_at, id) <= (p_cursor_ts, COALESCE(p_cursor_id, 'ffffffff-ffff-ffff-ffff-ffffffffffff')));
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+CREATE TRIGGER trg_events_immutable
+    BEFORE UPDATE OR DELETE ON events
+    FOR EACH ROW EXECUTE FUNCTION events_block_mutation();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- warning_acks  (fraud-warning evidence — the IPR/VOP liability pivot)
+-- "The customer was shown warning X about payment Y and chose to proceed."
+-- One row per shown/acknowledged warning, captured BEFORE the money moves and
+-- tied to the attempt by (user, debit account, counterparty, amount). Append-only
+-- (same discipline as events/ledger): liability evidence must not be rewritable.
+-- This is the input to any future reimbursement / consumer-standard-of-caution
+-- file (spec-banking-grade-hardening Rec 10; Rec 26 joins it to the audit feed).
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE warning_acks (
+    id                UUID PRIMARY KEY DEFAULT uuidv7(),
+    user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category          TEXT NOT NULL,                 -- cop_no_match | cop_close_match | cop_unable | guided_steer | high_value | other
+    reason_code       TEXT NOT NULL DEFAULT '',      -- machine token echoed from the warning (e.g. NO_MATCH)
+    acknowledged      BOOLEAN NOT NULL DEFAULT TRUE, -- FALSE = warning shown, customer backed out
+    debit_account_id  UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    counterparty_iban TEXT NOT NULL DEFAULT '',
+    amount_minor      BIGINT,
+    device            TEXT NOT NULL DEFAULT '',      -- client-supplied device/platform label
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (category IN ('cop_no_match','cop_close_match','cop_unable','guided_steer','high_value','other')),
+    CHECK (amount_minor IS NULL OR amount_minor > 0)
+);
+CREATE INDEX idx_warning_acks_user ON warning_acks (user_id, created_at DESC);
+
+-- +goose StatementBegin
+
+-- record_warning_ack: persist one piece of warning evidence for the caller. The
+-- debit account, when given, must belong to the caller (42501 -> 403) so evidence
+-- can't be planted on someone else's account.
+CREATE OR REPLACE FUNCTION record_warning_ack(
+    p_user_id           UUID,
+    p_category          TEXT,
+    p_reason_code       TEXT    DEFAULT '',
+    p_acknowledged      BOOLEAN DEFAULT TRUE,
+    p_debit_account_id  UUID    DEFAULT NULL,
+    p_counterparty_iban TEXT    DEFAULT '',
+    p_amount_minor      BIGINT  DEFAULT NULL,
+    p_device            TEXT    DEFAULT ''
+) RETURNS UUID AS $$
+DECLARE v_owner UUID; v_id UUID;
+BEGIN
+    IF p_debit_account_id IS NOT NULL THEN
+        SELECT user_id INTO v_owner FROM accounts WHERE id = p_debit_account_id;
+        IF v_owner IS NULL OR v_owner <> p_user_id THEN
+            RAISE EXCEPTION 'account does not belong to the caller' USING ERRCODE = '42501';
+        END IF;
+    END IF;
+    INSERT INTO warning_acks (user_id, category, reason_code, acknowledged,
+                              debit_account_id, counterparty_iban, amount_minor, device)
+    VALUES (p_user_id, p_category, COALESCE(p_reason_code,''), COALESCE(p_acknowledged, TRUE),
+            p_debit_account_id, COALESCE(p_counterparty_iban,''), p_amount_minor, COALESCE(p_device,''))
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- warning_acks_block_mutation: evidence is written once. No UPDATE, no DELETE
+-- (user-cascade is the sole removal path).
+CREATE OR REPLACE FUNCTION warning_acks_block_mutation() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'warning_acks is append-only (% blocked)', TG_OP
+        USING ERRCODE = 'restrict_violation';
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER trg_warning_acks_immutable
+    BEFORE UPDATE OR DELETE ON warning_acks
+    FOR EACH ROW EXECUTE FUNCTION warning_acks_block_mutation();
+
+-- +goose Down
+DROP TRIGGER IF EXISTS trg_warning_acks_immutable ON warning_acks;
+-- +goose StatementBegin
+DROP FUNCTION IF EXISTS warning_acks_block_mutation();
+DROP FUNCTION IF EXISTS record_warning_ack(UUID, TEXT, TEXT, BOOLEAN, UUID, TEXT, BIGINT, TEXT);
+-- +goose StatementEnd
+DROP TABLE IF EXISTS warning_acks;
+DROP TRIGGER IF EXISTS trg_events_immutable ON events;
+-- +goose StatementBegin
+DROP FUNCTION IF EXISTS mark_events_read(UUID, TIMESTAMPTZ, UUID);
+DROP FUNCTION IF EXISTS emit_event(UUID, event_type, TEXT, TEXT, UUID, UUID, JSONB);
+DROP FUNCTION IF EXISTS events_block_mutation();
 DROP FUNCTION IF EXISTS resolve_dispute(UUID, UUID, dispute_status, TEXT);
 DROP FUNCTION IF EXISTS raise_dispute(UUID, UUID, dispute_category, TEXT);
 DROP FUNCTION IF EXISTS suggest_transfer_destinations(UUID, UUID, BIGINT);
 DROP FUNCTION IF EXISTS delete_beneficiary(UUID, UUID);
 DROP FUNCTION IF EXISTS add_beneficiary(UUID, TEXT, VARCHAR);
-DROP FUNCTION IF EXISTS resolve_account_by_iban(VARCHAR);
+DROP FUNCTION IF EXISTS resolve_account_by_iban(VARCHAR, TEXT);
+DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS disputes;
 DROP INDEX IF EXISTS idx_guided_scenarios_active;
 DROP TABLE IF EXISTS guided_scenarios;

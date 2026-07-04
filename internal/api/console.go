@@ -19,6 +19,7 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/reconcile", s.consoleReconcile).Methods(http.MethodGet)
 	r.HandleFunc("/console/audit", s.consoleAudit).Methods(http.MethodGet)
 	r.HandleFunc("/console/approvals", s.consoleApprovals).Methods(http.MethodGet)
+	r.HandleFunc("/console/limit-requests", s.consoleLimitRequests).Methods(http.MethodGet)
 	r.HandleFunc("/console/disputes", s.consoleDisputes).Methods(http.MethodGet)
 	r.HandleFunc("/console/settings", s.consoleSettings).Methods(http.MethodGet)
 	r.HandleFunc("/console/settings", s.consoleUpdateSettings).Methods(http.MethodPost)
@@ -29,11 +30,16 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/transfers/results", s.consoleTransfersResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/audit/results", s.consoleAuditResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/approvals/results", s.consoleApprovalsResults).Methods(http.MethodGet)
+	r.HandleFunc("/console/limit-requests/results", s.consoleLimitRequestsResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/disputes/results", s.consoleDisputesResults).Methods(http.MethodGet)
 
 	// Maker-checker approve/reject (admin only; approver must differ from maker)
 	r.HandleFunc("/console/approvals/{id}/approve", s.consoleApprove).Methods(http.MethodPost)
 	r.HandleFunc("/console/approvals/{id}/reject", s.consoleReject).Methods(http.MethodPost)
+
+	// Customer limit-change requests (admin applies/rejects; never the requester)
+	r.HandleFunc("/console/limit-requests/{id}/approve", s.consoleLimitApprove).Methods(http.MethodPost)
+	r.HandleFunc("/console/limit-requests/{id}/reject", s.consoleLimitReject).Methods(http.MethodPost)
 
 	// Dispute resolve (operators/admins; state machine in resolve_dispute)
 	r.HandleFunc("/console/disputes/{id}/resolve", s.consoleResolveDispute).Methods(http.MethodPost)

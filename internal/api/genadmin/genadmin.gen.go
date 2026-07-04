@@ -253,6 +253,19 @@ type IdResponse struct {
 	Id *openapi_types.UUID `json:"id,omitempty"`
 }
 
+// LimitRequestItem defines model for LimitRequestItem.
+type LimitRequestItem struct {
+	AccountIban         *string             `json:"account_iban,omitempty"`
+	AccountId           *openapi_types.UUID `json:"account_id,omitempty"`
+	CurrentLimitMinor   *int64              `json:"current_limit_minor,omitempty"`
+	Reason              *string             `json:"reason,omitempty"`
+	RequestId           *openapi_types.UUID `json:"request_id,omitempty"`
+	RequestedAt         *time.Time          `json:"requested_at,omitempty"`
+	RequestedLimitMinor *int64              `json:"requested_limit_minor,omitempty"`
+	UserId              *openapi_types.UUID `json:"user_id,omitempty"`
+	Username            *string             `json:"username,omitempty"`
+}
+
 // MoneyMoveResponse defines model for MoneyMoveResponse.
 type MoneyMoveResponse struct {
 	RequiresApproval *bool               `json:"requires_approval,omitempty"`
@@ -320,26 +333,35 @@ type Transfer struct {
 	Currency        *string             `json:"currency,omitempty"`
 	DebitAccountId  *openapi_types.UUID `json:"debit_account_id,omitempty"`
 	Description     *string             `json:"description,omitempty"`
-	FailureReason   *string             `json:"failure_reason,omitempty"`
-	Id              *openapi_types.UUID `json:"id,omitempty"`
-	Kind            *string             `json:"kind,omitempty"`
-	PostedAt        *time.Time          `json:"posted_at,omitempty"`
-	RequestedAt     *time.Time          `json:"requested_at,omitempty"`
-	ReversesId      *openapi_types.UUID `json:"reverses_id,omitempty"`
-	Status          *string             `json:"status,omitempty"`
+
+	// EndToEndId Originator-supplied ISO 20022 EndToEndId, when given.
+	EndToEndId    *string             `json:"end_to_end_id,omitempty"`
+	FailureReason *string             `json:"failure_reason,omitempty"`
+	Id            *openapi_types.UUID `json:"id,omitempty"`
+	Kind          *string             `json:"kind,omitempty"`
+	PostedAt      *time.Time          `json:"posted_at,omitempty"`
+	RequestedAt   *time.Time          `json:"requested_at,omitempty"`
+	ReversesId    *openapi_types.UUID `json:"reverses_id,omitempty"`
+	Status        *string             `json:"status,omitempty"`
+
+	// Uetr Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays.
+	Uetr *openapi_types.UUID `json:"uetr,omitempty"`
 }
 
 // User defines model for User.
 type User struct {
-	CreatedAt   *time.Time          `json:"created_at,omitempty"`
-	Email       *string             `json:"email,omitempty"`
-	FullName    *string             `json:"full_name,omitempty"`
-	Id          *openapi_types.UUID `json:"id,omitempty"`
-	PhoneNumber *string             `json:"phone_number,omitempty"`
-	Role        *string             `json:"role,omitempty"`
-	Status      *string             `json:"status,omitempty"`
-	UpdatedAt   *time.Time          `json:"updated_at,omitempty"`
-	Username    *string             `json:"username,omitempty"`
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	Email     *string             `json:"email,omitempty"`
+	FullName  *string             `json:"full_name,omitempty"`
+	Id        *openapi_types.UUID `json:"id,omitempty"`
+
+	// OnboardingStatus Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'.
+	OnboardingStatus *string    `json:"onboarding_status,omitempty"`
+	PhoneNumber      *string    `json:"phone_number,omitempty"`
+	Role             *string    `json:"role,omitempty"`
+	Status           *string    `json:"status,omitempty"`
+	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
+	Username         *string    `json:"username,omitempty"`
 }
 
 // Cursor defines model for Cursor.
@@ -380,6 +402,12 @@ type ListDisputesParams struct {
 // ListDisputesParamsStatus defines parameters for ListDisputes.
 type ListDisputesParamsStatus string
 
+// ListLimitRequestsParams defines parameters for ListLimitRequests.
+type ListLimitRequestsParams struct {
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListPendingTransfersParams defines parameters for ListPendingTransfers.
 type ListPendingTransfersParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -405,6 +433,9 @@ type WithdrawJSONRequestBody = AmountRequest
 
 // ResolveDisputeJSONRequestBody defines body for ResolveDispute for application/json ContentType.
 type ResolveDisputeJSONRequestBody = ResolveDisputeRequest
+
+// RejectLimitRequestJSONRequestBody defines body for RejectLimitRequest for application/json ContentType.
+type RejectLimitRequestJSONRequestBody = ReasonRequest
 
 // ReverseTransferJSONRequestBody defines body for ReverseTransfer for application/json ContentType.
 type ReverseTransferJSONRequestBody = ReasonRequest
@@ -438,6 +469,15 @@ type ServerInterface interface {
 	// Manually run the hold-expiry sweep
 	// (POST /admin/expire-holds)
 	ExpireHolds(w http.ResponseWriter, r *http.Request)
+	// Pending transfer-limit-change requests (cursor-paginated)
+	// (GET /admin/limit-requests)
+	ListLimitRequests(w http.ResponseWriter, r *http.Request, params ListLimitRequestsParams)
+	// Approve a limit request (applies the new limit; 4-eyes — not your own)
+	// (POST /admin/limit-requests/{id}/approve)
+	ApproveLimitRequest(w http.ResponseWriter, r *http.Request, id Id)
+	// Reject a pending limit request
+	// (POST /admin/limit-requests/{id}/reject)
+	RejectLimitRequest(w http.ResponseWriter, r *http.Request, id Id)
 	// Run ledger invariant checks (empty issues = books balanced)
 	// (GET /admin/reconcile)
 	Reconcile(w http.ResponseWriter, r *http.Request)
@@ -737,6 +777,104 @@ func (siw *ServerInterfaceWrapper) ExpireHolds(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ExpireHolds(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLimitRequests operation middleware
+func (siw *ServerInterfaceWrapper) ListLimitRequests(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLimitRequestsParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLimitRequests(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveLimitRequest operation middleware
+func (siw *ServerInterfaceWrapper) ApproveLimitRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveLimitRequest(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RejectLimitRequest operation middleware
+func (siw *ServerInterfaceWrapper) RejectLimitRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RejectLimitRequest(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1094,6 +1232,12 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/admin/disputes/{id}/resolve", wrapper.ResolveDispute).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/admin/expire-holds", wrapper.ExpireHolds).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/admin/limit-requests", wrapper.ListLimitRequests).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/admin/limit-requests/{id}/approve", wrapper.ApproveLimitRequest).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/admin/limit-requests/{id}/reject", wrapper.RejectLimitRequest).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/admin/reconcile", wrapper.Reconcile).Methods(http.MethodGet)
 

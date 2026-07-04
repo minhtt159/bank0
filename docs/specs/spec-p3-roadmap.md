@@ -17,11 +17,7 @@
 >
 > | Spec | Covers | Relates to P3 § |
 > |------|--------|-----------------|
-> | [`spec-self-registration.md`](spec-self-registration.md) | public signup + email/phone verification + onboarding state | §1 (this is its v1) |
-> | [`spec-customer-account-opening.md`](spec-customer-account-opening.md) | `POST /me/accounts` + IBAN allocator + limit requests | §2 (pots reuse the allocator) |
-> | [`spec-step-up-mfa.md`](spec-step-up-mfa.md) | TOTP MFA + step-up | §3 (card controls), §6 (FX confirm) |
-> | [`spec-notifications-events.md`](spec-notifications-events.md) | `GET /me/events` feed | §5 (schedule ran/failed), §7 (request received) |
-> | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (idempotency HTTP contract, server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
+> | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
 >
 > **Already shipped** (no longer tracked here; as-built in the reference docs):
 > self-service profile (`PATCH /me`), password change (`POST /me/password`),
@@ -29,7 +25,15 @@
 > list-my-transfers (`GET /transfers`), disputes, guided-transfer v1
 > (`GET /transfers/suggestion` — the v2 "mule menu" in
 > [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) §5 supersedes it),
-> and the e2e harness (Go split-mode, Worker proxy, Playwright PWA). See
+> the e2e harness (Go split-mode, Worker proxy, Playwright PWA),
+> **self-registration v1** (`/auth/register` + contact verification + onboarding
+> state — §1's KYC continuation below remains open), **customer account opening +
+> limit requests** (`POST /me/accounts`, server-minted ISO IBANs, the operator
+> limit-request queue), the **`/me/events` notification feed** (phase 1, poll) +
+> **warning-ack evidence** + the **server-side CoP verdict**, **TOTP MFA +
+> step-up** (as-built: [`../06-client-api.md`](../06-client-api.md) §6), and the hardening
+> roadmap's Wave-0 idempotency items (ERRCODE→HTTP map, replay header, stale-key
+> sweep, `uetr`/`end_to_end_id`). See
 > [`../06-client-api.md`](../06-client-api.md) / [`../05-admin-ui.md`](../05-admin-ui.md).
 >
 > The gap backlog and BFF decision are in
@@ -72,11 +76,12 @@ months and/or a third-party integration / regulatory surface.
 state, no contact verification. (`users.status` gates login; nothing models "partway
 onboarded".)
 
-**Rationale.** Clients can't acquire users. The **v1 of this is already fully specced**
-([`spec-self-registration.md`](spec-self-registration.md)): public `POST /auth/register`,
-`onboarding_status` enum on `users`, `verification_challenges` table (hash-at-rest
-codes), email/phone verification, DB cooldown + Go IP rate-limit. This section is the
-**KYC continuation** beyond that v1.
+**Rationale.** The **v1 is SHIPPED** (as-built in
+[`../06-client-api.md`](../06-client-api.md) §1 + `00003_users.sql`): public
+`POST /auth/register`, `onboarding_status` enum on `users`,
+`verification_challenges` table (hash-at-rest codes), email/phone verification,
+DB cooldown + Go IP rate-limit. This section is the **KYC continuation** beyond
+that v1.
 
 **Extends existing domain** (users lifecycle) — *not* a new domain. KYC document
 capture is the one piece that is genuinely new and best **outsourced**.
@@ -88,7 +93,7 @@ capture is the one piece that is genuinely new and best **outsourced**.
 | `kyc_status` on `users` | enum `none / pending / in_review / approved / rejected`; advances independent of `onboarding_status` |
 | `kyc_verifications` table | `id uuidv7, user_id, provider TEXT, provider_ref TEXT, level SMALLINT, status, decided_at, detail JSONB` — one row per KYC attempt; **no raw documents stored** (provider holds them) |
 | `account_tier` / limits by tier | a `tier SMALLINT` on `users` or `accounts`; tiered `transfer_limit_minor` defaults; unverified users get a low cap |
-| Onboarding events | reuse the `me_events` feed ([`spec-notifications-events.md`](spec-notifications-events.md)) for "KYC approved" |
+| Onboarding events | reuse the SHIPPED `/me/events` feed (as-built: [`../06-client-api.md`](../06-client-api.md) §1) for "KYC approved" |
 
 ### Endpoints (sketch)
 
@@ -186,10 +191,11 @@ in a txn with its use; split migration), a `create_pot` + a scoped transfer wrap
 
 ### Sequencing
 
-After [`spec-customer-account-opening.md`](spec-customer-account-opening.md) lands —
-that spec already builds **server-side IBAN allocation and `open_customer_account`**,
-which pots reuse (minus the IBAN). Do pots **before** multi-currency: pots in EUR are
-trivial; pots across currencies inherit §6's hard problems.
+Customer account opening is **shipped** — **server-side IBAN allocation
+(`allocate_iban`, real ISO SE IBANs) and `open_customer_account`** live in
+`00004_accounts.sql`, and pots reuse them (minus the IBAN). Do pots **before**
+multi-currency: pots in EUR are trivial; pots across currencies inherit §6's
+hard problems.
 
 ---
 
@@ -403,7 +409,7 @@ bank0 doesn't have to build.
 **First among the "new feature" P3 items** — it's the best architecture fit, demos
 strongly, and is low-risk because the ledger/idempotency/worker are all reused. Depends
 on nothing but the existing transfer path. (Pairs naturally with the events feed in
-[`spec-notifications-events.md`](spec-notifications-events.md) for "your standing order
+the shipped `/me/events` feed for "your standing order
 ran / failed".)
 
 ---
@@ -543,7 +549,7 @@ through existing `transfer()`.
 Do **handles first** (small, reuses confirmation-of-payee, immediately useful for
 "pay @alice"), then **request-money**, then **bill-split** (just grouped requests) on
 top. Sits naturally after the P1 client gaps and pairs with the events feed in
-[`spec-notifications-events.md`](spec-notifications-events.md) ("@bob requested €20").
+the shipped `/me/events` feed ("@bob requested €20").
 Independent of pots/cards/FX.
 
 ---

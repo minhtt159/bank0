@@ -30,6 +30,15 @@ type AuthConfig struct {
 	JWTAudience        string        `mapstructure:"jwt_audience"`
 	RefreshTTL         time.Duration `mapstructure:"refresh_ttl"`          // idle window, slid on rotate
 	RefreshAbsoluteTTL time.Duration `mapstructure:"refresh_absolute_ttl"` // hard cap per family
+
+	// TOTP MFA + step-up (spec-step-up-mfa). Empty mfa_enc_key = the MFA
+	// endpoints refuse with 503 (never store a plaintext seed).
+	StepUpLimitMinor int64         `mapstructure:"step_up_limit_minor"` // transfers >= this need a fresh otp
+	StepUpMaxAge     time.Duration `mapstructure:"step_up_max_age"`     // how fresh auth_time must be
+	MFAEncKey        string        `mapstructure:"mfa_enc_key"`         // base64 32-byte AEAD key (APP_AUTH_MFA_ENC_KEY)
+	MFATokenTTL      time.Duration `mapstructure:"mfa_token_ttl"`       // pending-login token TTL
+	MFALockMaxFail   int           `mapstructure:"mfa_lock_max_fail"`   // failed attempts before lockout
+	MFALockWindow    time.Duration `mapstructure:"mfa_lock_window"`     // trailing window for the count
 }
 
 type AppConfig struct {
@@ -133,6 +142,12 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("auth.jwt_audience", "bank0-client")
 	v.SetDefault("auth.refresh_ttl", "720h")           // 30d idle
 	v.SetDefault("auth.refresh_absolute_ttl", "2160h") // 90d hard cap
+	v.SetDefault("auth.step_up_limit_minor", 100000) // €1,000.00
+	v.SetDefault("auth.step_up_max_age", "5m")
+	v.SetDefault("auth.mfa_enc_key", "") // empty => MFA endpoints 503 with a loud warn
+	v.SetDefault("auth.mfa_token_ttl", "5m")
+	v.SetDefault("auth.mfa_lock_max_fail", 5)
+	v.SetDefault("auth.mfa_lock_window", "15m")
 
 	v.AddConfigPath(path)
 	v.SetConfigName("config")

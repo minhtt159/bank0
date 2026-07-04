@@ -62,7 +62,7 @@ SELECT reverse_transfer(
 
 -- name: GetTransfer :one
 SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status, kind,
-       reverses_id, description, failure_reason, requested_at, posted_at, created_at, updated_at
+       reverses_id, description, uetr, end_to_end_id, failure_reason, requested_at, posted_at, created_at, updated_at
 FROM transfers WHERE id = sqlc.arg(id)::uuid;
 
 -- name: ListPendingTransfers :many

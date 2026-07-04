@@ -5,7 +5,7 @@
 > **fronted by a Cloudflare proxy** (see [`04-deployment.md`](04-deployment.md)).
 > The browser never calls this host directly — the PWA's Worker proxies `/api/*`
 > here ([`07-client-web-app.md`](07-client-web-app.md)). MFA and step-up auth are
-> a designed extension (§6).
+> shipped (§6).
 
 ---
 
@@ -23,6 +23,12 @@ JWT subject.
 | Auth | POST | `/auth/refresh` | refresh token | rotate → new access + refresh pair |
 | Auth | POST | `/auth/logout` | refresh token | revoke one refresh token |
 | Auth | POST | `/auth/logout-all` | bearer | revoke every refresh token for the caller |
+| Onboarding | POST | `/auth/register` | public | self-registration → locked `pending_verification` customer; `Idempotency-Key` required (replay returns the original body + `Idempotency-Replayed: true`); code dispatched out-of-band |
+| Onboarding | POST | `/auth/verify-contact` | public | consume the 6-digit code via the opaque `verify_token`; unlocks login (401 wrong/expired, 422 after 5 attempts, 404 unknown token) |
+| Onboarding | POST | `/auth/resend-code` | public | re-dispatch (60s DB cooldown → 429; unknown token → silent 202) |
+| MFA | POST | `/auth/mfa/enroll` | bearer | begin TOTP enrollment → otpauth URI + base32 secret (shown once); 409 if already enabled |
+| MFA | POST | `/auth/mfa/confirm` | bearer | first live code → MFA on + 10 one-time recovery codes (shown once, stored hashed) |
+| MFA | POST | `/auth/mfa/verify` | public | exchange the login-issued `mfa_token` + TOTP/recovery code → real token pair (`amr=["pwd","otp"]`); lockout → 429 |
 | Profile | GET | `/me` | bearer | the caller's own `User` (no password hash) |
 | Profile | PATCH | `/me` | bearer | self-service edit of name/email/phone (password/status/role can't be set here) |
 | Profile | POST | `/me/password` | bearer | change password (verify current); revokes other refresh families, spares the current session |
@@ -30,26 +36,35 @@ JWT subject.
 | Sessions | DELETE | `/me/sessions/{family_id}` | bearer | selective sign-out of one device (idempotent; 404 if not the caller's) |
 | Accounts | GET | `/users/{id}/accounts` | bearer | own accounts only (404 otherwise) |
 | Accounts | GET | `/accounts/{id}` | bearer | account + available balance |
+| Accounts | POST | `/me/accounts` | bearer | open a new account for the caller — server-minted ISO SE IBAN, default limit + per-user cap from `bank_settings`; `Idempotency-Key` required; cap → 409 `account_limit` |
+| Accounts | POST | `/accounts/{id}/limit-requests` | bearer | ask for a transfer-limit change on an OWNED account (403 otherwise); lands in the operator maker-checker queue — never self-applied |
 | Statement | GET | `/accounts/{id}/ledger?cursor&cursor_id&limit&from&to&direction&q&min_minor&max_minor` | bearer | composite-keyset cursor (`cursor`+`cursor_id`, fixes same-timestamp tie-skip), running balance, counterparty; server-side filters (date range, direction, free text, amount range) |
 | Beneficiaries | GET | `/beneficiaries` | bearer | saved payees (fuzzy search is client-side) |
-| Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
+| Beneficiaries | GET | `/beneficiaries/resolve?iban=&name=` | bearer | confirmation-of-payee: masked owner name + the **server-side CoP/VOP verdict** (`match_result`, `reason_code`, `suggested_name` on close_match only, `gate`) — clients render, never decide |
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
 | Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
-| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required |
+| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true` |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |
+| Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
+| Notifications | GET | `/me/events/unread` | bearer | unread count (badge) |
+| Notifications | POST | `/me/events/read` | bearer | mark read up to a cursor (or all); idempotent |
+| Fraud evidence | POST | `/me/warning-acks` | bearer | "warned and proceeded / backed out" liability evidence (CoP/VOP pivot); append-only, debit account must be the caller's |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" — party-only, one open per (transfer, caller) |
 | Disputes | GET | `/disputes` · `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id → 404) |
 | Health | GET | `/health` | public | DB-blind liveness/version |
 | Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
 | Metrics | GET | `/metrics` | public | RED counters |
 
-Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`,
-`/readyz`, `/metrics`, `/docs`, `/openapi.yaml`) are registered on the parent
-router ahead of the JWT-guarded subrouter, so they aren't shadowed. `logout-all`
-needs the subject, so it stays behind `requireJWT`.
+Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`,
+`/auth/verify-contact`, `/auth/resend-code`, `/health`, `/readyz`, `/metrics`,
+`/docs`, `/openapi.yaml`) are registered on the parent router ahead of the
+JWT-guarded subrouter, so they aren't shadowed. `logout-all` needs the subject,
+so it stays behind `requireJWT`. The three onboarding routes share the strict
+per-IP login limiter; every `Transfer` carries the rail-ready `uetr`
+(bank-minted UUIDv4) and optional originator `end_to_end_id`.
 
 ---
 
@@ -157,12 +172,12 @@ behalf). One customer can never read or debit another's account.
 
 ---
 
-## 6. MFA & step-up (designed extension)
+## 6. MFA & step-up (SHIPPED)
 
 The MFA/step-up increment hardens login and money moves. Same DB-first discipline;
-the access-token path (`requireJWT`) barely changes. Its tables land in a new
-migration after the baseline; the full design is in
-[`specs/spec-step-up-mfa.md`](specs/spec-step-up-mfa.md).
+the access-token path (`requireJWT`) barely changes. As-built: tables + the
+mfa_* PL/pgSQL live in `00003_users.sql`; handlers in
+`internal/api/handlers_mfa.go`; the planning spec is retired.
 
 ### 6.1 TOTP MFA
 
@@ -171,17 +186,24 @@ migration after the baseline; the full design is in
   (throttle/lockout). "MFA enabled" = a confirmed credential exists.
 - Endpoints: `/auth/mfa/enroll` (→ otpauth URI), `/auth/mfa/confirm` (first code →
   recovery codes), `/auth/mfa/verify` (exchange a short-lived `mfa_token` + code →
-  tokens). The HMAC-SHA1 TOTP math lives in Go (`pquerna/otp`); the **seed is
-  encrypted at rest** with an app-side AEAD key (`auth.mfa_enc_key`).
+  tokens; public — the token, audience `bank0-mfa`, is the credential; shares the
+  login rate limiter). The HMAC-SHA1 TOTP math lives in Go (`pquerna/otp`,
+  SHA1/6/30s, ±1-step drift); the **seed is encrypted at rest** (AES-256-GCM,
+  `auth.mfa_enc_key`; unset key ⇒ MFA endpoints 503).
 - `LoginResponse` gains `mfa_required` + `mfa_token`; when required, **no** access
   token is issued until `/auth/mfa/verify`.
 
 ### 6.2 Step-up
 
-The access JWT carries `amr` (`["pwd","otp"]`) and `auth_time`. A transfer ≥
-`auth.step_up_limit_minor` with a stale `auth_time` returns **403
-`step_up_required`**; the client re-runs `/auth/mfa/verify` and retries with the
-**same `Idempotency-Key`**. Customer control, complementing the operator-side
+The access JWT carries `amr` (`["pwd","otp"]`) and `auth_time`. For an
+MFA-enabled caller, a transfer ≥ `auth.step_up_limit_minor` **or to a new payee**
+(not among their saved beneficiaries) without a fresh `otp` factor
+(`auth.step_up_max_age`, default 5m) returns **403 `step_up_required`**; the
+client re-runs `/auth/mfa/verify` and retries with the **same `Idempotency-Key`**
+(the gate runs before the key is claimed, so the retry posts exactly once).
+Freshness is per-verify — deliberately NOT preserved across `/auth/refresh`.
+Users without MFA are not gated (they could never satisfy it); limits +
+maker-checker still apply. Customer control, complementing the operator-side
 maker-checker.
 
 ### 6.3 Toward OIDC / asymmetric keys
@@ -221,6 +243,14 @@ are unchanged, so the ledger and ownership logic don't move.
   tables/functions — schema in
   [`00003_users.sql`](../db/migrations/00003_users.sql) and
   [`00008_features.sql`](../db/migrations/00008_features.sql).
-- **Open backlog** (onboarding/KYC, self-registration, notifications, statement
+- **Onboarding v1 is shipped**: public self-registration + contact verification
+  (§1 Onboarding rows; schema/functions in
+  [`00003_users.sql`](../db/migrations/00003_users.sql)) and customer
+  self-service account opening / limit requests (§1 Accounts rows). A
+  self-registered user is `locked` + `pending_verification` until a code is
+  verified; codes and the `verify_token` are stored hashed; failed attempts are
+  persisted from Go in a second statement (a `RAISE` rolls back the function's
+  own writes).
+- **Open backlog** (full KYC/document capture, notifications, statement
   export, multi-currency) lives in [`specs/`](specs/) — see
   [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).

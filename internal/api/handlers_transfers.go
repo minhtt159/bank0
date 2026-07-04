@@ -88,10 +88,11 @@ func (s *Server) ListMyTransfers(w http.ResponseWriter, r *http.Request, params 
 }
 
 type createTransferReq struct {
-	DebitAccount  string `json:"debit_account"`
-	CreditAccount string `json:"credit_account"`
-	AmountMinor   int64  `json:"amount_minor"`
-	Description   string `json:"description"`
+	DebitAccount  string  `json:"debit_account"`
+	CreditAccount string  `json:"credit_account"`
+	AmountMinor   int64   `json:"amount_minor"`
+	Description   string  `json:"description"`
+	EndToEndID    *string `json:"end_to_end_id,omitempty"` // optional ISO 20022 originator reference
 }
 
 // CreateTransfer implements genclient.ServerInterface. Auto-posts by default;
@@ -116,13 +117,44 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
 		return
 	}
+	// Step-up gate (SCA): an MFA-enabled caller moving high value OR paying a
+	// new payee must present a token with a FRESH otp factor. Runs BEFORE
+	// client_transfer, so a rejected step-up writes nothing and never claims the
+	// idempotency key — the client re-verifies and retries with the SAME key.
+	// Users without MFA are not gated (they could never satisfy it); the
+	// per-transfer limit + maker-checker still apply server-side.
+	if claims, ok := clientClaimsFrom(r.Context()); ok && !claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) {
+		highValue := s.cfg.Auth.StepUpLimitMinor > 0 && req.AmountMinor >= s.cfg.Auth.StepUpLimitMinor
+		gated := highValue
+		if !gated {
+			known, err := s.pg.Queries.IsKnownPayee(r.Context(), sqlc.IsKnownPayeeParams{Owner: subj, Credit: credit})
+			if err != nil {
+				s.mapDBError(w, r, err)
+				return
+			}
+			gated = !known
+		}
+		if gated {
+			if enabled, err := s.pg.MFAEnabled(r.Context(), subj); err != nil {
+				s.mapDBError(w, r, err)
+				return
+			} else if enabled {
+				writeError(w, http.StatusForbidden, "step_up_required",
+					"this transfer requires re-verification (high value or new payee)")
+				return
+			}
+		}
+	}
 	// Debit-account ownership is enforced inside client_transfer (one round trip, in
 	// the DB) — non-ownership raises 42501 -> 403. No separate probe.
 	res, err := s.pg.ClientTransfer(r.Context(), subj, params.IdempotencyKey, debit, credit,
-		req.AmountMinor, req.Description)
+		req.AmountMinor, req.Description, req.EndToEndID)
 	if err != nil {
 		s.mapDBError(w, r, err)
 		return
+	}
+	if res.WasReplay {
+		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	writeJSON(w, http.StatusOK, res)
 }

@@ -3,10 +3,15 @@
 > How the fraudbank clients (web, Android, iOS) integrate with bank0's client API.
 > They run against the API as-is — auth (login / refresh / rotation), accounts,
 > ledger, beneficiaries, transfers, disputes, and the guided-transfer suggestion
-> all work with no bank0-specific backend changes. This doc describes the
-> integration surface; the forward-looking backlog (self-registration, account
-> opening, notifications, step-up MFA, banking-grade hardening) lives in
-> [`docs/specs/`](specs/) — see [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).
+> all work with no bank0-specific backend changes. **Now also shipped:**
+> self-registration + contact verification (`/auth/register`,
+> `/auth/verify-contact`, `/auth/resend-code`), customer account opening
+> (`POST /me/accounts`, server-minted IBAN), transfer-limit requests
+> (`POST /accounts/{id}/limit-requests` + the operator queue), and rail-ready
+> transfer ids (`uetr`, `end_to_end_id`) — see [`06-client-api.md`](06-client-api.md) §1.
+> The remaining backlog (notifications, step-up MFA, the rest of the
+> banking-grade hardening roadmap) lives in [`docs/specs/`](specs/) — see
+> [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).
 > Companion on the client side: fraudbank `docs/02-api-contract.md`.
 
 ---

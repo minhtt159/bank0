@@ -85,6 +85,28 @@ func (q *Queries) GetBeneficiary(ctx context.Context, arg GetBeneficiaryParams) 
 	return i, err
 }
 
+const isKnownPayee = `-- name: IsKnownPayee :one
+SELECT EXISTS (
+    SELECT 1 FROM beneficiaries
+     WHERE owner_user_id = $1::uuid
+       AND credit_account_id = $2::uuid
+) AS known
+`
+
+type IsKnownPayeeParams struct {
+	Owner  uuid.UUID `json:"owner"`
+	Credit uuid.UUID `json:"credit"`
+}
+
+// Step-up "new payee" check: the credit account is one of the caller's saved
+// beneficiaries. (Prior-posted-transfer relaxation is a possible follow-up.)
+func (q *Queries) IsKnownPayee(ctx context.Context, arg IsKnownPayeeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isKnownPayee, arg.Owner, arg.Credit)
+	var known bool
+	err := row.Scan(&known)
+	return known, err
+}
+
 const listBeneficiaries = `-- name: ListBeneficiaries :many
 SELECT id, label, credit_account_id, iban, owner_name_masked, created_at
 FROM beneficiaries

@@ -13,7 +13,9 @@
 -- +goose StatementBegin
 
 -- expire_holds: batch sweep. Active holds past expiry -> expired; their pending
--- transfers -> failed. Run by the app's ticker (or pg_cron in production).
+-- transfers -> failed. Returns the number of HOLDS expired (counting the
+-- transfers UPDATE would undercount when a hold's transfer already left
+-- 'pending'). Run by the app's ticker (or pg_cron in production).
 CREATE OR REPLACE FUNCTION expire_holds() RETURNS INTEGER AS $$
 DECLARE v_n INTEGER;
 BEGIN
@@ -21,19 +23,26 @@ BEGIN
         UPDATE holds SET status = 'expired', released_at = now()
         WHERE status = 'active' AND expires_at < now()
         RETURNING transfer_id
+    ), failed AS (
+        UPDATE transfers SET status = 'failed', failure_reason = 'hold expired'
+        WHERE id IN (SELECT transfer_id FROM expired) AND status = 'pending'
     )
-    UPDATE transfers SET status = 'failed', failure_reason = 'hold expired'
-    WHERE id IN (SELECT transfer_id FROM expired) AND status = 'pending';
-    GET DIAGNOSTICS v_n = ROW_COUNT;
+    SELECT count(*) INTO v_n FROM expired;
     RETURN v_n;
 END;
 $$ LANGUAGE plpgsql;
 
--- cleanup_idempotency_keys: drop completed keys past their TTL.
+-- cleanup_idempotency_keys: drop completed keys past their TTL, plus any
+-- committed 'in_progress' orphan older than 15 minutes. Today every claim
+-- completes (or rolls back) inside one transaction, so a visible in_progress
+-- orphan is unreachable — the reap is a guard for future multi-statement flows
+-- (e.g. step-up MFA claiming the key before the challenge round-trip).
 CREATE OR REPLACE FUNCTION cleanup_idempotency_keys() RETURNS INTEGER AS $$
 DECLARE v_n INTEGER;
 BEGIN
-    DELETE FROM idempotency_keys WHERE status = 'completed' AND expires_at < now();
+    DELETE FROM idempotency_keys
+     WHERE (status = 'completed'   AND expires_at < now())
+        OR (status = 'in_progress' AND created_at < now() - INTERVAL '15 minutes');
     GET DIAGNOSTICS v_n = ROW_COUNT;
     RETURN v_n;
 END;

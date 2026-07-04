@@ -61,6 +61,13 @@ $$;
 CREATE TYPE user_role       AS ENUM ('customer', 'operator', 'admin', 'auditor');
 CREATE TYPE user_status     AS ENUM ('active', 'locked', 'closed');
 
+-- Onboarding lifecycle for self-registered users, distinct from user_status
+-- (which gates login). Admin-created users are born 'active'; only public
+-- self-registration walks pending_verification -> verified.
+CREATE TYPE onboarding_status    AS ENUM ('pending_verification', 'verified', 'active', 'rejected');
+CREATE TYPE verification_channel AS ENUM ('email', 'phone');
+CREATE TYPE verification_status  AS ENUM ('pending', 'verified', 'expired', 'canceled');
+
 CREATE TYPE account_kind    AS ENUM ('customer', 'system');
 CREATE TYPE account_status  AS ENUM ('active', 'frozen', 'closed');
 
@@ -76,9 +83,21 @@ CREATE TYPE ik_status       AS ENUM ('in_progress', 'completed');
 CREATE TYPE dispute_status   AS ENUM ('open', 'under_review', 'resolved', 'rejected');
 CREATE TYPE dispute_category AS ENUM ('unrecognised', 'fraud', 'wrong_amount', 'duplicate', 'other');
 
+-- Notification-feed taxonomy (per-user events projection; table in the features file).
+CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.new', 'dispute.updated');
+
+-- MFA credential kinds (tables in the users file). webauthn is the reserved
+-- passkey path for future dynamic linking.
+CREATE TYPE mfa_kind AS ENUM ('totp', 'webauthn');
+
 -- +goose Down
+DROP TYPE IF EXISTS mfa_kind;
+DROP TYPE IF EXISTS event_type;
 DROP TYPE IF EXISTS dispute_category;
 DROP TYPE IF EXISTS dispute_status;
+DROP TYPE IF EXISTS verification_status;
+DROP TYPE IF EXISTS verification_channel;
+DROP TYPE IF EXISTS onboarding_status;
 DROP TYPE IF EXISTS ik_status;
 DROP TYPE IF EXISTS hold_status;
 DROP TYPE IF EXISTS entry_direction;

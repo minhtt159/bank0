@@ -29,6 +29,13 @@ CREATE TABLE transfers (
     reverses_id       UUID REFERENCES transfers(id),
     description       TEXT NOT NULL DEFAULT '',
     idempotency_key   TEXT,                                              -- soft ref to idempotency_keys.key
+    -- Rail-ready identifiers (ISO 20022 / SWIFT). uetr is the bank-minted UUIDv4
+    -- end-to-end trace id (stable across replays — minted once at insert);
+    -- end_to_end_id is the optional ORIGINATOR-supplied reference (pain.001
+    -- EndToEndId, <= 35 chars of the ISO restricted set). Neither affects money
+    -- movement; they exist so the contract already speaks rail before a rail exists.
+    uetr              UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    end_to_end_id     VARCHAR(35),
     failure_reason    TEXT,
     requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     posted_at         TIMESTAMPTZ,
@@ -37,6 +44,7 @@ CREATE TABLE transfers (
 
     CHECK (amount_minor > 0),
     CHECK (debit_account_id <> credit_account_id),
+    CHECK (end_to_end_id IS NULL OR end_to_end_id ~ '^[A-Za-z0-9+?/:().,'' -]{1,35}$'),
     -- posted_at is set once a transfer reaches the ledger; a reversed transfer
     -- was posted, so it keeps its posted_at.
     CHECK ((posted_at IS NOT NULL) = (status IN ('posted', 'reversed'))),
@@ -164,13 +172,15 @@ CREATE OR REPLACE FUNCTION request_transfer(
     p_amount_minor    BIGINT,
     p_description     TEXT          DEFAULT '',
     p_kind            transfer_kind DEFAULT 'transfer',
-    p_hold_ttl        INTERVAL      DEFAULT INTERVAL '15 minutes'
+    p_hold_ttl        INTERVAL      DEFAULT INTERVAL '15 minutes',
+    p_end_to_end_id   VARCHAR(35)   DEFAULT NULL
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
 DECLARE
     v_hash      TEXT := encode(digest(
         coalesce(p_debit_account::text,'') || '|' ||
         coalesce(p_credit_account::text,'') || '|' ||
-        p_amount_minor::text || '|' || p_kind::text, 'sha256'), 'hex');
+        p_amount_minor::text || '|' || p_kind::text || '|' ||
+        coalesce(p_end_to_end_id,''), 'sha256'), 'hex');
     v_existing  idempotency_keys%ROWTYPE;
     v_debit     accounts%ROWTYPE;
     v_credit    accounts%ROWTYPE;
@@ -235,11 +245,13 @@ BEGIN
         END IF;
     END IF;
 
-    -- (c) Create the pending transfer + the hold.
+    -- (c) Create the pending transfer + the hold. uetr is minted by the column
+    -- default (bank-minted, stable across replays since replays never reach here).
     INSERT INTO transfers (debit_account_id, credit_account_id, amount_minor,
-                           currency, status, kind, description, idempotency_key)
+                           currency, status, kind, description, idempotency_key, end_to_end_id)
     VALUES (p_debit_account, p_credit_account, p_amount_minor,
-            v_debit.currency, 'pending', p_kind, p_description, p_idempotency_key)
+            v_debit.currency, 'pending', p_kind, p_description, p_idempotency_key,
+            NULLIF(p_end_to_end_id, ''))
     RETURNING id INTO v_id;
 
     INSERT INTO holds (account_id, transfer_id, amount_minor, status, expires_at)
@@ -260,7 +272,10 @@ $$ LANGUAGE plpgsql;
 -- trigger does the rest), captures the hold. Idempotent on an already-posted row.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION post_transfer(p_transfer_id UUID) RETURNS transfer_status AS $$
-DECLARE v_t transfers%ROWTYPE;
+DECLARE
+    v_t      transfers%ROWTYPE;
+    v_debit  accounts%ROWTYPE;
+    v_credit accounts%ROWTYPE;
 BEGIN
     SELECT * INTO v_t FROM transfers WHERE id = p_transfer_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
@@ -279,6 +294,33 @@ BEGIN
      WHERE transfer_id = p_transfer_id AND status = 'active';
 
     UPDATE transfers SET status = 'posted', posted_at = now() WHERE id = p_transfer_id;
+
+    -- Notify both HUMAN parties in the same txn (events, 00008): the payer gets
+    -- transfer.posted, the payee payment.incoming. System/GL sides (NULL user_id)
+    -- emit nothing. Replays never reach here (idempotent no-op above), and the
+    -- partial unique index absorbs any double emission. Counterparty is labelled
+    -- by IBAN/system code only — never a name (no new disclosure).
+    SELECT * INTO v_debit  FROM accounts WHERE id = v_t.debit_account_id;
+    SELECT * INTO v_credit FROM accounts WHERE id = v_t.credit_account_id;
+    IF v_debit.user_id IS NOT NULL THEN
+        PERFORM emit_event(v_debit.user_id, 'transfer.posted',
+            'Payment sent',
+            'Your payment to ' || COALESCE(v_credit.iban, v_credit.system_code, 'account') || ' completed.',
+            p_transfer_id, v_t.debit_account_id,
+            jsonb_build_object('amount_minor', v_t.amount_minor, 'currency', v_t.currency,
+                               'counterparty_iban', COALESCE(v_credit.iban, v_credit.system_code, ''),
+                               'kind', v_t.kind));
+    END IF;
+    IF v_credit.user_id IS NOT NULL THEN
+        PERFORM emit_event(v_credit.user_id, 'payment.incoming',
+            'Payment received',
+            'You received a payment from ' || COALESCE(v_debit.iban, v_debit.system_code, 'account') || '.',
+            p_transfer_id, v_t.credit_account_id,
+            jsonb_build_object('amount_minor', v_t.amount_minor, 'currency', v_t.currency,
+                               'counterparty_iban', COALESCE(v_debit.iban, v_debit.system_code, ''),
+                               'kind', v_t.kind));
+    END IF;
+
     RETURN 'posted';
 END;
 $$ LANGUAGE plpgsql;
@@ -334,13 +376,15 @@ CREATE OR REPLACE FUNCTION transfer(
     p_credit_account  UUID,
     p_amount_minor    BIGINT,
     p_description     TEXT          DEFAULT '',
-    p_kind            transfer_kind DEFAULT 'transfer'
+    p_kind            transfer_kind DEFAULT 'transfer',
+    p_end_to_end_id   VARCHAR(35)   DEFAULT NULL
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
 DECLARE v_id UUID; v_status transfer_status; v_replay BOOLEAN;
 BEGIN
     SELECT r.transfer_id, r.status, r.was_replay INTO v_id, v_status, v_replay
     FROM request_transfer(p_idempotency_key, p_debit_account, p_credit_account,
-                          p_amount_minor, p_description, p_kind) r;
+                          p_amount_minor, p_description, p_kind,
+                          INTERVAL '15 minutes', p_end_to_end_id) r;
 
     IF NOT v_replay AND v_status = 'pending' THEN
         v_status := post_transfer(v_id);
@@ -482,14 +526,15 @@ CREATE OR REPLACE FUNCTION client_transfer(
     p_debit_account   UUID,
     p_credit_account  UUID,
     p_amount_minor    BIGINT,
-    p_description     TEXT DEFAULT ''
+    p_description     TEXT        DEFAULT '',
+    p_end_to_end_id   VARCHAR(35) DEFAULT NULL
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
 BEGIN
     PERFORM assert_caller_owns(p_caller_subject, p_debit_account);
     RETURN QUERY
         SELECT t.transfer_id, t.status, t.was_replay
         FROM transfer(p_idempotency_key, p_debit_account, p_credit_account,
-                      p_amount_minor, p_description, 'transfer') t;
+                      p_amount_minor, p_description, 'transfer', p_end_to_end_id) t;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -530,16 +575,16 @@ $$ LANGUAGE plpgsql;
 -- +goose StatementBegin
 DROP FUNCTION IF EXISTS client_cancel_transfer(UUID, UUID, TEXT);
 DROP FUNCTION IF EXISTS client_post_transfer(UUID, UUID);
-DROP FUNCTION IF EXISTS client_transfer(UUID, TEXT, UUID, UUID, BIGINT, TEXT);
+DROP FUNCTION IF EXISTS client_transfer(UUID, TEXT, UUID, UUID, BIGINT, TEXT, VARCHAR);
 DROP FUNCTION IF EXISTS assert_caller_owns(UUID, UUID);
 DROP FUNCTION IF EXISTS withdraw(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS reverse_transfer(UUID, TEXT, TEXT);
-DROP FUNCTION IF EXISTS transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind);
+DROP FUNCTION IF EXISTS transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, VARCHAR);
 DROP FUNCTION IF EXISTS fail_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS post_transfer(UUID);
-DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL);
+DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR);
 -- +goose StatementEnd
 DROP TRIGGER IF EXISTS trg_ledger_immutable     ON ledger_entries;
 DROP TRIGGER IF EXISTS trg_ledger_apply_balance ON ledger_entries;

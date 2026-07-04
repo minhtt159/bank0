@@ -96,6 +96,122 @@ paths:
         "204": { description: logged out everywhere }
         "401": { $ref: "#/components/responses/Error" }
 
+  /auth/register:
+    post:
+      operationId: register
+      tags: [client]
+      summary: Public self-registration. Creates a locked, pending-verification customer. Idempotent.
+      security: []
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: registered; a verification code has been dispatched out-of-band
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "409": { $ref: "#/components/responses/Error" }   # username/email/phone taken
+        "422": { $ref: "#/components/responses/Error" }   # weak password / bad input
+        "429": { $ref: "#/components/responses/Error" }   # rate-limited
+
+  /auth/verify-contact:
+    post:
+      operationId: verifyContact
+      tags: [client]
+      summary: Consume a verification code for an email or phone channel
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerifyContactRequest" }
+      responses:
+        "200":
+          description: verified; the user may now log in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerifyContactResponse" }
+        "401": { $ref: "#/components/responses/Error" }   # wrong/expired code
+        "404": { $ref: "#/components/responses/Error" }   # no such challenge
+        "422": { $ref: "#/components/responses/Error" }   # too many attempts
+        "429": { $ref: "#/components/responses/Error" }
+
+  /auth/mfa/enroll:
+    post:
+      operationId: mfaEnroll
+      tags: [client]
+      summary: Begin TOTP enrollment — returns an otpauth:// URI + base32 secret
+      responses:
+        "200":
+          description: enrollment started (unconfirmed credential created)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaEnrollResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # already has a confirmed credential
+        "503": { $ref: "#/components/responses/Error" }   # mfa_enc_key not configured
+
+  /auth/mfa/confirm:
+    post:
+      operationId: mfaConfirm
+      tags: [client]
+      summary: Confirm TOTP enrollment with the first live code; returns one-time recovery codes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaConfirmRequest" }
+      responses:
+        "200":
+          description: MFA enabled; recovery codes (shown ONCE)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MfaRecoveryCodes" }
+        "401": { $ref: "#/components/responses/Error" }   # bad code
+        "404": { $ref: "#/components/responses/Error" }   # no pending enrollment
+        "429": { $ref: "#/components/responses/Error" }   # throttled/locked
+        "503": { $ref: "#/components/responses/Error" }
+
+  /auth/mfa/verify:
+    post:
+      operationId: mfaVerify
+      tags: [client]
+      summary: Exchange an mfa_token + TOTP/recovery code for an access + refresh pair
+      security: []                                         # the mfa_token IS the credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MfaVerifyRequest" }
+      responses:
+        "200":
+          description: verified; access + refresh issued (amr includes "otp")
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Error" }   # bad/expired mfa_token or code
+        "429": { $ref: "#/components/responses/Error" }   # throttled/locked
+        "503": { $ref: "#/components/responses/Error" }
+
+  /auth/resend-code:
+    post:
+      operationId: resendCode
+      tags: [client]
+      summary: Re-dispatch a verification code (cooldown-throttled)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResendCodeRequest" }
+      responses:
+        "202": { description: dispatched (or silently a no-op if no pending challenge) }
+        "429": { $ref: "#/components/responses/Error" }
+
   /me:
     get:
       operationId: getMe
@@ -169,6 +285,145 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }   # family not owned by caller
 
+  /me/accounts:
+    post:
+      operationId: openMyAccount
+      tags: [client]
+      summary: Open a new account for the caller (server allocates the IBAN). Idempotent.
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenAccountRequest" }
+      responses:
+        "201":
+          description: opened
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # per-user account cap reached
+        "422": { $ref: "#/components/responses/Error" }
+
+  /accounts/{id}/limit-requests:
+    post:
+      operationId: requestLimitChange
+      tags: [client]
+      summary: Request a transfer-limit change on an owned account (an operator approves)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LimitRequest" }
+      responses:
+        "201":
+          description: pending approval
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LimitRequestResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # not the caller's account
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }   # negative / unchanged limit
+
+  /me/events:
+    get:
+      operationId: listMyEvents
+      tags: [client]
+      summary: The caller's notification feed (money + security events), newest first
+      description: >-
+        Per-user append-only feed, written in the same DB transaction as its cause
+        (a posted transfer, an incoming payment, a new sign-in, a dispute update).
+        Bare array (always [], never null; end of data = a short page). Paginate
+        with `cursor` (last row's created_at) + `cursor_id` (last row's id).
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: cursor_id
+          in: query
+          required: false
+          description: id of the last row seen; with `cursor` forms the composite keyset tie-break.
+          schema: { type: string, format: uuid }
+        - { $ref: "#/components/parameters/Limit" }
+        - name: type
+          in: query
+          required: false
+          description: Filter to one event type.
+          schema:
+            type: string
+            enum: [transfer.posted, payment.incoming, device.new, dispute.updated]
+        - name: unread_only
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Event" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/events/unread:
+    get:
+      operationId: countUnreadEvents
+      tags: [client]
+      summary: Unread-event count for the caller (notification badge)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UnreadCount" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/events/read:
+    post:
+      operationId: markEventsRead
+      tags: [client]
+      summary: Mark events read up to and including a cursor (or all when omitted)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MarkEventsReadRequest" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MarkedResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /me/warning-acks:
+    post:
+      operationId: recordWarningAck
+      tags: [client]
+      summary: Record fraud-warning evidence ("warned and chose to proceed / backed out")
+      description: >-
+        The client posts one row per warning interaction, BEFORE submitting the
+        transfer. This is the CoP/VOP liability evidence — append-only, tied to the
+        caller; the referenced debit account must be theirs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WarningAckRequest" }
+      responses:
+        "201":
+          description: recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # debit account not the caller's
+        "422": { $ref: "#/components/responses/Error" }
+
   /beneficiaries:
     get:
       operationId: listBeneficiaries
@@ -205,11 +460,21 @@ paths:
     get:
       operationId: resolveBeneficiary
       tags: [client]
-      summary: Confirmation of payee — resolve an IBAN to a masked owner name
+      summary: Confirmation of payee — masked owner name + the server-side match verdict
+      description: >-
+        Pass `name` (what the customer typed) to get the CoP/VOP verdict computed
+        server-side; all clients then gate identically by construction. Without
+        `name` the verdict is `unable`. On a close_match the actual registered
+        name is returned (suggested_name) so a typo can be corrected.
       parameters:
         - name: iban
           in: query
           required: true
+          schema: { type: string }
+        - name: name
+          in: query
+          required: false
+          description: The payee name as typed by the customer.
           schema: { type: string }
       responses:
         "200":
@@ -495,6 +760,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TransferResult" }
+        "403": { $ref: "#/components/responses/Error" }   # step_up_required — re-verify at /auth/mfa/verify, retry with the SAME Idempotency-Key
         "422": { $ref: "#/components/responses/Error" }
 
   /transfers/pending:
@@ -726,6 +992,59 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ExpireHoldsResponse" }
 
+  /admin/limit-requests:
+    get:
+      operationId: listLimitRequests
+      tags: [admin]
+      summary: Pending transfer-limit-change requests (cursor-paginated)
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LimitRequestItem" }
+
+  /admin/limit-requests/{id}/approve:
+    post:
+      operationId: approveLimitRequest
+      tags: [admin]
+      summary: Approve a limit request (applies the new limit; 4-eyes — not your own)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: applied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "403": { $ref: "#/components/responses/Error" }   # own request / not operator
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # already handled
+
+  /admin/limit-requests/{id}/reject:
+    post:
+      operationId: rejectLimitRequest
+      tags: [admin]
+      summary: Reject a pending limit request
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonRequest" }
+      responses:
+        "200":
+          description: rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     # client surface (api.bank0.hnimn.art): JWT bearer from POST /auth/login
@@ -803,10 +1122,12 @@ components:
       type: object
       properties:
         user_id: { type: string, format: uuid }
-        token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'." }
+        token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'. Absent when mfa_required." }
         token_type: { type: string, example: Bearer }
         expires_at: { type: string, format: date-time }
-        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair." }
+        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required." }
+        mfa_required: { type: boolean, description: "When true, no tokens are issued; exchange mfa_token + code at /auth/mfa/verify." }
+        mfa_token: { type: string, description: "Short-lived (5m) pending-login token. Present only when mfa_required." }
     RefreshRequest:
       type: object
       required: [refresh_token]
@@ -836,8 +1157,139 @@ components:
         phone_number: { type: string }
         role: { type: string }
         status: { type: string }
+        onboarding_status: { type: string, description: "Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      required: [username, password, full_name]
+      properties:
+        username:     { type: string }
+        password:     { type: string, minLength: 12, maxLength: 256 }
+        full_name:    { type: string }
+        email:        { type: string }
+        phone_number: { type: string }
+      description: At least one of email/phone_number is required (enforced server-side).
+    RegisterResponse:
+      type: object
+      properties:
+        user_id:           { type: string, format: uuid }
+        onboarding_status: { type: string, example: pending_verification }
+        verify_channel:    { type: string, enum: [email, phone], description: "channel a code was sent to" }
+        verify_token:      { type: string, description: "Opaque handle for /auth/verify-contact and /auth/resend-code. The code itself is delivered out-of-band, never in a response." }
+    VerifyContactRequest:
+      type: object
+      required: [verify_token, code]
+      properties:
+        verify_token: { type: string }
+        code:         { type: string, description: "6-digit numeric code" }
+    VerifyContactResponse:
+      type: object
+      properties:
+        user_id:           { type: string, format: uuid }
+        onboarding_status: { type: string }
+        channel:           { type: string, enum: [email, phone] }
+        login_ready:       { type: boolean, description: "true once the user may POST /auth/login" }
+    ResendCodeRequest:
+      type: object
+      required: [verify_token]
+      properties:
+        verify_token: { type: string }
+    OpenAccountRequest:
+      type: object
+      properties:
+        kind: { type: string, enum: [customer], default: customer, description: "reserved for future kinds (savings); only 'customer' is accepted today" }
+    Event:
+      type: object
+      required: [id, type, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [transfer.posted, payment.incoming, device.new, dispute.updated]
+        title: { type: string, description: "Short human-readable summary (server-driven copy)." }
+        body: { type: string }
+        related_transfer_id: { type: string, format: uuid }
+        related_account_id: { type: string, format: uuid }
+        data:
+          type: object
+          additionalProperties: true
+          description: "Type-specific payload (amount_minor, counterparty_iban, user_agent, …)."
+        read_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    UnreadCount:
+      type: object
+      properties:
+        unread_count: { type: integer }
+    MarkEventsReadRequest:
+      type: object
+      description: Omit the cursor to mark everything read.
+      properties:
+        up_to_cursor:    { type: string, format: date-time, description: "created_at of the newest event to mark (inclusive)." }
+        up_to_cursor_id: { type: string, format: uuid }
+    MarkedResponse:
+      type: object
+      properties:
+        marked: { type: integer }
+    MfaEnrollResponse:
+      type: object
+      properties:
+        secret: { type: string, description: "base32 TOTP secret (also embedded in the URI). Shown ONCE." }
+        otpauth_uri: { type: string, description: "otpauth://totp/bank0:<username>?secret=...&issuer=bank0 (SHA1/6/30s)" }
+    MfaConfirmRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "6-digit TOTP from the authenticator app" }
+    MfaRecoveryCodes:
+      type: object
+      properties:
+        recovery_codes:
+          type: array
+          items: { type: string }
+          description: "One-time recovery codes; shown ONCE, stored hashed server-side."
+    MfaVerifyRequest:
+      type: object
+      required: [mfa_token, code]
+      properties:
+        mfa_token: { type: string }
+        code: { type: string, description: "6-digit TOTP, or a recovery code" }
+    WarningAckRequest:
+      type: object
+      required: [category]
+      properties:
+        category:          { type: string, enum: [cop_no_match, cop_close_match, cop_unable, guided_steer, high_value, other] }
+        reason_code:       { type: string, description: "Machine token echoed from the warning (e.g. NO_MATCH)." }
+        acknowledged:      { type: boolean, default: true, description: "true = customer proceeded past the warning; false = shown but backed out." }
+        debit_account_id:  { type: string, format: uuid }
+        counterparty_iban: { type: string }
+        amount_minor:      { type: integer, format: int64 }
+        device:            { type: string, description: "Client platform/device label." }
+    LimitRequest:
+      type: object
+      required: [transfer_limit_minor]
+      properties:
+        transfer_limit_minor: { type: integer, format: int64, minimum: 0 }
+        reason:               { type: string }
+    LimitRequestResponse:
+      type: object
+      properties:
+        request_id:            { type: string, format: uuid }
+        account_id:            { type: string, format: uuid }
+        requested_limit_minor: { type: integer, format: int64 }
+        status:                { type: string, example: pending }
+    LimitRequestItem:
+      type: object
+      properties:
+        request_id:            { type: string, format: uuid }
+        account_id:            { type: string, format: uuid }
+        account_iban:          { type: string }
+        user_id:               { type: string, format: uuid }
+        username:              { type: string }
+        current_limit_minor:   { type: integer, format: int64 }
+        requested_limit_minor: { type: integer, format: int64 }
+        reason:                { type: string }
+        requested_at:          { type: string, format: date-time }
     UpdateMeRequest:
       type: object
       # All optional; absent field => unchanged (COALESCE in update_user_info).
@@ -990,6 +1442,13 @@ components:
         credit_account: { type: string, format: uuid }
         amount_minor: { type: integer, format: int64 }
         description: { type: string }
+        end_to_end_id:
+          type: string
+          maxLength: 35
+          description: >-
+            Optional originator-supplied reference (ISO 20022 pain.001 EndToEndId,
+            <= 35 chars of the ISO restricted charset). Echoed on the Transfer;
+            part of the idempotency fingerprint.
     TransferResult:
       type: object
       properties:
@@ -1008,6 +1467,8 @@ components:
         kind: { type: string }
         reverses_id: { type: string, format: uuid }
         description: { type: string }
+        uetr: { type: string, format: uuid, description: "Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays." }
+        end_to_end_id: { type: string, description: "Originator-supplied ISO 20022 EndToEndId, when given." }
         failure_reason: { type: string }
         requested_at: { type: string, format: date-time }
         posted_at: { type: string, format: date-time }
@@ -1051,6 +1512,12 @@ components:
         account_id: { type: string, format: uuid }
         iban: { type: string }
         owner_name_masked: { type: string }
+        match_result: { type: string, enum: [match, close_match, no_match, unable], description: "Server-side CoP/VOP verdict against the supplied name." }
+        reason_code: { type: string, description: "Stable machine token (MATCH/CLOSE_MATCH/NO_MATCH/NAME_NOT_SUPPLIED)." }
+        suggested_name: { type: string, description: "The registered name — present ONLY on close_match (the CoP-mandated disclosure)." }
+        account_type: { type: string, enum: [personal, business] }
+        gate: { type: string, enum: [ok, awaiting_acknowledgement, blocked], description: "Server-driven continue gate; clients must not compute their own." }
+        checked_at: { type: string, format: date-time }
     LedgerEntry:
       type: object
       properties:

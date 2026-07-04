@@ -91,12 +91,12 @@ func runMaintenanceOnce(cfg config.Config, log *slog.Logger) {
 	defer pg.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	expired, cleaned, sessions, reconcileIssues, ran, err := pg.RunMaintenance(ctx)
+	expired, cleaned, sessions, verifExpired, reconcileIssues, ran, err := pg.RunMaintenance(ctx)
 	if err != nil {
 		log.Error("maintenance", "err", err)
 		os.Exit(1)
 	}
-	log.Info("maintenance", "ran", ran, "holds_expired", expired, "keys_cleaned", cleaned, "sessions_cleaned", sessions, "reconcile_issues", reconcileIssues)
+	log.Info("maintenance", "ran", ran, "holds_expired", expired, "keys_cleaned", cleaned, "sessions_cleaned", sessions, "verifications_expired", verifExpired, "reconcile_issues", reconcileIssues)
 	if reconcileIssues > 0 {
 		log.Warn("reconcile drift detected — the ledger/cache invariants do not hold", "issues", reconcileIssues)
 	}
@@ -167,13 +167,13 @@ func runMaintenanceLoop(ctx context.Context, log *slog.Logger, pg *db.Postgres, 
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			expired, cleaned, sessions, reconcileIssues, ran, err := pg.RunMaintenance(ctx)
+			expired, cleaned, sessions, verifExpired, reconcileIssues, ran, err := pg.RunMaintenance(ctx)
 			if err != nil {
 				log.Warn("maintenance", "err", err)
 				continue
 			}
-			if ran && (expired > 0 || cleaned > 0 || sessions > 0) {
-				log.Info("maintenance", "holds_expired", expired, "keys_cleaned", cleaned, "sessions_cleaned", sessions)
+			if ran && (expired > 0 || cleaned > 0 || sessions > 0 || verifExpired > 0) {
+				log.Info("maintenance", "holds_expired", expired, "keys_cleaned", cleaned, "sessions_cleaned", sessions, "verifications_expired", verifExpired)
 			}
 			if ran && reconcileIssues > 0 {
 				// The correctness oracle found drift — page on this in prod.

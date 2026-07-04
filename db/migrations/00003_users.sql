@@ -1,8 +1,9 @@
 -- +goose Up
 -- ─────────────────────────────────────────────────────────────────────────────
--- USER MODEL — identity, credentials, sessions & refresh tokens
+-- USER MODEL — identity, credentials, sessions, refresh tokens & onboarding
 -- The people and their logins: the users table, operator (portal) cookie sessions,
--- and client (api) refresh-token families — plus every function that creates a
+-- client (api) refresh-token families, and public self-registration (onboarding
+-- state + contact-verification challenges) — plus every function that creates a
 -- user, checks credentials, changes a password, and mints / validates / rotates /
 -- revokes sessions and refresh tokens. Password & PIN hashing is bcrypt via
 -- pgcrypto (crypt / gen_salt('bf',10)); password POLICY is DB-first (rule 1). The
@@ -14,16 +15,22 @@
 -- users
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE users (
-    id            UUID PRIMARY KEY DEFAULT uuidv7(),
-    username      CITEXT NOT NULL UNIQUE,
-    password_hash TEXT   NOT NULL,
-    full_name     TEXT   NOT NULL,
-    email         CITEXT UNIQUE,
-    phone_number  VARCHAR(16) UNIQUE,
-    role          user_role   NOT NULL DEFAULT 'customer',
-    status        user_status NOT NULL DEFAULT 'active',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id                UUID PRIMARY KEY DEFAULT uuidv7(),
+    username          CITEXT NOT NULL UNIQUE,
+    password_hash     TEXT   NOT NULL,
+    full_name         TEXT   NOT NULL,
+    email             CITEXT UNIQUE,
+    phone_number      VARCHAR(16) UNIQUE,
+    role              user_role   NOT NULL DEFAULT 'customer',
+    status            user_status NOT NULL DEFAULT 'active',
+    -- Onboarding lifecycle (public self-registration), distinct from status which
+    -- gates login. DEFAULT 'active' keeps every staff-created user unaffected;
+    -- only register_user sets 'pending_verification'.
+    onboarding_status onboarding_status NOT NULL DEFAULT 'active',
+    email_verified_at TIMESTAMPTZ,
+    phone_verified_at TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (email IS NULL OR email ~* '^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
 );
 
@@ -76,6 +83,35 @@ CREATE TABLE refresh_tokens (
 CREATE INDEX idx_refresh_user    ON refresh_tokens (user_id);
 CREATE INDEX idx_refresh_family  ON refresh_tokens (family_id);
 CREATE INDEX idx_refresh_expires ON refresh_tokens (expires_at);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- verification_challenges  (self-registration contact verification)
+-- One row per (user, channel) verification. Same hash-at-rest discipline as
+-- refresh_tokens: only sha256 of the opaque verify_token and of the 6-digit code
+-- are stored. A resend REFRESHES the pending row in place (same token, new code,
+-- attempts reset) so the client's handle keeps working and UNIQUE(token_hash)
+-- holds. TTL-swept by expire_verification_challenges() on the maintenance tick.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE verification_challenges (
+    id            UUID PRIMARY KEY DEFAULT uuidv7(),
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel       verification_channel NOT NULL,
+    destination   TEXT NOT NULL,                 -- email/phone snapshot at send time
+    token_hash    TEXT NOT NULL UNIQUE,          -- sha256(verify_token)
+    code_hash     TEXT NOT NULL,                 -- sha256(code)
+    status        verification_status NOT NULL DEFAULT 'pending',
+    attempts      SMALLINT NOT NULL DEFAULT 0,
+    max_attempts  SMALLINT NOT NULL DEFAULT 5,
+    last_sent_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '15 minutes',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    verified_at   TIMESTAMPTZ
+);
+
+-- at most one PENDING challenge per (user, channel)
+CREATE UNIQUE INDEX uq_verif_pending ON verification_challenges (user_id, channel)
+    WHERE status = 'pending';
+CREATE INDEX idx_verif_expiry ON verification_challenges (expires_at) WHERE status = 'pending';
 
 -- +goose StatementBegin
 
@@ -191,6 +227,395 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Self-registration & contact verification
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- create_verification_challenge: issue (or re-issue) the pending challenge for a
+-- (user, channel). A resend REFRESHES the pending row in place — same token, new
+-- code, attempts reset. Enforces the resend cooldown (53400 -> 429). The Go layer
+-- supplies the already-hashed token+code (plaintext never reaches the DB here).
+CREATE OR REPLACE FUNCTION create_verification_challenge(
+    p_user_id     UUID,
+    p_channel     verification_channel,
+    p_destination TEXT,
+    p_token_hash  TEXT,
+    p_code_hash   TEXT,
+    p_cooldown    INTERVAL DEFAULT INTERVAL '60 seconds',
+    p_ttl         INTERVAL DEFAULT INTERVAL '15 minutes'
+) RETURNS UUID AS $$
+DECLARE v_prev verification_challenges%ROWTYPE; v_id UUID;
+BEGIN
+    SELECT * INTO v_prev FROM verification_challenges
+     WHERE user_id = p_user_id AND channel = p_channel AND status = 'pending'
+     FOR UPDATE;
+    IF FOUND THEN
+        IF v_prev.last_sent_at > now() - p_cooldown THEN
+            RAISE EXCEPTION 'verification code recently sent; wait before retrying'
+                USING ERRCODE = '53400';   -- configuration_limit_exceeded -> 429
+        END IF;
+        UPDATE verification_challenges
+           SET code_hash = p_code_hash, token_hash = p_token_hash,
+               destination = p_destination, attempts = 0,
+               last_sent_at = now(), expires_at = now() + p_ttl
+         WHERE id = v_prev.id;
+        RETURN v_prev.id;
+    END IF;
+
+    INSERT INTO verification_challenges
+        (user_id, channel, destination, token_hash, code_hash, expires_at)
+    VALUES (p_user_id, p_channel, p_destination, p_token_hash, p_code_hash,
+            now() + p_ttl)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- register_user: the whole public signup in ONE atomic call, gated by an
+-- idempotency key exactly like request_transfer (claim-key + side effects +
+-- stored response in one transaction; a concurrent duplicate blocks on the
+-- in-flight insert). Creates the locked, pending-verification customer plus its
+-- first verification challenge, and completes the key with the response JSONB.
+-- A replayed key returns the stored response (was_replay = TRUE) so a mobile
+-- retry never double-registers.
+--
+-- The response JSONB deliberately carries the PLAINTEXT verify_token: replay
+-- must return the same token or the retrying client could never verify. The
+-- token is single-use and dead after the challenge TTL (15 min), while the key
+-- row lives 7 days — an acceptable, bounded exception to hash-at-rest.
+--
+-- Password policy matches change_password (>= 12 chars) — DB-first, one place.
+CREATE OR REPLACE FUNCTION register_user(
+    p_idempotency_key TEXT,
+    p_username        CITEXT,
+    p_password        TEXT,
+    p_full_name       TEXT,
+    p_email           CITEXT,
+    p_phone_number    VARCHAR(16),
+    p_channel         verification_channel,
+    p_destination     TEXT,
+    p_token_hash      TEXT,
+    p_code_hash       TEXT,
+    p_verify_token    TEXT
+) RETURNS TABLE (user_id UUID, was_replay BOOLEAN, response JSONB) AS $$
+DECLARE
+    -- scalar vars, not idempotency_keys%ROWTYPE: %ROWTYPE resolves at CREATE
+    -- time and the table lives in 00005 (this function only runs after both exist).
+    v_hash      TEXT;
+    v_ex_scope  TEXT;
+    v_ex_hash   TEXT;
+    v_ex_status ik_status;
+    v_ex_resp   JSONB;
+    v_id        UUID;
+    v_resp      JSONB;
+BEGIN
+    IF p_idempotency_key IS NULL OR p_idempotency_key = '' THEN
+        RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = 'check_violation';
+    END IF;
+    v_hash := encode(digest(
+        COALESCE(p_username::text,'') || '|' || COALESCE(p_email::text,'') || '|' ||
+        COALESCE(p_phone_number,'')   || '|' || COALESCE(p_full_name,''), 'sha256'), 'hex');
+
+    INSERT INTO idempotency_keys (key, scope, request_hash, status)
+    VALUES (p_idempotency_key, 'register', v_hash, 'in_progress')
+    ON CONFLICT (key) DO NOTHING;
+
+    IF NOT FOUND THEN
+        SELECT ik.scope, ik.request_hash, ik.status, ik.response
+          INTO v_ex_scope, v_ex_hash, v_ex_status, v_ex_resp
+          FROM idempotency_keys ik WHERE ik.key = p_idempotency_key;
+        IF v_ex_scope <> 'register' OR v_ex_hash <> v_hash THEN
+            RAISE EXCEPTION 'idempotency key reused with different parameters'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF v_ex_status = 'in_progress' THEN
+            RAISE EXCEPTION 'request with this idempotency key is in progress'
+                USING ERRCODE = 'object_in_use';   -- -> 409
+        END IF;
+        RETURN QUERY SELECT (v_ex_resp->>'user_id')::uuid, TRUE, v_ex_resp;
+        RETURN;
+    END IF;
+
+    -- fresh key: validate + create
+    IF p_email IS NULL AND p_phone_number IS NULL THEN
+        RAISE EXCEPTION 'at least one of email or phone is required'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF length(p_password) < 12 THEN
+        RAISE EXCEPTION 'password must be at least 12 characters'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    INSERT INTO users (username, password_hash, full_name, email, phone_number,
+                       role, status, onboarding_status)
+    VALUES (p_username, crypt(p_password, gen_salt('bf', 10)), p_full_name,
+            NULLIF(p_email, ''), NULLIF(p_phone_number, ''),
+            'customer', 'locked', 'pending_verification')
+    RETURNING id INTO v_id;
+
+    PERFORM create_verification_challenge(v_id, p_channel, p_destination,
+                                          p_token_hash, p_code_hash);
+
+    v_resp := jsonb_build_object(
+        'user_id', v_id,
+        'onboarding_status', 'pending_verification',
+        'verify_channel', p_channel,
+        'verify_token', p_verify_token);
+    UPDATE idempotency_keys SET status = 'completed', response = v_resp
+     WHERE key = p_idempotency_key;
+
+    RETURN QUERY SELECT v_id, FALSE, v_resp;
+END;
+$$ LANGUAGE plpgsql;
+
+-- verify_contact: consume a code against a pending challenge (looked up by token
+-- hash). On success marks the challenge verified, stamps users.email/phone_
+-- verified_at, promotes onboarding_status pending_verification -> verified and
+-- status locked -> active (login becomes possible).
+--
+-- IMPORTANT (the RAISE-rolls-back trap, see CLAUDE.md): this function only READS
+-- the attempt counter. A RAISE would roll back any increment written here, so the
+-- failed-attempt increment is persisted by record_failed_verification(), which
+-- the API calls in a SEPARATE statement after catching the 28000 — the same
+-- pattern as rotate_refresh_token + revoke_refresh_family.
+--   * unknown token          -> P0001  (-> 404)
+--   * consumed/expired       -> 28000  (-> 401)
+--   * attempts exhausted     -> 23514  (-> 422)
+--   * wrong code             -> 28000  (-> 401; Go then records the attempt)
+CREATE OR REPLACE FUNCTION verify_contact(
+    p_token_hash TEXT,
+    p_code_hash  TEXT
+) RETURNS TABLE (user_id UUID, onboarding onboarding_status, channel verification_channel, login_ready BOOLEAN) AS $$
+DECLARE v_c verification_challenges%ROWTYPE;
+BEGIN
+    SELECT * INTO v_c FROM verification_challenges
+     WHERE token_hash = p_token_hash FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'no verification challenge found'; END IF;  -- P0001 -> 404
+
+    IF v_c.status <> 'pending' OR v_c.expires_at < now() THEN
+        RAISE EXCEPTION 'verification code expired or already used'
+            USING ERRCODE = '28000';   -- -> 401 (the TTL sweep flips the row)
+    END IF;
+
+    IF v_c.attempts >= v_c.max_attempts THEN
+        RAISE EXCEPTION 'too many verification attempts' USING ERRCODE = 'check_violation'; -- -> 422
+    END IF;
+
+    IF v_c.code_hash <> p_code_hash THEN
+        RAISE EXCEPTION 'invalid verification code' USING ERRCODE = '28000'; -- -> 401
+    END IF;
+
+    -- success
+    UPDATE verification_challenges SET status = 'verified', verified_at = now()
+     WHERE id = v_c.id;
+
+    UPDATE users u SET
+        email_verified_at = CASE WHEN v_c.channel = 'email' THEN now() ELSE u.email_verified_at END,
+        phone_verified_at = CASE WHEN v_c.channel = 'phone' THEN now() ELSE u.phone_verified_at END,
+        onboarding_status = CASE WHEN u.onboarding_status = 'pending_verification'
+                                 THEN 'verified'::onboarding_status ELSE u.onboarding_status END,
+        status            = CASE WHEN u.status = 'locked' THEN 'active'::user_status ELSE u.status END
+     WHERE u.id = v_c.user_id;
+
+    RETURN QUERY
+        SELECT v_c.user_id,
+               (SELECT u.onboarding_status FROM users u WHERE u.id = v_c.user_id),
+               v_c.channel,
+               TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- record_failed_verification: persist one failed attempt against a pending
+-- challenge. Called by the API in a separate statement after verify_contact
+-- raises 'invalid verification code' (28000), because that RAISE rolled back
+-- anything verify_contact itself wrote. Best-effort: unknown/consumed token is a
+-- no-op (returns NULL).
+CREATE OR REPLACE FUNCTION record_failed_verification(p_token_hash TEXT)
+RETURNS SMALLINT AS $$
+    UPDATE verification_challenges
+       SET attempts = attempts + 1
+     WHERE token_hash = p_token_hash AND status = 'pending'
+    RETURNING attempts;
+$$ LANGUAGE sql;
+
+-- expire_verification_challenges: sweep stale pending challenges. Runs in the
+-- maintenance tick alongside expire_holds.
+CREATE OR REPLACE FUNCTION expire_verification_challenges() RETURNS INTEGER AS $$
+DECLARE v_n INTEGER;
+BEGIN
+    UPDATE verification_challenges SET status = 'expired'
+     WHERE status = 'pending' AND expires_at < now();
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- TOTP MFA (spec-step-up-mfa): credentials, one-time recovery codes, and the
+-- attempt log that drives the DB-side throttle/lockout. The TOTP seed is
+-- encrypted at rest by the Go layer (AES-256-GCM, auth.mfa_enc_key) — the DB
+-- stores only ciphertext. Recovery codes are sha256-only, like refresh tokens.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- +goose StatementEnd
+CREATE TABLE mfa_credentials (
+    id            UUID PRIMARY KEY DEFAULT uuidv7(),
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind          mfa_kind NOT NULL DEFAULT 'totp',
+    secret_enc    BYTEA NOT NULL,                 -- AEAD ciphertext of the base32 seed
+    confirmed_at  TIMESTAMPTZ,                    -- NULL until /auth/mfa/confirm succeeds
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- at most one CONFIRMED totp credential per user
+CREATE UNIQUE INDEX uq_mfa_confirmed_totp
+    ON mfa_credentials (user_id) WHERE kind = 'totp' AND confirmed_at IS NOT NULL;
+CREATE INDEX idx_mfa_user ON mfa_credentials (user_id);
+
+CREATE TABLE mfa_recovery_codes (
+    id          UUID PRIMARY KEY DEFAULT uuidv7(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash   TEXT NOT NULL,                    -- sha256(code) hex; never plaintext
+    used_at     TIMESTAMPTZ,                      -- burn marker (one-time)
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_recovery_hash ON mfa_recovery_codes (user_id, code_hash);
+
+CREATE TABLE mfa_attempts (
+    id           UUID PRIMARY KEY DEFAULT uuidv7(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    succeeded    BOOLEAN NOT NULL,
+    ip           TEXT,
+    attempted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_mfa_attempts_user_time ON mfa_attempts (user_id, attempted_at DESC);
+-- +goose StatementBegin
+
+-- mfa_enabled: a confirmed totp credential exists.
+CREATE OR REPLACE FUNCTION mfa_enabled(p_user_id UUID) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM mfa_credentials
+         WHERE user_id = p_user_id AND kind = 'totp' AND confirmed_at IS NOT NULL);
+$$;
+
+-- mfa_begin_enroll: create (or replace) an UNCONFIRMED totp credential. Refuses
+-- (23505 -> 409) if a confirmed credential already exists; a prior unconfirmed
+-- one is replaced (re-enroll before confirm is fine).
+CREATE OR REPLACE FUNCTION mfa_begin_enroll(p_user_id UUID, p_secret_enc BYTEA)
+RETURNS UUID AS $$
+DECLARE v_id UUID;
+BEGIN
+    IF mfa_enabled(p_user_id) THEN
+        RAISE EXCEPTION 'mfa already enabled' USING ERRCODE = 'unique_violation'; -- 23505 -> 409
+    END IF;
+    DELETE FROM mfa_credentials
+     WHERE user_id = p_user_id AND kind = 'totp' AND confirmed_at IS NULL;
+    INSERT INTO mfa_credentials (user_id, kind, secret_enc)
+    VALUES (p_user_id, 'totp', p_secret_enc)
+    RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mfa_pending_secret: the encrypted seed of the unconfirmed credential.
+CREATE OR REPLACE FUNCTION mfa_pending_secret(p_user_id UUID)
+RETURNS BYTEA AS $$
+DECLARE v BYTEA;
+BEGIN
+    SELECT secret_enc INTO v FROM mfa_credentials
+     WHERE user_id = p_user_id AND kind = 'totp' AND confirmed_at IS NULL
+     ORDER BY created_at DESC LIMIT 1;
+    IF NOT FOUND THEN RAISE EXCEPTION 'no pending mfa enrollment found'; END IF; -- P0001 -> 404
+    RETURN v;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mfa_confirm: mark the pending credential confirmed AND replace the recovery
+-- codes, atomically. The Go layer verified the live TOTP first; this commits.
+CREATE OR REPLACE FUNCTION mfa_confirm(p_user_id UUID, p_recovery_hashes TEXT[])
+RETURNS VOID AS $$
+DECLARE v_cred UUID; h TEXT;
+BEGIN
+    SELECT id INTO v_cred FROM mfa_credentials
+     WHERE user_id = p_user_id AND kind = 'totp' AND confirmed_at IS NULL
+     ORDER BY created_at DESC LIMIT 1 FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'no pending mfa enrollment found'; END IF;
+
+    UPDATE mfa_credentials SET confirmed_at = now() WHERE id = v_cred;
+    DELETE FROM mfa_recovery_codes WHERE user_id = p_user_id;     -- fresh set on (re)confirm
+    FOREACH h IN ARRAY p_recovery_hashes LOOP
+        INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES (p_user_id, h);
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mfa_confirmed_secret: the encrypted seed of the CONFIRMED credential.
+CREATE OR REPLACE FUNCTION mfa_confirmed_secret(p_user_id UUID)
+RETURNS BYTEA AS $$
+DECLARE v BYTEA;
+BEGIN
+    SELECT secret_enc INTO v FROM mfa_credentials
+     WHERE user_id = p_user_id AND kind = 'totp' AND confirmed_at IS NOT NULL;
+    IF NOT FOUND THEN RAISE EXCEPTION 'mfa credential not found'; END IF;      -- P0001 -> 404
+    RETURN v;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mfa_burn_recovery_code: consume a recovery code (one-time). TRUE iff a live
+-- code matched and was burned.
+CREATE OR REPLACE FUNCTION mfa_burn_recovery_code(p_user_id UUID, p_code_hash TEXT)
+RETURNS BOOLEAN AS $$
+DECLARE v_id UUID;
+BEGIN
+    SELECT id INTO v_id FROM mfa_recovery_codes
+     WHERE user_id = p_user_id AND code_hash = p_code_hash AND used_at IS NULL
+     FOR UPDATE;
+    IF NOT FOUND THEN RETURN FALSE; END IF;
+    UPDATE mfa_recovery_codes SET used_at = now() WHERE id = v_id;
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mfa_record_attempt: append an attempt; returns whether the user is now LOCKED.
+-- Lockout policy lives here (DB-first): >= p_max_fail fails in the trailing window.
+CREATE OR REPLACE FUNCTION mfa_record_attempt(
+    p_user_id        UUID,
+    p_succeeded      BOOLEAN,
+    p_ip             TEXT,
+    p_max_fail       INT,
+    p_window_seconds INT
+) RETURNS BOOLEAN AS $$
+DECLARE v_fails INT;
+BEGIN
+    INSERT INTO mfa_attempts (user_id, succeeded, ip) VALUES (p_user_id, p_succeeded, p_ip);
+    SELECT count(*) INTO v_fails
+      FROM mfa_attempts
+     WHERE user_id = p_user_id
+       AND succeeded = FALSE
+       AND attempted_at > now() - make_interval(secs => p_window_seconds);
+    RETURN v_fails >= p_max_fail;
+END;
+$$ LANGUAGE plpgsql;
+
+-- mfa_is_locked: read-only lock check (short-circuit BEFORE verifying).
+CREATE OR REPLACE FUNCTION mfa_is_locked(p_user_id UUID, p_max_fail INT, p_window_seconds INT)
+RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
+    SELECT count(*) >= p_max_fail
+      FROM mfa_attempts
+     WHERE user_id = p_user_id AND succeeded = FALSE
+       AND attempted_at > now() - make_interval(secs => p_window_seconds);
+$$;
+
+-- cleanup_mfa_attempts: drop attempt rows older than a day (maintenance sweep).
+CREATE OR REPLACE FUNCTION cleanup_mfa_attempts() RETURNS INTEGER AS $$
+DECLARE v_n INTEGER;
+BEGIN
+    DELETE FROM mfa_attempts WHERE attempted_at <= now() - INTERVAL '1 day';
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Operator session functions
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -269,7 +694,9 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- issue_refresh_token: open a new family at login, carrying the optional device
--- label. Returns the family id.
+-- label. Returns the family id. Emits the 'device.new' security event in the
+-- same txn (events, 00008) — one per family, deduped by the family-id partial
+-- unique index, so an intrusion can't sign in silently.
 CREATE OR REPLACE FUNCTION issue_refresh_token(
     p_user_id      UUID,
     p_token_hash   TEXT,
@@ -284,6 +711,16 @@ BEGIN
     VALUES (p_token_hash, p_user_id, now() + make_interval(secs => p_idle_seconds),
             p_user_agent, p_ip, p_device_label)
     RETURNING family_id INTO v_family;
+
+    INSERT INTO events (user_id, type, title, body, data)
+    VALUES (p_user_id, 'device.new', 'New sign-in',
+            'A new device signed in to your account.',
+            jsonb_build_object('family_id', v_family,
+                               'user_agent', COALESCE(p_user_agent, ''),
+                               'ip', COALESCE(p_ip, ''),
+                               'device_label', COALESCE(p_device_label, '')))
+    ON CONFLICT ((data->>'family_id')) WHERE type = 'device.new' DO NOTHING;
+
     RETURN v_family;
 END;
 $$ LANGUAGE plpgsql;
@@ -464,6 +901,20 @@ $$ LANGUAGE plpgsql;
 
 -- +goose Down
 -- +goose StatementBegin
+DROP FUNCTION IF EXISTS cleanup_mfa_attempts();
+DROP FUNCTION IF EXISTS mfa_is_locked(UUID, INT, INT);
+DROP FUNCTION IF EXISTS mfa_record_attempt(UUID, BOOLEAN, TEXT, INT, INT);
+DROP FUNCTION IF EXISTS mfa_burn_recovery_code(UUID, TEXT);
+DROP FUNCTION IF EXISTS mfa_confirmed_secret(UUID);
+DROP FUNCTION IF EXISTS mfa_confirm(UUID, TEXT[]);
+DROP FUNCTION IF EXISTS mfa_pending_secret(UUID);
+DROP FUNCTION IF EXISTS mfa_begin_enroll(UUID, BYTEA);
+DROP FUNCTION IF EXISTS mfa_enabled(UUID);
+DROP FUNCTION IF EXISTS expire_verification_challenges();
+DROP FUNCTION IF EXISTS record_failed_verification(TEXT);
+DROP FUNCTION IF EXISTS verify_contact(TEXT, TEXT);
+DROP FUNCTION IF EXISTS register_user(TEXT, CITEXT, TEXT, TEXT, CITEXT, VARCHAR, verification_channel, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS create_verification_challenge(UUID, verification_channel, TEXT, TEXT, TEXT, INTERVAL, INTERVAL);
 DROP FUNCTION IF EXISTS cleanup_refresh_tokens();
 DROP FUNCTION IF EXISTS revoke_refresh_family_scoped(UUID, UUID);
 DROP FUNCTION IF EXISTS list_user_sessions(UUID);
@@ -481,6 +932,10 @@ DROP FUNCTION IF EXISTS change_password(UUID, TEXT, TEXT);
 DROP FUNCTION IF EXISTS check_user_credentials(CITEXT, TEXT);
 DROP FUNCTION IF EXISTS update_user_info(UUID, TEXT, CITEXT, VARCHAR, TEXT, user_status);
 DROP FUNCTION IF EXISTS create_user(CITEXT, TEXT, TEXT, CITEXT, VARCHAR, user_role);
+DROP TABLE IF EXISTS mfa_attempts;
+DROP TABLE IF EXISTS mfa_recovery_codes;
+DROP TABLE IF EXISTS mfa_credentials;
+DROP TABLE IF EXISTS verification_challenges;
 DROP TABLE IF EXISTS refresh_tokens;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
