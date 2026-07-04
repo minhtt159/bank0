@@ -968,6 +968,50 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }   # illegal state transition
 
+  /admin/disputes/{id}/decide:
+    post:
+      operationId: decideDispute
+      tags: [admin]
+      summary: Decide a PSR-style claim — reimburse (moves real money from clearing) or decline
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecideDisputeRequest" }
+      responses:
+        "200":
+          description: decided
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DecideDisputeResponse" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # already decided / terminal
+        "422": { $ref: "#/components/responses/Error" }   # bad amount / decision
+
+  /admin/disputes/{id}/recall:
+    post:
+      operationId: recallDispute
+      tags: [admin]
+      summary: Advance the simulated interbank recall (none -> requested -> funds_returned|refused)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecallDisputeRequest" }
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecallDisputeResponse" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }   # illegal transition
+        "422": { $ref: "#/components/responses/Error" }
+
   /admin/reconcile:
     get:
       operationId: reconcile
@@ -1254,6 +1298,42 @@ components:
       properties:
         mfa_token: { type: string }
         code: { type: string, description: "6-digit TOTP, or a recovery code" }
+        link:
+          type: object
+          description: >-
+            Dynamic-linking commitment (PSD2 RTS Art. 5 / WYSIWYS): binds this OTP to
+            ONE payment. REQUIRED to pass the transfer step-up gate; changing amount
+            or payee invalidates the factor. Omit for a plain login verify.
+          required: [debit_account, credit_account, amount_minor]
+          properties:
+            debit_account:  { type: string, format: uuid }
+            credit_account: { type: string, format: uuid }
+            amount_minor:   { type: integer, format: int64 }
+    DecideDisputeRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:                { type: string, enum: [reimbursed, partially_reimbursed, declined] }
+        reimbursed_amount_minor: { type: integer, format: int64, description: "Requested payout; capped + excess-adjusted by bank_settings policy in the DB." }
+        vulnerable:              { type: boolean, description: "Marks the customer vulnerable (excess waived)." }
+        note:                    { type: string }
+    DecideDisputeResponse:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        decision:     { type: string }
+        payout_minor: { type: integer, format: int64, description: "The amount actually credited back." }
+    RecallDisputeRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [requested, funds_returned, refused] }
+        reason: { type: string, description: "e.g. FRAD" }
+    RecallDisputeResponse:
+      type: object
+      properties:
+        id:            { type: string, format: uuid }
+        recall_status: { type: string }
     WarningAckRequest:
       type: object
       required: [category]
@@ -1330,8 +1410,9 @@ components:
     RaiseDisputeRequest:
       type: object
       properties:
-        category: { type: string, enum: [unrecognised, fraud, wrong_amount, duplicate, other] }
-        reason:   { type: string, description: "Free-text customer explanation (optional)." }
+        category:  { type: string, enum: [unrecognised, fraud, wrong_amount, duplicate, other] }
+        reason:    { type: string, description: "Free-text customer explanation (optional)." }
+        scam_type: { type: string, enum: [impersonation, purchase, investment, romance, invoice, advance_fee, other], description: "Optional APP-scam claim tag; starts the PSR business-day clock semantics." }
     Dispute:
       type: object
       properties:
@@ -1341,6 +1422,13 @@ components:
         category:        { type: string, enum: [unrecognised, fraud, wrong_amount, duplicate, other] }
         reason:          { type: string }
         resolution_note: { type: string }
+        scam_type:               { type: string, enum: [impersonation, purchase, investment, romance, invoice, advance_fee, other] }
+        sla_due_at:              { type: string, format: date-time, description: "PSR-style business-day deadline (15 BBD from raise)." }
+        decision:                { type: string, enum: [pending, reimbursed, partially_reimbursed, declined] }
+        reimbursed_amount_minor: { type: integer, format: int64, description: "Actual payout, net of the excess (waived for vulnerable customers)." }
+        vulnerable_flag:         { type: boolean }
+        recall_status:           { type: string, enum: [none, requested, funds_returned, refused], description: "Simulated interbank recall (pacs.004)." }
+        recall_reason:           { type: string, description: "e.g. FRAD" }
         created_at:      { type: string, format: date-time }
         updated_at:      { type: string, format: date-time }
     DisputeQueueItem:
@@ -1357,6 +1445,13 @@ components:
         raised_by:      { type: string, description: "Raiser username." }
         debit_iban:     { type: string }
         credit_iban:    { type: string }
+        scam_type:      { type: string }
+        sla_due_at:     { type: string, format: date-time }
+        decision:       { type: string }
+        reimbursed_amount_minor: { type: integer, format: int64 }
+        vulnerable_flag: { type: boolean }
+        recall_status:  { type: string }
+        recall_reason:  { type: string }
         created_at:     { type: string, format: date-time }
     ResolveDisputeRequest:
       type: object
@@ -1518,6 +1613,12 @@ components:
         account_type: { type: string, enum: [personal, business] }
         gate: { type: string, enum: [ok, awaiting_acknowledgement, blocked], description: "Server-driven continue gate; clients must not compute their own." }
         checked_at: { type: string, format: date-time }
+        recipient_risk: { type: string, enum: [low, medium, high], description: "Server-decided destination risk badge (Rec 11)." }
+        mule_suspected: { type: boolean, description: "Destination is operator-flagged or on a live fraud dispute." }
+        signals:
+          type: array
+          items: { type: string, enum: [mule_flagged, reported, recently_opened, new_payee, first_payment] }
+        is_first_payment_to_payee: { type: boolean }
     LedgerEntry:
       type: object
       properties:

@@ -70,6 +70,15 @@ CREATE TABLE disputes (
     reason            TEXT NOT NULL DEFAULT '',
     resolver_user_id  UUID REFERENCES users(id),
     resolution_note   TEXT NOT NULL DEFAULT '',
+    -- PSR/APP-scam claim machine (Rec 12): the regulatory clock + outcome.
+    scam_type               scam_type,                                   -- NULL = not claimed as a scam
+    sla_due_at              TIMESTAMPTZ,                                 -- business-day deadline (raise_dispute)
+    decision                dispute_decision NOT NULL DEFAULT 'pending',
+    reimbursed_amount_minor BIGINT CHECK (reimbursed_amount_minor >= 0), -- actual payout (net of excess)
+    vulnerable_flag         BOOLEAN NOT NULL DEFAULT FALSE,              -- PSR: excess waived
+    -- simulated interbank recall (pacs.004) — state only, the core is closed.
+    recall_status           recall_status NOT NULL DEFAULT 'none',
+    recall_reason           TEXT NOT NULL DEFAULT '',                    -- e.g. FRAD
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -105,22 +114,34 @@ CREATE TRIGGER trg_disputes_updated_at
 -- Matching: exact after whitespace/case normalization -> match; pg_trgm
 -- similarity >= 0.55 -> close_match (threshold is a product knob, hedged — the
 -- EPC wire tokens are not public). Raises (-> 404) if not found / inactive.
-CREATE OR REPLACE FUNCTION resolve_account_by_iban(p_iban VARCHAR, p_name_hint TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION resolve_account_by_iban(
+    p_iban      VARCHAR,
+    p_name_hint TEXT DEFAULT NULL,
+    p_caller    UUID DEFAULT NULL
+)
 RETURNS TABLE (account_id UUID, iban VARCHAR, owner_name_masked TEXT,
                match_result TEXT, reason_code TEXT, suggested_name TEXT,
-               account_type TEXT, gate TEXT, checked_at TIMESTAMPTZ) AS $$
+               account_type TEXT, gate TEXT, checked_at TIMESTAMPTZ,
+               recipient_risk TEXT, mule_suspected BOOLEAN,
+               signals TEXT[], is_first_payment_to_payee BOOLEAN) AS $$
 DECLARE
     v_id      UUID;
     v_iban    VARCHAR;
     v_full    TEXT;
+    v_created TIMESTAMPTZ;
     v_hint    TEXT;
     v_reg     TEXT;
     v_match   TEXT;
     v_reason  TEXT;
     v_suggest TEXT;
     v_gate    TEXT;
+    -- recipient-risk signals (Rec 11)
+    v_signals TEXT[] := '{}';
+    v_mule    BOOLEAN := FALSE;
+    v_first   BOOLEAN := FALSE;
+    v_risk    TEXT;
 BEGIN
-    SELECT a.id, a.iban, u.full_name INTO v_id, v_iban, v_full
+    SELECT a.id, a.iban, u.full_name, a.created_at INTO v_id, v_iban, v_full, v_created
     FROM accounts a
     JOIN users u ON u.id = a.user_id
     WHERE a.iban = p_iban AND a.kind = 'customer' AND a.status = 'active';
@@ -143,8 +164,46 @@ BEGIN
         END IF;
     END IF;
 
+    -- Recipient-risk signals (Rec 11). The operator-flagged mule pool
+    -- (guided_scenarios) IS the rule seam; a destination sitting in it — or on
+    -- the credit side of a live fraud dispute — resolves high. The caller-scoped
+    -- signals (new payee / first payment) power first-payment friction.
+    IF EXISTS (SELECT 1 FROM guided_scenarios gs
+                WHERE gs.target_account_id = v_id AND gs.active) THEN
+        v_signals := v_signals || 'mule_flagged'::text;  v_mule := TRUE;
+    END IF;
+    IF EXISTS (SELECT 1 FROM disputes d
+                JOIN transfers t ON t.id = d.transfer_id
+                WHERE t.credit_account_id = v_id
+                  AND d.status IN ('open', 'under_review')
+                  AND d.category IN ('fraud', 'unrecognised')) THEN
+        v_signals := v_signals || 'reported'::text;  v_mule := TRUE;
+    END IF;
+    IF v_created > now() - INTERVAL '30 days' THEN
+        v_signals := v_signals || 'recently_opened'::text;
+    END IF;
+    IF p_caller IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM beneficiaries b
+                        WHERE b.owner_user_id = p_caller AND b.credit_account_id = v_id) THEN
+            v_signals := v_signals || 'new_payee'::text;
+        END IF;
+        v_first := NOT EXISTS (
+            SELECT 1 FROM transfers t
+            JOIN accounts da ON da.id = t.debit_account_id
+            WHERE da.user_id = p_caller AND t.credit_account_id = v_id
+              AND t.status IN ('posted', 'reversed'));
+        IF v_first THEN
+            v_signals := v_signals || 'first_payment'::text;
+        END IF;
+    END IF;
+    v_risk := CASE
+        WHEN v_mule THEN 'high'
+        WHEN v_signals @> ARRAY['new_payee','first_payment','recently_opened'] THEN 'medium'
+        ELSE 'low' END;
+
     RETURN QUERY SELECT v_id, v_iban, mask_name(v_full), v_match, v_reason,
-                        v_suggest, 'personal'::text, v_gate, now();
+                        v_suggest, 'personal'::text, v_gate, now(),
+                        v_risk, v_mule, v_signals, v_first;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
@@ -261,7 +320,8 @@ CREATE OR REPLACE FUNCTION raise_dispute(
     p_transfer_id UUID,
     p_raiser      UUID,
     p_category    dispute_category DEFAULT 'unrecognised',
-    p_reason      TEXT DEFAULT ''
+    p_reason      TEXT DEFAULT '',
+    p_scam_type   scam_type DEFAULT NULL
 ) RETURNS UUID AS $$
 DECLARE
     v_t        transfers%ROWTYPE;
@@ -290,8 +350,11 @@ BEGIN
             USING ERRCODE = 'check_violation';                    -- -> 422
     END IF;
 
-    INSERT INTO disputes (transfer_id, raised_by_user_id, category, reason)
-    VALUES (p_transfer_id, p_raiser, p_category, COALESCE(p_reason, ''))
+    -- sla_due_at: the PSR-style business-day clock (15 BBD, mirroring the SEPA
+    -- beneficiary-bank answer deadline). Weekends skipped; no holiday calendar.
+    INSERT INTO disputes (transfer_id, raised_by_user_id, category, reason, scam_type, sla_due_at)
+    VALUES (p_transfer_id, p_raiser, p_category, COALESCE(p_reason, ''), p_scam_type,
+            add_business_days(now(), 15))
     RETURNING id INTO v_id;                                        -- dup open -> 23505 -> 409
 
     -- Server-side fraud hook: an auditable signal alongside the ledger (flag-only).
@@ -352,6 +415,218 @@ BEGIN
             'Your dispute is now ' || p_status::text || '.',
             v_d.transfer_id,
             jsonb_build_object('dispute_id', p_dispute_id, 'status', p_status));
+
+    RETURN p_status;
+END;
+$$ LANGUAGE plpgsql;
+
+-- assess_transfer_risk: the server-side TRA seam (Rec 15). Scores a transfer
+-- ATTEMPT from what the bank already knows — velocity, first-payment, mule/
+-- reported destination, account age — and emits a band the step-up gate ORs
+-- into its trigger set. The client SDK is advisory input only; THIS decision is
+-- authoritative. Deliberately transparent scoring, not ML:
+--   +3 destination is an operator-flagged mule or on a live fraud dispute
+--   +2 velocity count: >= 10 debits from the caller in the trailing 24h
+--   +2 velocity value: 24h debits + this amount >= 5x the 90d daily average
+--      (with a €100/day floor so a quiet account isn't gated by its first coffee)
+--   +1 first payment from this caller to this destination
+--   +1 debit account younger than 7 days
+-- band: >= 4 high, >= 2 medium, else low.
+-- ponytail: fixed weights; lift them into a rule table when tuning matters.
+CREATE OR REPLACE FUNCTION assess_transfer_risk(
+    p_caller       UUID,
+    p_debit        UUID,
+    p_credit       UUID,
+    p_amount_minor BIGINT
+) RETURNS TABLE (risk_band TEXT, score INT, reasons TEXT[]) AS $$
+DECLARE
+    v_score   INT := 0;
+    v_reasons TEXT[] := '{}';
+    v_count24 INT;
+    v_sum24   BIGINT;
+    v_avg90   NUMERIC;
+BEGIN
+    IF EXISTS (SELECT 1 FROM guided_scenarios gs
+                WHERE gs.target_account_id = p_credit AND gs.active)
+       OR EXISTS (SELECT 1 FROM disputes d
+                   JOIN transfers t ON t.id = d.transfer_id
+                   WHERE t.credit_account_id = p_credit
+                     AND d.status IN ('open', 'under_review')
+                     AND d.category IN ('fraud', 'unrecognised')) THEN
+        v_score := v_score + 3;  v_reasons := v_reasons || 'destination_flagged'::text;
+    END IF;
+
+    SELECT count(*), COALESCE(sum(t.amount_minor), 0) INTO v_count24, v_sum24
+      FROM transfers t
+      JOIN accounts da ON da.id = t.debit_account_id
+     WHERE da.user_id = p_caller
+       AND t.requested_at > now() - INTERVAL '24 hours'
+       AND t.status <> 'canceled';
+    IF v_count24 >= 10 THEN
+        v_score := v_score + 2;  v_reasons := v_reasons || 'velocity_count_24h'::text;
+    END IF;
+
+    SELECT COALESCE(sum(t.amount_minor), 0) / 90.0 INTO v_avg90
+      FROM transfers t
+      JOIN accounts da ON da.id = t.debit_account_id
+     WHERE da.user_id = p_caller
+       AND t.status IN ('posted', 'reversed')
+       AND t.requested_at > now() - INTERVAL '90 days';
+    IF (v_sum24 + p_amount_minor) >= 5 * GREATEST(v_avg90, 10000) THEN
+        v_score := v_score + 2;  v_reasons := v_reasons || 'velocity_value_24h'::text;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM transfers t
+                    JOIN accounts da ON da.id = t.debit_account_id
+                   WHERE da.user_id = p_caller AND t.credit_account_id = p_credit
+                     AND t.status IN ('posted', 'reversed')) THEN
+        v_score := v_score + 1;  v_reasons := v_reasons || 'first_payment_to_payee'::text;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM accounts a
+                WHERE a.id = p_debit AND a.created_at > now() - INTERVAL '7 days') THEN
+        v_score := v_score + 1;  v_reasons := v_reasons || 'new_debit_account'::text;
+    END IF;
+
+    RETURN QUERY SELECT CASE WHEN v_score >= 4 THEN 'high'
+                             WHEN v_score >= 2 THEN 'medium'
+                             ELSE 'low' END,
+                        v_score, v_reasons;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- decide_dispute: the PSR claim OUTCOME (Rec 12) — reimburse (full/partial) or
+-- decline, in one transaction. A reimbursement is REAL MONEY: a transfer from
+-- EXTERNAL_CLEARING to the disputed transfer's debit (victim) account, kind
+-- 'adjustment', idempotency key derived from the dispute id — so the books stay
+-- zero-sum, reconcile() still holds, and a replayed decide can never pay twice
+-- (the state machine blocks it first; the key is the belt).
+-- Policy (bank_settings): payout = min(requested, cap) minus the excess, except
+-- for vulnerable customers (excess waived, PSR-style). Payout may not exceed the
+-- disputed amount. Only an open/under_review dispute can be decided.
+--   * unknown id                 -> P0001 'not found'   -> 404
+--   * already terminal/decided   -> P0001 'cannot ...'  -> 409
+--   * bad amounts                -> check_violation     -> 422
+CREATE OR REPLACE FUNCTION decide_dispute(
+    p_dispute_id      UUID,
+    p_resolver        UUID,
+    p_decision        dispute_decision,
+    p_reimburse_minor BIGINT  DEFAULT NULL,
+    p_vulnerable      BOOLEAN DEFAULT NULL,
+    p_note            TEXT    DEFAULT ''
+) RETURNS BIGINT AS $$
+DECLARE
+    v_d       disputes%ROWTYPE;
+    v_t       transfers%ROWTYPE;
+    v_cap     BIGINT;
+    v_excess  BIGINT;
+    v_vuln    BOOLEAN;
+    v_payout  BIGINT := 0;
+    v_ext     UUID;
+    v_status  dispute_status;
+BEGIN
+    SELECT * INTO v_d FROM disputes WHERE id = p_dispute_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'dispute % not found', p_dispute_id; END IF;
+    IF v_d.status NOT IN ('open', 'under_review') THEN
+        RAISE EXCEPTION 'cannot decide a % dispute', v_d.status;             -- -> 409
+    END IF;
+    IF p_decision = 'pending' THEN
+        RAISE EXCEPTION 'decision must be reimbursed, partially_reimbursed or declined'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT * INTO v_t FROM transfers WHERE id = v_d.transfer_id;
+    v_vuln := COALESCE(p_vulnerable, v_d.vulnerable_flag);
+
+    IF p_decision IN ('reimbursed', 'partially_reimbursed') THEN
+        IF p_reimburse_minor IS NULL OR p_reimburse_minor <= 0 THEN
+            RAISE EXCEPTION 'reimbursed_amount_minor must be > 0'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF p_reimburse_minor > v_t.amount_minor THEN
+            RAISE EXCEPTION 'reimbursement exceeds the disputed amount'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        SELECT reimbursement_cap_minor, reimbursement_excess_minor
+          INTO v_cap, v_excess FROM bank_settings WHERE id;
+        v_payout := LEAST(p_reimburse_minor, v_cap);
+        IF NOT v_vuln THEN
+            v_payout := GREATEST(v_payout - v_excess, 0);
+        END IF;
+        IF v_payout > 0 THEN
+            SELECT id INTO v_ext FROM accounts WHERE system_code = 'EXTERNAL_CLEARING';
+            IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)'; END IF;
+            PERFORM transfer('dispute-reimburse-' || p_dispute_id::text,
+                             v_ext, v_t.debit_account_id, v_payout,
+                             'dispute reimbursement ' || p_dispute_id::text, 'adjustment');
+        END IF;
+        v_status := 'resolved';
+    ELSE
+        v_status := 'rejected';
+    END IF;
+
+    UPDATE disputes
+       SET status = v_status,
+           decision = p_decision,
+           reimbursed_amount_minor = CASE WHEN p_decision = 'declined' THEN NULL ELSE v_payout END,
+           vulnerable_flag  = v_vuln,
+           resolver_user_id = p_resolver,
+           resolution_note  = COALESCE(NULLIF(p_note, ''), resolution_note)
+     WHERE id = p_dispute_id;
+
+    INSERT INTO admin_actions (actor_user_id, action, target_id, detail)
+    VALUES (p_resolver, 'dispute_decided', p_dispute_id,
+            jsonb_build_object('decision', p_decision, 'payout_minor', v_payout,
+                               'vulnerable', v_vuln, 'note', COALESCE(p_note, '')));
+
+    INSERT INTO events (user_id, type, title, body, related_transfer_id, data)
+    VALUES (v_d.raised_by_user_id, 'dispute.updated', 'Dispute decided',
+            CASE WHEN p_decision = 'declined' THEN 'Your claim was declined.'
+                 ELSE 'Your claim was accepted.' END,
+            v_d.transfer_id,
+            jsonb_build_object('dispute_id', p_dispute_id, 'status', v_status,
+                               'decision', p_decision, 'payout_minor', v_payout));
+
+    RETURN v_payout;
+END;
+$$ LANGUAGE plpgsql;
+
+-- set_dispute_recall: the SIMULATED interbank recall (pacs.004) state machine.
+-- none -> requested -> funds_returned | refused. May trail the decision (a
+-- recall answer can arrive after reimbursement). Audited + notified.
+CREATE OR REPLACE FUNCTION set_dispute_recall(
+    p_dispute_id UUID,
+    p_actor      UUID,
+    p_status     recall_status,
+    p_reason     TEXT DEFAULT ''
+) RETURNS recall_status AS $$
+DECLARE v_d disputes%ROWTYPE;
+BEGIN
+    SELECT * INTO v_d FROM disputes WHERE id = p_dispute_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'dispute % not found', p_dispute_id; END IF;
+    IF p_status = 'none' THEN
+        RAISE EXCEPTION 'cannot transition a recall back to none';           -- -> 409
+    END IF;
+    IF p_status = 'requested' AND v_d.recall_status <> 'none' THEN
+        RAISE EXCEPTION 'cannot re-request a % recall', v_d.recall_status;   -- -> 409
+    END IF;
+    IF p_status IN ('funds_returned', 'refused') AND v_d.recall_status <> 'requested' THEN
+        RAISE EXCEPTION 'cannot answer a recall that is %', v_d.recall_status; -- -> 409
+    END IF;
+
+    UPDATE disputes SET recall_status = p_status,
+                        recall_reason = COALESCE(NULLIF(p_reason, ''), recall_reason)
+     WHERE id = p_dispute_id;
+
+    INSERT INTO admin_actions (actor_user_id, action, target_id, detail)
+    VALUES (p_actor, 'dispute_recall_' || p_status::text, p_dispute_id,
+            jsonb_build_object('reason', COALESCE(p_reason, '')));
+
+    INSERT INTO events (user_id, type, title, body, related_transfer_id, data)
+    VALUES (v_d.raised_by_user_id, 'dispute.updated', 'Recall update',
+            'The recall on your disputed payment is now ' || replace(p_status::text, '_', ' ') || '.',
+            v_d.transfer_id,
+            jsonb_build_object('dispute_id', p_dispute_id, 'recall_status', p_status));
 
     RETURN p_status;
 END;
@@ -555,12 +830,15 @@ DROP TRIGGER IF EXISTS trg_events_immutable ON events;
 DROP FUNCTION IF EXISTS mark_events_read(UUID, TIMESTAMPTZ, UUID);
 DROP FUNCTION IF EXISTS emit_event(UUID, event_type, TEXT, TEXT, UUID, UUID, JSONB);
 DROP FUNCTION IF EXISTS events_block_mutation();
+DROP FUNCTION IF EXISTS set_dispute_recall(UUID, UUID, recall_status, TEXT);
+DROP FUNCTION IF EXISTS decide_dispute(UUID, UUID, dispute_decision, BIGINT, BOOLEAN, TEXT);
+DROP FUNCTION IF EXISTS assess_transfer_risk(UUID, UUID, UUID, BIGINT);
 DROP FUNCTION IF EXISTS resolve_dispute(UUID, UUID, dispute_status, TEXT);
-DROP FUNCTION IF EXISTS raise_dispute(UUID, UUID, dispute_category, TEXT);
+DROP FUNCTION IF EXISTS raise_dispute(UUID, UUID, dispute_category, TEXT, scam_type);
 DROP FUNCTION IF EXISTS suggest_transfer_destinations(UUID, UUID, BIGINT);
 DROP FUNCTION IF EXISTS delete_beneficiary(UUID, UUID);
 DROP FUNCTION IF EXISTS add_beneficiary(UUID, TEXT, VARCHAR);
-DROP FUNCTION IF EXISTS resolve_account_by_iban(VARCHAR, TEXT);
+DROP FUNCTION IF EXISTS resolve_account_by_iban(VARCHAR, TEXT, UUID);
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS disputes;
 DROP INDEX IF EXISTS idx_guided_scenarios_active;

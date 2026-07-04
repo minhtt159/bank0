@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/pquerna/otp"
@@ -121,6 +122,14 @@ func (s *Server) MfaConfirm(w http.ResponseWriter, r *http.Request) {
 type mfaVerifyReq struct {
 	MfaToken string `json:"mfa_token"`
 	Code     string `json:"code"`
+	// Optional dynamic-linking commitment (PSD2 RTS Art. 5): binds THIS otp to
+	// one payment. Required to pass the step-up gate; a login-time verify
+	// (no link) yields a token that cannot authorize a gated transfer.
+	Link *struct {
+		DebitAccount  uuid.UUID `json:"debit_account"`
+		CreditAccount uuid.UUID `json:"credit_account"`
+		AmountMinor   int64     `json:"amount_minor"`
+	} `json:"link"`
 }
 
 // MfaVerify implements genclient.ServerInterface (POST /auth/mfa/verify) —
@@ -185,11 +194,21 @@ func (s *Server) MfaVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	txnLink := ""
+	if req.Link != nil {
+		txnLink = transferLinkHash(req.Link.DebitAccount, req.Link.CreditAccount, req.Link.AmountMinor)
+	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), userID, hashToken(refresh),
 		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), ""); err != nil {
 		s.mapDBError(w, r, err)
 		return
 	}
-	s.writeTokenPair(w, userID, claims.Role, claims.Username, refresh, []string{"pwd", "otp"})
+	s.writeTokenPair(w, userID, claims.Role, claims.Username, refresh, []string{"pwd", "otp"}, txnLink)
+}
+
+// transferLinkHash is the WYSIWYS commitment: the exact (debit, credit, amount)
+// tuple the OTP authorizes — the same elements the idempotency fingerprint uses.
+func transferLinkHash(debit, credit uuid.UUID, amountMinor int64) string {
+	return hashToken(debit.String() + "|" + credit.String() + "|" + strconv.FormatInt(amountMinor, 10))
 }

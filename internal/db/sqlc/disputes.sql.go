@@ -12,20 +12,57 @@ import (
 	uuid "github.com/google/uuid"
 )
 
+const decideDispute = `-- name: DecideDispute :one
+SELECT decide_dispute($1::uuid, $2::uuid,
+    $3::dispute_decision, $4::bigint,
+    $5::boolean, $6::text) AS payout_minor
+`
+
+type DecideDisputeParams struct {
+	DisputeID      uuid.UUID       `json:"dispute_id"`
+	Resolver       uuid.UUID       `json:"resolver"`
+	Decision       DisputeDecision `json:"decision"`
+	ReimburseMinor *int64          `json:"reimburse_minor"`
+	Vulnerable     *bool           `json:"vulnerable"`
+	Note           string          `json:"note"`
+}
+
+func (q *Queries) DecideDispute(ctx context.Context, arg DecideDisputeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, decideDispute,
+		arg.DisputeID,
+		arg.Resolver,
+		arg.Decision,
+		arg.ReimburseMinor,
+		arg.Vulnerable,
+		arg.Note,
+	)
+	var payout_minor int64
+	err := row.Scan(&payout_minor)
+	return payout_minor, err
+}
+
 const getDisputeAdmin = `-- name: GetDisputeAdmin :one
-SELECT id, transfer_id, status, category, reason, resolution_note, created_at, updated_at
+SELECT id, transfer_id, status, category, reason, resolution_note,
+       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
 FROM disputes WHERE id = $1::uuid
 `
 
 type GetDisputeAdminRow struct {
-	ID             uuid.UUID       `json:"id"`
-	TransferID     uuid.UUID       `json:"transfer_id"`
-	Status         DisputeStatus   `json:"status"`
-	Category       DisputeCategory `json:"category"`
-	Reason         string          `json:"reason"`
-	ResolutionNote string          `json:"resolution_note"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                    uuid.UUID       `json:"id"`
+	TransferID            uuid.UUID       `json:"transfer_id"`
+	Status                DisputeStatus   `json:"status"`
+	Category              DisputeCategory `json:"category"`
+	Reason                string          `json:"reason"`
+	ResolutionNote        string          `json:"resolution_note"`
+	ScamType              *string         `json:"scam_type"`
+	SlaDueAt              *time.Time      `json:"sla_due_at"`
+	Decision              DisputeDecision `json:"decision"`
+	ReimbursedAmountMinor *int64          `json:"reimbursed_amount_minor"`
+	VulnerableFlag        bool            `json:"vulnerable_flag"`
+	RecallStatus          RecallStatus    `json:"recall_status"`
+	RecallReason          string          `json:"recall_reason"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 func (q *Queries) GetDisputeAdmin(ctx context.Context, id uuid.UUID) (GetDisputeAdminRow, error) {
@@ -38,6 +75,13 @@ func (q *Queries) GetDisputeAdmin(ctx context.Context, id uuid.UUID) (GetDispute
 		&i.Category,
 		&i.Reason,
 		&i.ResolutionNote,
+		&i.ScamType,
+		&i.SlaDueAt,
+		&i.Decision,
+		&i.ReimbursedAmountMinor,
+		&i.VulnerableFlag,
+		&i.RecallStatus,
+		&i.RecallReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -45,7 +89,8 @@ func (q *Queries) GetDisputeAdmin(ctx context.Context, id uuid.UUID) (GetDispute
 }
 
 const getDisputeForRaiser = `-- name: GetDisputeForRaiser :one
-SELECT id, transfer_id, status, category, reason, resolution_note, created_at, updated_at
+SELECT id, transfer_id, status, category, reason, resolution_note,
+       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
 FROM disputes
 WHERE id = $1::uuid AND raised_by_user_id = $2::uuid
 `
@@ -56,14 +101,21 @@ type GetDisputeForRaiserParams struct {
 }
 
 type GetDisputeForRaiserRow struct {
-	ID             uuid.UUID       `json:"id"`
-	TransferID     uuid.UUID       `json:"transfer_id"`
-	Status         DisputeStatus   `json:"status"`
-	Category       DisputeCategory `json:"category"`
-	Reason         string          `json:"reason"`
-	ResolutionNote string          `json:"resolution_note"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                    uuid.UUID       `json:"id"`
+	TransferID            uuid.UUID       `json:"transfer_id"`
+	Status                DisputeStatus   `json:"status"`
+	Category              DisputeCategory `json:"category"`
+	Reason                string          `json:"reason"`
+	ResolutionNote        string          `json:"resolution_note"`
+	ScamType              *string         `json:"scam_type"`
+	SlaDueAt              *time.Time      `json:"sla_due_at"`
+	Decision              DisputeDecision `json:"decision"`
+	ReimbursedAmountMinor *int64          `json:"reimbursed_amount_minor"`
+	VulnerableFlag        bool            `json:"vulnerable_flag"`
+	RecallStatus          RecallStatus    `json:"recall_status"`
+	RecallReason          string          `json:"recall_reason"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 func (q *Queries) GetDisputeForRaiser(ctx context.Context, arg GetDisputeForRaiserParams) (GetDisputeForRaiserRow, error) {
@@ -76,6 +128,13 @@ func (q *Queries) GetDisputeForRaiser(ctx context.Context, arg GetDisputeForRais
 		&i.Category,
 		&i.Reason,
 		&i.ResolutionNote,
+		&i.ScamType,
+		&i.SlaDueAt,
+		&i.Decision,
+		&i.ReimbursedAmountMinor,
+		&i.VulnerableFlag,
+		&i.RecallStatus,
+		&i.RecallReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -84,6 +143,8 @@ func (q *Queries) GetDisputeForRaiser(ctx context.Context, arg GetDisputeForRais
 
 const listDisputesAdmin = `-- name: ListDisputesAdmin :many
 SELECT d.id, d.transfer_id, d.status, d.category, d.reason,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor,
+       d.vulnerable_flag, d.recall_status, d.recall_reason,
        t.amount_minor, t.currency,
        COALESCE(u.username::text, '')        AS raised_by,
        COALESCE(da.iban, da.system_code, '') AS debit_iban,
@@ -109,17 +170,24 @@ type ListDisputesAdminParams struct {
 }
 
 type ListDisputesAdminRow struct {
-	ID          uuid.UUID       `json:"id"`
-	TransferID  uuid.UUID       `json:"transfer_id"`
-	Status      DisputeStatus   `json:"status"`
-	Category    DisputeCategory `json:"category"`
-	Reason      string          `json:"reason"`
-	AmountMinor int64           `json:"amount_minor"`
-	Currency    string          `json:"currency"`
-	RaisedBy    interface{}     `json:"raised_by"`
-	DebitIban   string          `json:"debit_iban"`
-	CreditIban  string          `json:"credit_iban"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID                    uuid.UUID       `json:"id"`
+	TransferID            uuid.UUID       `json:"transfer_id"`
+	Status                DisputeStatus   `json:"status"`
+	Category              DisputeCategory `json:"category"`
+	Reason                string          `json:"reason"`
+	ScamType              *string         `json:"scam_type"`
+	SlaDueAt              *time.Time      `json:"sla_due_at"`
+	Decision              DisputeDecision `json:"decision"`
+	ReimbursedAmountMinor *int64          `json:"reimbursed_amount_minor"`
+	VulnerableFlag        bool            `json:"vulnerable_flag"`
+	RecallStatus          RecallStatus    `json:"recall_status"`
+	RecallReason          string          `json:"recall_reason"`
+	AmountMinor           int64           `json:"amount_minor"`
+	Currency              string          `json:"currency"`
+	RaisedBy              interface{}     `json:"raised_by"`
+	DebitIban             string          `json:"debit_iban"`
+	CreditIban            string          `json:"credit_iban"`
+	CreatedAt             time.Time       `json:"created_at"`
 }
 
 func (q *Queries) ListDisputesAdmin(ctx context.Context, arg ListDisputesAdminParams) ([]ListDisputesAdminRow, error) {
@@ -142,6 +210,13 @@ func (q *Queries) ListDisputesAdmin(ctx context.Context, arg ListDisputesAdminPa
 			&i.Status,
 			&i.Category,
 			&i.Reason,
+			&i.ScamType,
+			&i.SlaDueAt,
+			&i.Decision,
+			&i.ReimbursedAmountMinor,
+			&i.VulnerableFlag,
+			&i.RecallStatus,
+			&i.RecallReason,
 			&i.AmountMinor,
 			&i.Currency,
 			&i.RaisedBy,
@@ -160,7 +235,8 @@ func (q *Queries) ListDisputesAdmin(ctx context.Context, arg ListDisputesAdminPa
 }
 
 const listDisputesForRaiser = `-- name: ListDisputesForRaiser :many
-SELECT id, transfer_id, status, category, reason, resolution_note, created_at, updated_at
+SELECT id, transfer_id, status, category, reason, resolution_note,
+       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
 FROM disputes
 WHERE raised_by_user_id = $1::uuid
   AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
@@ -175,14 +251,21 @@ type ListDisputesForRaiserParams struct {
 }
 
 type ListDisputesForRaiserRow struct {
-	ID             uuid.UUID       `json:"id"`
-	TransferID     uuid.UUID       `json:"transfer_id"`
-	Status         DisputeStatus   `json:"status"`
-	Category       DisputeCategory `json:"category"`
-	Reason         string          `json:"reason"`
-	ResolutionNote string          `json:"resolution_note"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID                    uuid.UUID       `json:"id"`
+	TransferID            uuid.UUID       `json:"transfer_id"`
+	Status                DisputeStatus   `json:"status"`
+	Category              DisputeCategory `json:"category"`
+	Reason                string          `json:"reason"`
+	ResolutionNote        string          `json:"resolution_note"`
+	ScamType              *string         `json:"scam_type"`
+	SlaDueAt              *time.Time      `json:"sla_due_at"`
+	Decision              DisputeDecision `json:"decision"`
+	ReimbursedAmountMinor *int64          `json:"reimbursed_amount_minor"`
+	VulnerableFlag        bool            `json:"vulnerable_flag"`
+	RecallStatus          RecallStatus    `json:"recall_status"`
+	RecallReason          string          `json:"recall_reason"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 func (q *Queries) ListDisputesForRaiser(ctx context.Context, arg ListDisputesForRaiserParams) ([]ListDisputesForRaiserRow, error) {
@@ -201,6 +284,13 @@ func (q *Queries) ListDisputesForRaiser(ctx context.Context, arg ListDisputesFor
 			&i.Category,
 			&i.Reason,
 			&i.ResolutionNote,
+			&i.ScamType,
+			&i.SlaDueAt,
+			&i.Decision,
+			&i.ReimbursedAmountMinor,
+			&i.VulnerableFlag,
+			&i.RecallStatus,
+			&i.RecallReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -219,7 +309,8 @@ SELECT raise_dispute(
     $1::uuid,
     $2::uuid,
     $3::dispute_category,
-    $4::text
+    $4::text,
+    $5::scam_type
 ) AS id
 `
 
@@ -228,6 +319,7 @@ type RaiseDisputeParams struct {
 	Raiser     uuid.UUID       `json:"raiser"`
 	Category   DisputeCategory `json:"category"`
 	Reason     string          `json:"reason"`
+	ScamType   *string         `json:"scam_type"`
 }
 
 func (q *Queries) RaiseDispute(ctx context.Context, arg RaiseDisputeParams) (uuid.UUID, error) {
@@ -236,6 +328,7 @@ func (q *Queries) RaiseDispute(ctx context.Context, arg RaiseDisputeParams) (uui
 		arg.Raiser,
 		arg.Category,
 		arg.Reason,
+		arg.ScamType,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
@@ -268,4 +361,28 @@ func (q *Queries) ResolveDispute(ctx context.Context, arg ResolveDisputeParams) 
 	var status DisputeStatus
 	err := row.Scan(&status)
 	return status, err
+}
+
+const setDisputeRecall = `-- name: SetDisputeRecall :one
+SELECT set_dispute_recall($1::uuid, $2::uuid,
+    $3::recall_status, $4::text) AS recall_status
+`
+
+type SetDisputeRecallParams struct {
+	DisputeID uuid.UUID    `json:"dispute_id"`
+	Actor     uuid.UUID    `json:"actor"`
+	Status    RecallStatus `json:"status"`
+	Reason    string       `json:"reason"`
+}
+
+func (q *Queries) SetDisputeRecall(ctx context.Context, arg SetDisputeRecallParams) (RecallStatus, error) {
+	row := q.db.QueryRow(ctx, setDisputeRecall,
+		arg.DisputeID,
+		arg.Actor,
+		arg.Status,
+		arg.Reason,
+	)
+	var recall_status RecallStatus
+	err := row.Scan(&recall_status)
+	return recall_status, err
 }

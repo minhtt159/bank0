@@ -83,6 +83,13 @@ CREATE TYPE ik_status       AS ENUM ('in_progress', 'completed');
 CREATE TYPE dispute_status   AS ENUM ('open', 'under_review', 'resolved', 'rejected');
 CREATE TYPE dispute_category AS ENUM ('unrecognised', 'fraud', 'wrong_amount', 'duplicate', 'other');
 
+-- PSR/APP-scam claim vocabulary (spec-banking-grade-hardening Rec 12; disputes
+-- table in the features file). recall is the SIMULATED interbank pacs.004 leg —
+-- bank0's core is closed, so the state machine exists without a real rail.
+CREATE TYPE dispute_decision AS ENUM ('pending', 'reimbursed', 'partially_reimbursed', 'declined');
+CREATE TYPE recall_status    AS ENUM ('none', 'requested', 'funds_returned', 'refused');
+CREATE TYPE scam_type        AS ENUM ('impersonation', 'purchase', 'investment', 'romance', 'invoice', 'advance_fee', 'other');
+
 -- Notification-feed taxonomy (per-user events projection; table in the features file).
 CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.new', 'dispute.updated');
 
@@ -90,7 +97,28 @@ CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.n
 -- passkey path for future dynamic linking.
 CREATE TYPE mfa_kind AS ENUM ('totp', 'webauthn');
 
+-- +goose StatementBegin
+-- add_business_days: ts + n Mon–Fri days (weekends skipped; no holiday calendar —
+-- ponytail: bolt a holidays table onto this if a jurisdictional calendar ever
+-- matters). Drives the PSR/SEPA business-day SLA clocks on disputes.
+CREATE OR REPLACE FUNCTION add_business_days(p_from TIMESTAMPTZ, p_days INT)
+RETURNS TIMESTAMPTZ LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE v TIMESTAMPTZ := p_from; n INT := 0;
+BEGIN
+    WHILE n < p_days LOOP
+        v := v + INTERVAL '1 day';
+        IF extract(isodow FROM v) < 6 THEN n := n + 1; END IF;
+    END LOOP;
+    RETURN v;
+END;
+$$;
+-- +goose StatementEnd
+
 -- +goose Down
+DROP FUNCTION IF EXISTS add_business_days(TIMESTAMPTZ, INT);
+DROP TYPE IF EXISTS scam_type;
+DROP TYPE IF EXISTS recall_status;
+DROP TYPE IF EXISTS dispute_decision;
 DROP TYPE IF EXISTS mfa_kind;
 DROP TYPE IF EXISTS event_type;
 DROP TYPE IF EXISTS dispute_category;

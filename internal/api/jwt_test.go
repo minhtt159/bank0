@@ -26,7 +26,7 @@ func TestJWTRoundTrip(t *testing.T) {
 	s := jwtServer("topsecret", time.Hour)
 	uid := uuid.New()
 
-	tok, exp, err := s.issueJWT(uid, "customer", "alice", []string{"pwd"})
+	tok, exp, err := s.issueJWT(uid, "customer", "alice", []string{"pwd"}, "")
 	if err != nil {
 		t.Fatalf("issueJWT: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestJWTRoundTrip(t *testing.T) {
 }
 
 func TestJWTRejectsTamperedSecret(t *testing.T) {
-	tok, _, _ := jwtServer("secretA", time.Hour).issueJWT(uuid.New(), "customer", "a", []string{"pwd"})
+	tok, _, _ := jwtServer("secretA", time.Hour).issueJWT(uuid.New(), "customer", "a", []string{"pwd"}, "")
 	if _, err := jwtServer("secretB", time.Hour).parseJWT(tok); err == nil {
 		t.Error("token signed with a different secret must be rejected")
 	}
@@ -55,14 +55,14 @@ func TestJWTRejectsTamperedSecret(t *testing.T) {
 
 func TestJWTRejectsExpired(t *testing.T) {
 	s := jwtServer("topsecret", -time.Hour) // already expired
-	tok, _, _ := s.issueJWT(uuid.New(), "customer", "a", []string{"pwd"})
+	tok, _, _ := s.issueJWT(uuid.New(), "customer", "a", []string{"pwd"}, "")
 	if _, err := s.parseJWT(tok); err == nil {
 		t.Error("expired token must be rejected")
 	}
 }
 
 func TestJWTRejectsWrongAudience(t *testing.T) {
-	tok, _, _ := jwtServer("topsecret", time.Hour).issueJWT(uuid.New(), "customer", "a", []string{"pwd"})
+	tok, _, _ := jwtServer("topsecret", time.Hour).issueJWT(uuid.New(), "customer", "a", []string{"pwd"}, "")
 	other := jwtServer("topsecret", time.Hour)
 	other.cfg.Auth.JWTAudience = "some-other-aud"
 	if _, err := other.parseJWT(tok); err == nil {

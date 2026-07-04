@@ -174,12 +174,45 @@ func TestHTTPStepUpGate(t *testing.T) {
 		t.Fatalf("gate body = %s", b)
 	}
 
-	// Verify (fresh otp), retry with the SAME key -> exactly one transfer.
+	// Dynamic linking (Rec 14): an UNLINKED fresh OTP no longer authorizes a
+	// gated transfer — the verify must commit to this exact (debit,credit,amount).
 	lr := postJSON(t, ts.URL+"/auth/login", nil, map[string]string{"username": uname, "password": "pw"})
 	var lb loginBody
 	decodeBody(t, lr, &lb)
 	code, _ := totp.GenerateCode(secret, time.Now())
 	vr := postJSON(t, ts.URL+"/auth/mfa/verify", nil, map[string]string{"mfa_token": lb.MfaToken, "code": code})
+	var unlinked loginBody
+	decodeBody(t, vr, &unlinked)
+	hdr = map[string]string{"Authorization": "Bearer " + unlinked.Token, "Idempotency-Key": key}
+	r = postJSON(t, ts.URL+"/transfers", hdr, map[string]any{
+		"debit_account": from.String(), "credit_account": to.String(), "amount_minor": 6_000})
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("unlinked fresh OTP = %d, want 403 (WYSIWYS)", r.StatusCode)
+	}
+
+	// Linked verify to a DIFFERENT amount must not authorize this one.
+	lr = postJSON(t, ts.URL+"/auth/login", nil, map[string]string{"username": uname, "password": "pw"})
+	decodeBody(t, lr, &lb)
+	code, _ = totp.GenerateCode(secret, time.Now())
+	vr = postJSON(t, ts.URL+"/auth/mfa/verify", nil, map[string]any{
+		"mfa_token": lb.MfaToken, "code": code,
+		"link": map[string]any{"debit_account": from.String(), "credit_account": to.String(), "amount_minor": 9_999}})
+	var wrongLink loginBody
+	decodeBody(t, vr, &wrongLink)
+	hdr = map[string]string{"Authorization": "Bearer " + wrongLink.Token, "Idempotency-Key": key}
+	r = postJSON(t, ts.URL+"/transfers", hdr, map[string]any{
+		"debit_account": from.String(), "credit_account": to.String(), "amount_minor": 6_000})
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong-amount link = %d, want 403", r.StatusCode)
+	}
+
+	// Correctly linked verify, retry with the SAME key -> exactly one transfer.
+	lr = postJSON(t, ts.URL+"/auth/login", nil, map[string]string{"username": uname, "password": "pw"})
+	decodeBody(t, lr, &lb)
+	code, _ = totp.GenerateCode(secret, time.Now())
+	vr = postJSON(t, ts.URL+"/auth/mfa/verify", nil, map[string]any{
+		"mfa_token": lb.MfaToken, "code": code,
+		"link": map[string]any{"debit_account": from.String(), "credit_account": to.String(), "amount_minor": 6_000}})
 	var pair loginBody
 	decodeBody(t, vr, &pair)
 

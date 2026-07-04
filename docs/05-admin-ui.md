@@ -161,6 +161,12 @@ resolve state machine, backed by the same endpoints the JSON admin API exposes
   raised-at, raiser, category, status, from/to IBANs, and amount. Backed by
   `ListDisputesAdmin` (cursor-paginated; the JSON `GET /admin/disputes?status=` adds
   the status filter).
+- **Decide / Recall (JSON, Rec 12)**: `POST /admin/disputes/{id}/decide`
+  (`reimbursed` / `partially_reimbursed` — a REAL clearing→victim `adjustment`
+  transfer, capped + excess-adjusted by `bank_settings`, excess waived for
+  vulnerable customers — or `declined`) and `POST /admin/disputes/{id}/recall`
+  (simulated pacs.004: `requested` → `funds_returned` | `refused`). Both audit
+  to `admin_actions` and notify the filer on the events feed.
 - **Resolve** (`POST /console/disputes/{id}/resolve?status=` + optional note): inline
   per-row actions — *Reviewing* (open → under_review), *Resolve*, *Reject* — with an
   optional resolution note. Terminal rows show their final status, no actions. The

@@ -118,19 +118,44 @@ type ResolvedAccount struct {
 	AccountType     string    `json:"account_type"`
 	Gate            string    `json:"gate"`
 	CheckedAt       time.Time `json:"checked_at"`
+	// Recipient-risk (Rec 11): server-decided badge + machine signals.
+	RecipientRisk         string   `json:"recipient_risk"`
+	MuleSuspected         bool     `json:"mule_suspected"`
+	Signals               []string `json:"signals"`
+	IsFirstPaymentToPayee bool     `json:"is_first_payment_to_payee"`
 }
 
 // ResolveAccountByIban looks up an active customer account by IBAN and computes
-// the CoP verdict against the customer-typed nameHint (nil = 'unable'). The
-// function RAISEs (mapped to 404) when no active account matches.
-func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string, nameHint *string) (ResolvedAccount, error) {
+// the CoP verdict against the customer-typed nameHint (nil = 'unable') plus the
+// recipient-risk signals for the caller (Rec 11). The function RAISEs (mapped
+// to 404) when no active account matches.
+func (p *Postgres) ResolveAccountByIban(ctx context.Context, iban string, nameHint *string, caller *uuid.UUID) (ResolvedAccount, error) {
 	const q = `SELECT account_id, iban, owner_name_masked, match_result, reason_code,
-	                  suggested_name, account_type, gate, checked_at
-	           FROM resolve_account_by_iban($1::varchar, $2::text)`
+	                  suggested_name, account_type, gate, checked_at,
+	                  recipient_risk, mule_suspected, signals, is_first_payment_to_payee
+	           FROM resolve_account_by_iban($1::varchar, $2::text, $3::uuid)`
 	var a ResolvedAccount
-	err := p.Pool.QueryRow(ctx, q, iban, nameHint).Scan(&a.AccountID, &a.Iban, &a.OwnerNameMasked,
-		&a.MatchResult, &a.ReasonCode, &a.SuggestedName, &a.AccountType, &a.Gate, &a.CheckedAt)
+	err := p.Pool.QueryRow(ctx, q, iban, nameHint, caller).Scan(&a.AccountID, &a.Iban, &a.OwnerNameMasked,
+		&a.MatchResult, &a.ReasonCode, &a.SuggestedName, &a.AccountType, &a.Gate, &a.CheckedAt,
+		&a.RecipientRisk, &a.MuleSuspected, &a.Signals, &a.IsFirstPaymentToPayee)
 	return a, err
+}
+
+// RiskAssessment mirrors assess_transfer_risk()'s RETURNS TABLE (Rec 15 TRA seam).
+type RiskAssessment struct {
+	Band    string   `json:"risk_band"`
+	Score   int32    `json:"score"`
+	Reasons []string `json:"reasons"`
+}
+
+// AssessTransferRisk scores a transfer attempt server-side. Advisory client
+// signals never feed it; the band ORs into the step-up gate's trigger set.
+func (p *Postgres) AssessTransferRisk(ctx context.Context, caller, debit, credit uuid.UUID, amountMinor int64) (RiskAssessment, error) {
+	var ra RiskAssessment
+	err := p.Pool.QueryRow(ctx,
+		`SELECT risk_band, score, reasons FROM assess_transfer_risk($1, $2, $3, $4)`,
+		caller, debit, credit, amountMinor).Scan(&ra.Band, &ra.Score, &ra.Reasons)
+	return ra, err
 }
 
 // TransferSuggestion mirrors one row of suggest_transfer_destinations()'s RETURNS

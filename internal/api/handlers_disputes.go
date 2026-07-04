@@ -32,6 +32,16 @@ func validResolveStatus(s string) bool {
 type raiseDisputeReq struct {
 	Category string `json:"category"`
 	Reason   string `json:"reason"`
+	ScamType string `json:"scam_type"` // optional PSR claim tag
+}
+
+func validScamType(t string) bool {
+	switch sqlc.ScamType(t) {
+	case sqlc.ScamTypeImpersonation, sqlc.ScamTypePurchase, sqlc.ScamTypeInvestment,
+		sqlc.ScamTypeRomance, sqlc.ScamTypeInvoice, sqlc.ScamTypeAdvanceFee, sqlc.ScamTypeOther:
+		return true
+	}
+	return false
 }
 
 // RaiseDispute implements genclient.ServerInterface ("I don't recognise this").
@@ -52,12 +62,20 @@ func (s *Server) RaiseDispute(w http.ResponseWriter, r *http.Request, id openapi
 		writeError(w, http.StatusUnprocessableEntity, "invalid_category", "unknown dispute category")
 		return
 	}
-	disputeID, err := s.pg.Queries.RaiseDispute(r.Context(), sqlc.RaiseDisputeParams{
+	rp := sqlc.RaiseDisputeParams{
 		TransferID: uuid.UUID(id),
 		Raiser:     subj,
 		Category:   sqlc.DisputeCategory(req.Category),
 		Reason:     req.Reason,
-	})
+	}
+	if req.ScamType != "" {
+		if !validScamType(req.ScamType) {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_scam_type", "unknown scam type")
+			return
+		}
+		rp.ScamType = &req.ScamType
+	}
+	disputeID, err := s.pg.Queries.RaiseDispute(r.Context(), rp)
 	if err != nil {
 		// not-a-party / unknown transfer -> 404; not disputable -> 422; dup open -> 409.
 		s.mapDBError(w, r, err)
@@ -168,4 +186,80 @@ func (s *Server) ResolveDispute(w http.ResponseWriter, r *http.Request, id opena
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+type decideDisputeReq struct {
+	Decision              string `json:"decision"`
+	ReimbursedAmountMinor *int64 `json:"reimbursed_amount_minor"`
+	Vulnerable            *bool  `json:"vulnerable"`
+	Note                  string `json:"note"`
+}
+
+// DecideDispute implements genadmin.ServerInterface — the PSR claim outcome.
+// A reimbursement MOVES REAL MONEY (EXTERNAL_CLEARING -> victim account) inside
+// decide_dispute, idempotency-keyed on the dispute id; policy (cap/excess/
+// vulnerable waiver) lives in the DB.
+func (s *Server) DecideDispute(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	op, ok := s.requireRole(w, r, canActOnMoney)
+	if !ok {
+		return
+	}
+	var req decideDisputeReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	switch sqlc.DisputeDecision(req.Decision) {
+	case sqlc.DisputeDecisionReimbursed, sqlc.DisputeDecisionPartiallyReimbursed, sqlc.DisputeDecisionDeclined:
+	default:
+		writeError(w, http.StatusUnprocessableEntity, "invalid_decision", "decision must be reimbursed, partially_reimbursed or declined")
+		return
+	}
+	payout, err := s.pg.Queries.DecideDispute(r.Context(), sqlc.DecideDisputeParams{
+		DisputeID:      uuid.UUID(id),
+		Resolver:       op.UserID,
+		Decision:       sqlc.DisputeDecision(req.Decision),
+		ReimburseMinor: req.ReimbursedAmountMinor,
+		Vulnerable:     req.Vulnerable,
+		Note:           req.Note,
+	})
+	if err != nil {
+		s.mapDBError(w, r, err) // terminal -> 409, bad amount -> 422, unknown -> 404
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "decision": req.Decision, "payout_minor": payout})
+}
+
+type recallDisputeReq struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
+// RecallDispute implements genadmin.ServerInterface — the SIMULATED interbank
+// recall (pacs.004) state machine: none -> requested -> funds_returned|refused.
+func (s *Server) RecallDispute(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	op, ok := s.requireRole(w, r, canActOnMoney)
+	if !ok {
+		return
+	}
+	var req recallDisputeReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	switch sqlc.RecallStatus(req.Status) {
+	case sqlc.RecallStatusRequested, sqlc.RecallStatusFundsReturned, sqlc.RecallStatusRefused:
+	default:
+		writeError(w, http.StatusUnprocessableEntity, "invalid_status", "status must be requested, funds_returned or refused")
+		return
+	}
+	st, err := s.pg.Queries.SetDisputeRecall(r.Context(), sqlc.SetDisputeRecallParams{
+		DisputeID: uuid.UUID(id),
+		Actor:     op.UserID,
+		Status:    sqlc.RecallStatus(req.Status),
+		Reason:    req.Reason,
+	})
+	if err != nil {
+		s.mapDBError(w, r, err) // illegal transition -> 409, unknown -> 404
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "recall_status": st})
 }
