@@ -1,44 +1,76 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "minimumReleaseAge": "7 days",
   "internalChecksFilter": "strict",
   "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
       "description": "Bundle non-major PWA (web/app) updates into one PR.",
-      "matchManagers": ["npm"],
-      "matchFileNames": ["web/app/**"],
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "web/app/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
       "groupName": "web app (PWA) deps"
     },
     {
       "description": "Bundle non-major Cloudflare worker updates into one PR.",
-      "matchManagers": ["npm"],
-      "matchFileNames": ["worker/**"],
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchFileNames": [
+        "worker/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
       "groupName": "cloudflare worker deps"
     },
     {
       "description": "Gate JS major upgrades behind manual dashboard approval (breaking changes; no JS build in CI).",
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["major"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "dependencyDashboardApproval": true,
-      "addLabels": ["deps:major"]
+      "addLabels": [
+        "deps:major"
+      ]
     },
     {
-      "description": "Pin GitHub Actions to commit SHAs for supply-chain safety; group their bumps.",
-      "matchManagers": ["github-actions"],
-      "pinDigests": true,
+      "description": "DECISION 2026-07-04 (minh): digest-pinning for GitHub Actions is DEFERRED \u2014 team/repo too small to carry the SHA-churn review load; tag pins (@vN) suffice for now. Revisit when the repo gains external contributors or a compliance requirement. Group action bumps into one PR.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "pinDigests": false,
       "groupName": "github actions"
     }
   ],
   "vulnerabilityAlerts": {
-    "labels": ["security"],
+    "labels": [
+      "security"
+    ],
     "minimumReleaseAge": "0 days"
   },
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 6am on monday"]
+    "schedule": [
+      "before 6am on monday"
+    ]
   }
 }
