@@ -9,7 +9,7 @@ SELECT create_user(
 ) AS id;
 
 -- name: GetUserByID :one
-SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
+SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, created_at, updated_at
 FROM users WHERE id = sqlc.arg(id)::uuid;
 
 -- name: UpdateUserInfo :exec

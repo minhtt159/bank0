@@ -61,6 +61,13 @@ $$;
 CREATE TYPE user_role       AS ENUM ('customer', 'operator', 'admin', 'auditor');
 CREATE TYPE user_status     AS ENUM ('active', 'locked', 'closed');
 
+-- Onboarding lifecycle for self-registered users, distinct from user_status
+-- (which gates login). Admin-created users are born 'active'; only public
+-- self-registration walks pending_verification -> verified.
+CREATE TYPE onboarding_status    AS ENUM ('pending_verification', 'verified', 'active', 'rejected');
+CREATE TYPE verification_channel AS ENUM ('email', 'phone');
+CREATE TYPE verification_status  AS ENUM ('pending', 'verified', 'expired', 'canceled');
+
 CREATE TYPE account_kind    AS ENUM ('customer', 'system');
 CREATE TYPE account_status  AS ENUM ('active', 'frozen', 'closed');
 
@@ -79,6 +86,9 @@ CREATE TYPE dispute_category AS ENUM ('unrecognised', 'fraud', 'wrong_amount', '
 -- +goose Down
 DROP TYPE IF EXISTS dispute_category;
 DROP TYPE IF EXISTS dispute_status;
+DROP TYPE IF EXISTS verification_status;
+DROP TYPE IF EXISTS verification_channel;
+DROP TYPE IF EXISTS onboarding_status;
 DROP TYPE IF EXISTS ik_status;
 DROP TYPE IF EXISTS hold_status;
 DROP TYPE IF EXISTS entry_direction;

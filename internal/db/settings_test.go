@@ -9,6 +9,17 @@ import (
 	"github.com/minhtt159/bank0/internal/iban"
 )
 
+// The singleton row is load-bearing (requires_approval / default_transfer_limit /
+// create_account read it): DELETE is blocked by trigger (23001 restrict_violation).
+func TestBankSettingsDeleteBlocked(t *testing.T) {
+	pg := newTestPG(t)
+	if _, err := pg.Pool.Exec(context.Background(), `DELETE FROM bank_settings`); err == nil {
+		t.Fatal("DELETE on bank_settings must be rejected")
+	} else if got := sqlstate(err); got != "23001" {
+		t.Errorf("SQLSTATE = %q, want 23001 (restrict_violation)", got)
+	}
+}
+
 // API-8: bank policy is DB-authoritative. requires_approval reflects updates, and
 // create_account sources its default limit from bank_settings. bank_settings is a
 // singleton, so reset it on cleanup to keep other tests' seeded threshold intact.

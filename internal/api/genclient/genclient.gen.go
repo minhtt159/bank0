@@ -92,6 +92,24 @@ func (e RaiseDisputeRequestCategory) Valid() bool {
 	}
 }
 
+// Defines values for RegisterResponseVerifyChannel.
+const (
+	RegisterResponseVerifyChannelEmail RegisterResponseVerifyChannel = "email"
+	RegisterResponseVerifyChannelPhone RegisterResponseVerifyChannel = "phone"
+)
+
+// Valid indicates whether the value is a known member of the RegisterResponseVerifyChannel enum.
+func (e RegisterResponseVerifyChannel) Valid() bool {
+	switch e {
+	case RegisterResponseVerifyChannelEmail:
+		return true
+	case RegisterResponseVerifyChannelPhone:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransferListItemDirection.
 const (
 	TransferListItemDirectionIn  TransferListItemDirection = "in"
@@ -119,6 +137,24 @@ const (
 func (e TransferSuggestionSource) Valid() bool {
 	switch e {
 	case Scenario:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerifyContactResponseChannel.
+const (
+	VerifyContactResponseChannelEmail VerifyContactResponseChannel = "email"
+	VerifyContactResponseChannelPhone VerifyContactResponseChannel = "phone"
+)
+
+// Valid indicates whether the value is a known member of the VerifyContactResponseChannel enum.
+func (e VerifyContactResponseChannel) Valid() bool {
+	switch e {
+	case VerifyContactResponseChannelEmail:
+		return true
+	case VerifyContactResponseChannelPhone:
 		return true
 	default:
 		return false
@@ -359,6 +395,35 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+// RegisterRequest At least one of email/phone_number is required (enforced server-side).
+type RegisterRequest struct {
+	Email       *string `json:"email,omitempty"`
+	FullName    string  `json:"full_name"`
+	Password    string  `json:"password"`
+	PhoneNumber *string `json:"phone_number,omitempty"`
+	Username    string  `json:"username"`
+}
+
+// RegisterResponse defines model for RegisterResponse.
+type RegisterResponse struct {
+	OnboardingStatus *string             `json:"onboarding_status,omitempty"`
+	UserId           *openapi_types.UUID `json:"user_id,omitempty"`
+
+	// VerifyChannel channel a code was sent to
+	VerifyChannel *RegisterResponseVerifyChannel `json:"verify_channel,omitempty"`
+
+	// VerifyToken Opaque handle for /auth/verify-contact and /auth/resend-code. The code itself is delivered out-of-band, never in a response.
+	VerifyToken *string `json:"verify_token,omitempty"`
+}
+
+// RegisterResponseVerifyChannel channel a code was sent to
+type RegisterResponseVerifyChannel string
+
+// ResendCodeRequest defines model for ResendCodeRequest.
+type ResendCodeRequest struct {
+	VerifyToken string `json:"verify_token"`
+}
+
 // ResolvedAccount defines model for ResolvedAccount.
 type ResolvedAccount struct {
 	AccountId       *openapi_types.UUID `json:"account_id,omitempty"`
@@ -462,16 +527,39 @@ type UpdateMeRequest struct {
 
 // User defines model for User.
 type User struct {
-	CreatedAt   *time.Time          `json:"created_at,omitempty"`
-	Email       *string             `json:"email,omitempty"`
-	FullName    *string             `json:"full_name,omitempty"`
-	Id          *openapi_types.UUID `json:"id,omitempty"`
-	PhoneNumber *string             `json:"phone_number,omitempty"`
-	Role        *string             `json:"role,omitempty"`
-	Status      *string             `json:"status,omitempty"`
-	UpdatedAt   *time.Time          `json:"updated_at,omitempty"`
-	Username    *string             `json:"username,omitempty"`
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	Email     *string             `json:"email,omitempty"`
+	FullName  *string             `json:"full_name,omitempty"`
+	Id        *openapi_types.UUID `json:"id,omitempty"`
+
+	// OnboardingStatus Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'.
+	OnboardingStatus *string    `json:"onboarding_status,omitempty"`
+	PhoneNumber      *string    `json:"phone_number,omitempty"`
+	Role             *string    `json:"role,omitempty"`
+	Status           *string    `json:"status,omitempty"`
+	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
+	Username         *string    `json:"username,omitempty"`
 }
+
+// VerifyContactRequest defines model for VerifyContactRequest.
+type VerifyContactRequest struct {
+	// Code 6-digit numeric code
+	Code        string `json:"code"`
+	VerifyToken string `json:"verify_token"`
+}
+
+// VerifyContactResponse defines model for VerifyContactResponse.
+type VerifyContactResponse struct {
+	Channel *VerifyContactResponseChannel `json:"channel,omitempty"`
+
+	// LoginReady true once the user may POST /auth/login
+	LoginReady       *bool               `json:"login_ready,omitempty"`
+	OnboardingStatus *string             `json:"onboarding_status,omitempty"`
+	UserId           *openapi_types.UUID `json:"user_id,omitempty"`
+}
+
+// VerifyContactResponseChannel defines model for VerifyContactResponse.Channel.
+type VerifyContactResponseChannel string
 
 // Cursor defines model for Cursor.
 type Cursor = time.Time
@@ -524,6 +612,11 @@ type GetAccountLedgerParams struct {
 
 // GetAccountLedgerParamsDirection defines parameters for GetAccountLedger.
 type GetAccountLedgerParamsDirection string
+
+// RegisterParams defines parameters for Register.
+type RegisterParams struct {
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+}
 
 // ResolveBeneficiaryParams defines parameters for ResolveBeneficiary.
 type ResolveBeneficiaryParams struct {
@@ -597,6 +690,15 @@ type LogoutJSONRequestBody = RefreshRequest
 // RefreshJSONRequestBody defines body for Refresh for application/json ContentType.
 type RefreshJSONRequestBody = RefreshRequest
 
+// RegisterJSONRequestBody defines body for Register for application/json ContentType.
+type RegisterJSONRequestBody = RegisterRequest
+
+// ResendCodeJSONRequestBody defines body for ResendCode for application/json ContentType.
+type ResendCodeJSONRequestBody = ResendCodeRequest
+
+// VerifyContactJSONRequestBody defines body for VerifyContact for application/json ContentType.
+type VerifyContactJSONRequestBody = VerifyContactRequest
+
 // AddBeneficiaryJSONRequestBody defines body for AddBeneficiary for application/json ContentType.
 type AddBeneficiaryJSONRequestBody = AddBeneficiaryRequest
 
@@ -635,6 +737,15 @@ type ServerInterface interface {
 	// Rotate a refresh token for a new access + refresh token pair
 	// (POST /auth/refresh)
 	Refresh(w http.ResponseWriter, r *http.Request)
+	// Public self-registration. Creates a locked, pending-verification customer. Idempotent.
+	// (POST /auth/register)
+	Register(w http.ResponseWriter, r *http.Request, params RegisterParams)
+	// Re-dispatch a verification code (cooldown-throttled)
+	// (POST /auth/resend-code)
+	ResendCode(w http.ResponseWriter, r *http.Request)
+	// Consume a verification code for an email or phone channel
+	// (POST /auth/verify-contact)
+	VerifyContact(w http.ResponseWriter, r *http.Request)
 	// List the caller's saved beneficiaries (fuzzy search is client-side)
 	// (GET /beneficiaries)
 	ListBeneficiaries(w http.ResponseWriter, r *http.Request)
@@ -925,6 +1036,79 @@ func (siw *ServerInterfaceWrapper) Refresh(w http.ResponseWriter, r *http.Reques
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Refresh(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Register operation middleware
+func (siw *ServerInterfaceWrapper) Register(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RegisterParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		err = fmt.Errorf("Header parameter Idempotency-Key is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "Idempotency-Key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Register(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResendCode operation middleware
+func (siw *ServerInterfaceWrapper) ResendCode(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResendCode(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyContact operation middleware
+func (siw *ServerInterfaceWrapper) VerifyContact(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyContact(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1698,6 +1882,12 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/auth/logout-all", wrapper.LogoutAll).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/auth/refresh", wrapper.Refresh).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/register", wrapper.Register).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/resend-code", wrapper.ResendCode).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/auth/verify-contact", wrapper.VerifyContact).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/beneficiaries", wrapper.ListBeneficiaries).Methods(http.MethodGet)
 

@@ -249,7 +249,7 @@ func (q *Queries) GetAccountLedger(ctx context.Context, arg GetAccountLedgerPara
 
 const getTransfer = `-- name: GetTransfer :one
 SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status, kind,
-       reverses_id, description, failure_reason, requested_at, posted_at, created_at, updated_at
+       reverses_id, description, uetr, end_to_end_id, failure_reason, requested_at, posted_at, created_at, updated_at
 FROM transfers WHERE id = $1::uuid
 `
 
@@ -263,6 +263,8 @@ type GetTransferRow struct {
 	Kind            TransferKind   `json:"kind"`
 	ReversesID      *uuid.UUID     `json:"reverses_id"`
 	Description     string         `json:"description"`
+	Uetr            uuid.UUID      `json:"uetr"`
+	EndToEndID      *string        `json:"end_to_end_id"`
 	FailureReason   *string        `json:"failure_reason"`
 	RequestedAt     time.Time      `json:"requested_at"`
 	PostedAt        *time.Time     `json:"posted_at"`
@@ -283,6 +285,8 @@ func (q *Queries) GetTransfer(ctx context.Context, id uuid.UUID) (GetTransferRow
 		&i.Kind,
 		&i.ReversesID,
 		&i.Description,
+		&i.Uetr,
+		&i.EndToEndID,
 		&i.FailureReason,
 		&i.RequestedAt,
 		&i.PostedAt,

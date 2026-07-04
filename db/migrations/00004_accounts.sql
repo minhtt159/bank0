@@ -199,6 +199,95 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Customer self-service account opening (spec-customer-account-opening).
+-- The server mints the IBAN: a REAL ISO 13616 'SE' IBAN (iban_generate, 00002 —
+-- valid MOD-97 check digits, so it passes the accounts checksum CHECK and every
+-- client-side validator) whose 20-digit BBAN comes off a sequence. The sequence
+-- guarantees uniqueness; UNIQUE(accounts.iban) is the backstop. Internal-only:
+-- these are not routable at any real Swedish bank.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE SEQUENCE iban_seq START 1000000000000001;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION allocate_iban() RETURNS VARCHAR AS $$
+    SELECT iban_generate('SE', lpad(nextval('iban_seq')::text, 20, '0'));
+$$ LANGUAGE sql;
+
+-- open_customer_account: a customer opens an account for THEMSELVES — the server
+-- allocates the IBAN, the limit comes from bank_settings (create_account sources
+-- default_transfer_limit() on limit<=0), and the per-user cap comes from
+-- bank_settings.max_accounts_per_user (bank policy, operator-tunable). The PIN
+-- exists only to satisfy create_account (card/ATM path is out of scope for the
+-- client surface): crypto-strong random, never returned, never logged.
+-- Idempotent via the same claim-key gate as request_transfer (scope
+-- 'open_account'): a mobile retry returns the originally-opened account instead
+-- of opening a second.
+CREATE OR REPLACE FUNCTION open_customer_account(
+    p_idempotency_key TEXT,
+    p_user_id         UUID
+) RETURNS TABLE (account_id UUID, was_replay BOOLEAN) AS $$
+DECLARE
+    -- scalar vars, not idempotency_keys%ROWTYPE: %ROWTYPE resolves at CREATE
+    -- time and the table lives in 00005 (this function only runs after both exist).
+    v_hash      TEXT := encode(digest('open_account|' || p_user_id::text, 'sha256'), 'hex');
+    v_ex_scope  TEXT;
+    v_ex_hash   TEXT;
+    v_ex_status ik_status;
+    v_ex_resp   JSONB;
+    v_count INT; v_cap INT; v_pin TEXT; v_id UUID;
+BEGIN
+    IF p_idempotency_key IS NULL OR p_idempotency_key = '' THEN
+        RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = 'check_violation';
+    END IF;
+
+    INSERT INTO idempotency_keys (key, scope, request_hash, status)
+    VALUES (p_idempotency_key, 'open_account', v_hash, 'in_progress')
+    ON CONFLICT (key) DO NOTHING;
+
+    IF NOT FOUND THEN
+        SELECT ik.scope, ik.request_hash, ik.status, ik.response
+          INTO v_ex_scope, v_ex_hash, v_ex_status, v_ex_resp
+          FROM idempotency_keys ik WHERE ik.key = p_idempotency_key;
+        IF v_ex_scope <> 'open_account' OR v_ex_hash <> v_hash THEN
+            RAISE EXCEPTION 'idempotency key reused with different parameters'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF v_ex_status = 'in_progress' THEN
+            RAISE EXCEPTION 'request with this idempotency key is in progress'
+                USING ERRCODE = 'object_in_use';
+        END IF;
+        RETURN QUERY SELECT (v_ex_resp->>'account_id')::uuid, TRUE;
+        RETURN;
+    END IF;
+
+    PERFORM 1 FROM users WHERE id = p_user_id AND status = 'active' FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'user % not found or not active', p_user_id;
+    END IF;
+
+    -- the user row is locked above, so two concurrent self-opens serialize and
+    -- the cap cannot be raced past.
+    v_cap := max_accounts_per_user();
+    SELECT count(*) INTO v_count FROM accounts
+     WHERE user_id = p_user_id AND status <> 'closed';
+    IF v_count >= v_cap THEN
+        RAISE EXCEPTION 'account limit reached (% of %)', v_count, v_cap
+            USING ERRCODE = 'check_violation';   -- handler maps the cap -> 409
+    END IF;
+
+    v_pin := lpad(((('x' || encode(gen_random_bytes(4), 'hex'))::bit(32)::bigint & 2147483647) % 1000000)::text, 6, '0');
+    v_id  := create_account(p_user_id, allocate_iban(), v_pin, 0);
+
+    UPDATE idempotency_keys
+       SET status = 'completed', response = jsonb_build_object('account_id', v_id)
+     WHERE key = p_idempotency_key;
+
+    RETURN QUERY SELECT v_id, FALSE;
+END;
+$$ LANGUAGE plpgsql;
+
 -- set_default_account: clear-then-set in one statement-pair under a user lock.
 CREATE OR REPLACE FUNCTION set_default_account(
     p_user_id    UUID,
@@ -253,9 +342,12 @@ $$ LANGUAGE plpgsql;
 DROP FUNCTION IF EXISTS update_transfer_limit(UUID, BIGINT);
 DROP FUNCTION IF EXISTS set_account_status(UUID, account_status);
 DROP FUNCTION IF EXISTS set_default_account(UUID, UUID);
+DROP FUNCTION IF EXISTS open_customer_account(TEXT, UUID);
+DROP FUNCTION IF EXISTS allocate_iban();
 DROP FUNCTION IF EXISTS create_account(UUID, VARCHAR, TEXT, BIGINT);
 DROP FUNCTION IF EXISTS account_available(UUID);
 -- +goose StatementEnd
+DROP SEQUENCE IF EXISTS iban_seq;
 DROP TRIGGER IF EXISTS trg_holds_maintain_held    ON holds;
 DROP TRIGGER IF EXISTS trg_accounts_guard_balance ON accounts;
 DROP TRIGGER IF EXISTS trg_accounts_updated_at    ON accounts;

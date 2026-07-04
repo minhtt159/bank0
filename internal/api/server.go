@@ -14,6 +14,7 @@ import (
 	"github.com/minhtt159/bank0/internal/api/genclient"
 	"github.com/minhtt159/bank0/internal/config"
 	"github.com/minhtt159/bank0/internal/db"
+	"github.com/minhtt159/bank0/internal/notify"
 	webstatic "github.com/minhtt159/bank0/web/static"
 	"log/slog"
 )
@@ -37,6 +38,8 @@ type Server struct {
 	loginLimiter   *rateLimiter // /auth/login per-IP backstop (nil = disabled)
 	refreshLimiter *rateLimiter // /auth/refresh per-IP backstop (nil = disabled)
 
+	notifier notify.Notifier // out-of-band verification-code delivery (LogNotifier by default)
+
 	metrics *metrics // Prometheus registry + instruments, served at /metrics
 }
 
@@ -56,6 +59,9 @@ func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
 		s.loginLimiter = newRateLimiter(n, time.Minute)
 		s.refreshLimiter = newRateLimiter(n*3, time.Minute) // refresh runs more often than login
 	}
+	// Verification codes go out-of-band; in dev the LogNotifier surfaces them in
+	// the app log. Codes never reach production logs. Tests may swap the field.
+	s.notifier = notify.LogNotifier{Log: log, LogCodes: cfg.App.Env != "production"}
 	if cfg.Auth.JWTSecret == "" {
 		log.Warn("auth.jwt_secret is empty — using an insecure dev secret; set APP_AUTH_JWT_SECRET in production")
 		s.jwtSecret = []byte(devJWTSecret)
@@ -125,6 +131,20 @@ func (s *Server) Router() http.Handler {
 		// logout shares the refresh limiter so the whole /auth/* surface has the
 		// per-IP backstop (it consumes a refresh token and is reachable unauthenticated).
 		r.Handle("/auth/logout", s.rateLimit(s.refreshLimiter, s.clientIP, http.HandlerFunc(s.Logout))).Methods(http.MethodPost)
+		// Public self-registration surface (spec-self-registration.md). Shares the
+		// strict login limiter: signup is unauthenticated, so the per-IP backstop is
+		// the only thing between the DB throttles and mass account creation.
+		r.Handle("/auth/register", s.rateLimit(s.loginLimiter, s.clientIP,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				key := r.Header.Get("Idempotency-Key")
+				if key == "" {
+					writeError(w, http.StatusBadRequest, "bad_request", "Idempotency-Key header is required")
+					return
+				}
+				s.Register(w, r, genclient.RegisterParams{IdempotencyKey: key})
+			}))).Methods(http.MethodPost)
+		r.Handle("/auth/verify-contact", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.VerifyContact))).Methods(http.MethodPost)
+		r.Handle("/auth/resend-code", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.ResendCode))).Methods(http.MethodPost)
 		cr := r.PathPrefix("/").Subrouter()
 		cr.Use(s.requireJWT)
 		genclient.HandlerFromMux(s, cr)

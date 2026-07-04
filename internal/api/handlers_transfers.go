@@ -88,10 +88,11 @@ func (s *Server) ListMyTransfers(w http.ResponseWriter, r *http.Request, params 
 }
 
 type createTransferReq struct {
-	DebitAccount  string `json:"debit_account"`
-	CreditAccount string `json:"credit_account"`
-	AmountMinor   int64  `json:"amount_minor"`
-	Description   string `json:"description"`
+	DebitAccount  string  `json:"debit_account"`
+	CreditAccount string  `json:"credit_account"`
+	AmountMinor   int64   `json:"amount_minor"`
+	Description   string  `json:"description"`
+	EndToEndID    *string `json:"end_to_end_id,omitempty"` // optional ISO 20022 originator reference
 }
 
 // CreateTransfer implements genclient.ServerInterface. Auto-posts by default;
@@ -119,10 +120,13 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 	// Debit-account ownership is enforced inside client_transfer (one round trip, in
 	// the DB) — non-ownership raises 42501 -> 403. No separate probe.
 	res, err := s.pg.ClientTransfer(r.Context(), subj, params.IdempotencyKey, debit, credit,
-		req.AmountMinor, req.Description)
+		req.AmountMinor, req.Description, req.EndToEndID)
 	if err != nil {
 		s.mapDBError(w, r, err)
 		return
+	}
+	if res.WasReplay {
+		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	writeJSON(w, http.StatusOK, res)
 }

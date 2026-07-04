@@ -10,10 +10,11 @@ import (
 	"time"
 
 	uuid "github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getBankSettings = `-- name: GetBankSettings :one
-SELECT maker_checker_threshold_minor, default_transfer_limit_minor, default_page_limit, updated_at, updated_by
+SELECT maker_checker_threshold_minor, default_transfer_limit_minor, default_page_limit, max_accounts_per_user, updated_at, updated_by
 FROM bank_settings WHERE id
 `
 
@@ -21,6 +22,7 @@ type GetBankSettingsRow struct {
 	MakerCheckerThresholdMinor int64      `json:"maker_checker_threshold_minor"`
 	DefaultTransferLimitMinor  int64      `json:"default_transfer_limit_minor"`
 	DefaultPageLimit           int32      `json:"default_page_limit"`
+	MaxAccountsPerUser         int32      `json:"max_accounts_per_user"`
 	UpdatedAt                  time.Time  `json:"updated_at"`
 	UpdatedBy                  *uuid.UUID `json:"updated_by"`
 }
@@ -32,6 +34,7 @@ func (q *Queries) GetBankSettings(ctx context.Context) (GetBankSettingsRow, erro
 		&i.MakerCheckerThresholdMinor,
 		&i.DefaultTransferLimitMinor,
 		&i.DefaultPageLimit,
+		&i.MaxAccountsPerUser,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 	)
@@ -43,15 +46,17 @@ SELECT update_bank_settings(
     $1::bigint,
     $2::bigint,
     $3::int,
-    $4::uuid
+    $4::uuid,
+    $5::int
 )
 `
 
 type UpdateBankSettingsParams struct {
-	ThresholdMinor    int64     `json:"threshold_minor"`
-	DefaultLimitMinor int64     `json:"default_limit_minor"`
-	PageLimit         int32     `json:"page_limit"`
-	Actor             uuid.UUID `json:"actor"`
+	ThresholdMinor    int64       `json:"threshold_minor"`
+	DefaultLimitMinor int64       `json:"default_limit_minor"`
+	PageLimit         int32       `json:"page_limit"`
+	Actor             uuid.UUID   `json:"actor"`
+	MaxAccounts       pgtype.Int4 `json:"max_accounts"`
 }
 
 func (q *Queries) UpdateBankSettings(ctx context.Context, arg UpdateBankSettingsParams) error {
@@ -60,6 +65,7 @@ func (q *Queries) UpdateBankSettings(ctx context.Context, arg UpdateBankSettings
 		arg.DefaultLimitMinor,
 		arg.PageLimit,
 		arg.Actor,
+		arg.MaxAccounts,
 	)
 	return err
 }

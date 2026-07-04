@@ -47,20 +47,21 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (uuid.UU
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, full_name, email, phone_number, role, status, created_at, updated_at
+SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, created_at, updated_at
 FROM users WHERE id = $1::uuid
 `
 
 type GetUserByIDRow struct {
-	ID          uuid.UUID  `json:"id"`
-	Username    string     `json:"username"`
-	FullName    string     `json:"full_name"`
-	Email       *string    `json:"email"`
-	PhoneNumber *string    `json:"phone_number"`
-	Role        UserRole   `json:"role"`
-	Status      UserStatus `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID               uuid.UUID        `json:"id"`
+	Username         string           `json:"username"`
+	FullName         string           `json:"full_name"`
+	Email            *string          `json:"email"`
+	PhoneNumber      *string          `json:"phone_number"`
+	Role             UserRole         `json:"role"`
+	Status           UserStatus       `json:"status"`
+	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
@@ -74,6 +75,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.PhoneNumber,
 		&i.Role,
 		&i.Status,
+		&i.OnboardingStatus,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

@@ -44,9 +44,9 @@ route that collides with the client's `/transfers/{id}` — `GET /transfers/pend
 
 ```
 api/openapi.yaml            HTTP contract (client+admin tags) -> genclient/genadmin
-db/migrations/*.sql         goose migrations — 9 domain files: foundation, iban,
+db/migrations/*.sql         goose migrations — 9 domain files (foundation, iban,
                             users, accounts, transfers, maker_checker, maintenance,
-                            features, system_seed (schema + ALL PL/pgSQL)
+                            features, system_seed; schema + ALL PL/pgSQL)
 db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.gen.go
 internal/db/bank.go         hand-written pgx for set-returning fns sqlc can't expand
 internal/db/auth.go         sessions + refresh-token DB calls (hand-written pgx)

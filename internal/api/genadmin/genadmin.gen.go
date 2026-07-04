@@ -331,15 +331,18 @@ type Transfer struct {
 
 // User defines model for User.
 type User struct {
-	CreatedAt   *time.Time          `json:"created_at,omitempty"`
-	Email       *string             `json:"email,omitempty"`
-	FullName    *string             `json:"full_name,omitempty"`
-	Id          *openapi_types.UUID `json:"id,omitempty"`
-	PhoneNumber *string             `json:"phone_number,omitempty"`
-	Role        *string             `json:"role,omitempty"`
-	Status      *string             `json:"status,omitempty"`
-	UpdatedAt   *time.Time          `json:"updated_at,omitempty"`
-	Username    *string             `json:"username,omitempty"`
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	Email     *string             `json:"email,omitempty"`
+	FullName  *string             `json:"full_name,omitempty"`
+	Id        *openapi_types.UUID `json:"id,omitempty"`
+
+	// OnboardingStatus Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'.
+	OnboardingStatus *string    `json:"onboarding_status,omitempty"`
+	PhoneNumber      *string    `json:"phone_number,omitempty"`
+	Role             *string    `json:"role,omitempty"`
+	Status           *string    `json:"status,omitempty"`
+	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
+	Username         *string    `json:"username,omitempty"`
 }
 
 // Cursor defines model for Cursor.

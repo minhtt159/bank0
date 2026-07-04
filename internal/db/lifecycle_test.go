@@ -81,6 +81,58 @@ func TestExpireHoldsFailsPendingTransferAndRestoresAvailable(t *testing.T) {
 	}
 }
 
+// expire_holds() counts HOLDS expired, not transfers flipped to 'failed': a hold
+// whose transfer already left 'pending' is still expired and still counted.
+func TestExpireHoldsCountsHoldsNotTransfers(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	a := mkAccount(t, pg, mkCustomer(t, pg))
+	b := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, a, 10_000)
+
+	var tid uuid.UUID
+	var status string
+	var wasReplay bool
+	if err := pg.Pool.QueryRow(ctx,
+		`SELECT transfer_id, status, was_replay
+		   FROM request_transfer($1,$2,$3,$4,$5,'transfer')`,
+		uuid.NewString(), a, b, int64(4_000), "pending").Scan(&tid, &status, &wasReplay); err != nil {
+		t.Fatalf("request_transfer: %v", err)
+	}
+
+	// The transfer leaves 'pending' while its hold stays active, then the hold
+	// passes expiry. (Direct UPDATE: transfers has no guard trigger.)
+	if _, err := pg.Pool.Exec(ctx,
+		`UPDATE transfers SET status = 'failed', failure_reason = 'test' WHERE id = $1`, tid); err != nil {
+		t.Fatalf("fail transfer: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx,
+		`UPDATE holds SET expires_at = now() - interval '1 hour'
+		  WHERE transfer_id = $1 AND status = 'active'`, tid); err != nil {
+		t.Fatalf("backdate hold: %v", err)
+	}
+
+	// Old body counted the transfers UPDATE (0 rows here); the count must reflect
+	// the expired hold. >= 1 rather than == 1: the count is global, and the api
+	// suite shares this database.
+	var n int
+	if err := pg.Pool.QueryRow(ctx, `SELECT expire_holds()`).Scan(&n); err != nil {
+		t.Fatalf("expire_holds: %v", err)
+	}
+	if n < 1 {
+		t.Errorf("expire_holds() = %d, want >= 1 (the expired hold)", n)
+	}
+
+	var holdStatus string
+	if err := pg.Pool.QueryRow(ctx,
+		`SELECT status FROM holds WHERE transfer_id = $1`, tid).Scan(&holdStatus); err != nil {
+		t.Fatalf("read hold status: %v", err)
+	}
+	if holdStatus != "expired" {
+		t.Errorf("hold status = %q, want expired", holdStatus)
+	}
+}
+
 // ─── disputes (00020) ────────────────────────────────────────────────────────
 
 // postedTransfer creates a posted transfer a->b (a owned by ownerA, b by ownerB).

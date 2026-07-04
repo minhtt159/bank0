@@ -96,6 +96,65 @@ paths:
         "204": { description: logged out everywhere }
         "401": { $ref: "#/components/responses/Error" }
 
+  /auth/register:
+    post:
+      operationId: register
+      tags: [client]
+      summary: Public self-registration. Creates a locked, pending-verification customer. Idempotent.
+      security: []
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: registered; a verification code has been dispatched out-of-band
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "409": { $ref: "#/components/responses/Error" }   # username/email/phone taken
+        "422": { $ref: "#/components/responses/Error" }   # weak password / bad input
+        "429": { $ref: "#/components/responses/Error" }   # rate-limited
+
+  /auth/verify-contact:
+    post:
+      operationId: verifyContact
+      tags: [client]
+      summary: Consume a verification code for an email or phone channel
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerifyContactRequest" }
+      responses:
+        "200":
+          description: verified; the user may now log in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerifyContactResponse" }
+        "401": { $ref: "#/components/responses/Error" }   # wrong/expired code
+        "404": { $ref: "#/components/responses/Error" }   # no such challenge
+        "422": { $ref: "#/components/responses/Error" }   # too many attempts
+        "429": { $ref: "#/components/responses/Error" }
+
+  /auth/resend-code:
+    post:
+      operationId: resendCode
+      tags: [client]
+      summary: Re-dispatch a verification code (cooldown-throttled)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResendCodeRequest" }
+      responses:
+        "202": { description: dispatched (or silently a no-op if no pending challenge) }
+        "429": { $ref: "#/components/responses/Error" }
+
   /me:
     get:
       operationId: getMe
@@ -836,8 +895,44 @@ components:
         phone_number: { type: string }
         role: { type: string }
         status: { type: string }
+        onboarding_status: { type: string, description: "Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      required: [username, password, full_name]
+      properties:
+        username:     { type: string }
+        password:     { type: string, minLength: 12, maxLength: 256 }
+        full_name:    { type: string }
+        email:        { type: string }
+        phone_number: { type: string }
+      description: At least one of email/phone_number is required (enforced server-side).
+    RegisterResponse:
+      type: object
+      properties:
+        user_id:           { type: string, format: uuid }
+        onboarding_status: { type: string, example: pending_verification }
+        verify_channel:    { type: string, enum: [email, phone], description: "channel a code was sent to" }
+        verify_token:      { type: string, description: "Opaque handle for /auth/verify-contact and /auth/resend-code. The code itself is delivered out-of-band, never in a response." }
+    VerifyContactRequest:
+      type: object
+      required: [verify_token, code]
+      properties:
+        verify_token: { type: string }
+        code:         { type: string, description: "6-digit numeric code" }
+    VerifyContactResponse:
+      type: object
+      properties:
+        user_id:           { type: string, format: uuid }
+        onboarding_status: { type: string }
+        channel:           { type: string, enum: [email, phone] }
+        login_ready:       { type: boolean, description: "true once the user may POST /auth/login" }
+    ResendCodeRequest:
+      type: object
+      required: [verify_token]
+      properties:
+        verify_token: { type: string }
     UpdateMeRequest:
       type: object
       # All optional; absent field => unchanged (COALESCE in update_user_info).

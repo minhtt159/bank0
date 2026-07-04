@@ -82,6 +82,9 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 		case "55006": // object_in_use (idempotent request still in progress)
 			writeError(w, http.StatusConflict, "in_progress", "a previous request is still being processed")
 			return
+		case "53400": // configuration_limit_exceeded (verification resend cooldown)
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "please wait before requesting another code")
+			return
 		case "28000", "28P01": // refresh-token reuse/expiry/unknown -> re-authenticate
 			writeError(w, http.StatusUnauthorized, "unauthorized", "please sign in again")
 			return

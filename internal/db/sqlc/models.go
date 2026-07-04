@@ -314,6 +314,50 @@ func (ns NullIkStatus) Value() (driver.Value, error) {
 	return string(ns.IkStatus), nil
 }
 
+type OnboardingStatus string
+
+const (
+	OnboardingStatusPendingVerification OnboardingStatus = "pending_verification"
+	OnboardingStatusVerified            OnboardingStatus = "verified"
+	OnboardingStatusActive              OnboardingStatus = "active"
+	OnboardingStatusRejected            OnboardingStatus = "rejected"
+)
+
+func (e *OnboardingStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OnboardingStatus(s)
+	case string:
+		*e = OnboardingStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OnboardingStatus: %T", src)
+	}
+	return nil
+}
+
+type NullOnboardingStatus struct {
+	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
+	Valid            bool             `json:"valid"` // Valid is true if OnboardingStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOnboardingStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.OnboardingStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OnboardingStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOnboardingStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OnboardingStatus), nil
+}
+
 type TransferKind string
 
 const (
@@ -492,6 +536,92 @@ func (ns NullUserStatus) Value() (driver.Value, error) {
 	return string(ns.UserStatus), nil
 }
 
+type VerificationChannel string
+
+const (
+	VerificationChannelEmail VerificationChannel = "email"
+	VerificationChannelPhone VerificationChannel = "phone"
+)
+
+func (e *VerificationChannel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VerificationChannel(s)
+	case string:
+		*e = VerificationChannel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VerificationChannel: %T", src)
+	}
+	return nil
+}
+
+type NullVerificationChannel struct {
+	VerificationChannel VerificationChannel `json:"verification_channel"`
+	Valid               bool                `json:"valid"` // Valid is true if VerificationChannel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVerificationChannel) Scan(value interface{}) error {
+	if value == nil {
+		ns.VerificationChannel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VerificationChannel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVerificationChannel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VerificationChannel), nil
+}
+
+type VerificationStatus string
+
+const (
+	VerificationStatusPending  VerificationStatus = "pending"
+	VerificationStatusVerified VerificationStatus = "verified"
+	VerificationStatusExpired  VerificationStatus = "expired"
+	VerificationStatusCanceled VerificationStatus = "canceled"
+)
+
+func (e *VerificationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VerificationStatus(s)
+	case string:
+		*e = VerificationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VerificationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullVerificationStatus struct {
+	VerificationStatus VerificationStatus `json:"verification_status"`
+	Valid              bool               `json:"valid"` // Valid is true if VerificationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVerificationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.VerificationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VerificationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVerificationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VerificationStatus), nil
+}
+
 type Account struct {
 	ID                 uuid.UUID     `json:"id"`
 	UserID             *uuid.UUID    `json:"user_id"`
@@ -526,6 +656,7 @@ type BankSetting struct {
 	UpdatedAt                  time.Time  `json:"updated_at"`
 	UpdatedBy                  *uuid.UUID `json:"updated_by"`
 	DefaultPageLimit           int32      `json:"default_page_limit"`
+	MaxAccountsPerUser         int32      `json:"max_accounts_per_user"`
 }
 
 type Beneficiary struct {
@@ -656,6 +787,8 @@ type Transfer struct {
 	ReversesID      *uuid.UUID     `json:"reverses_id"`
 	Description     string         `json:"description"`
 	IdempotencyKey  *string        `json:"idempotency_key"`
+	Uetr            uuid.UUID      `json:"uetr"`
+	EndToEndID      *string        `json:"end_to_end_id"`
 	FailureReason   *string        `json:"failure_reason"`
 	RequestedAt     time.Time      `json:"requested_at"`
 	PostedAt        *time.Time     `json:"posted_at"`
@@ -664,14 +797,33 @@ type Transfer struct {
 }
 
 type User struct {
-	ID           uuid.UUID  `json:"id"`
-	Username     string     `json:"username"`
-	PasswordHash string     `json:"password_hash"`
-	FullName     string     `json:"full_name"`
-	Email        *string    `json:"email"`
-	PhoneNumber  *string    `json:"phone_number"`
-	Role         UserRole   `json:"role"`
-	Status       UserStatus `json:"status"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID               uuid.UUID        `json:"id"`
+	Username         string           `json:"username"`
+	PasswordHash     string           `json:"password_hash"`
+	FullName         string           `json:"full_name"`
+	Email            *string          `json:"email"`
+	PhoneNumber      *string          `json:"phone_number"`
+	Role             UserRole         `json:"role"`
+	Status           UserStatus       `json:"status"`
+	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
+	EmailVerifiedAt  *time.Time       `json:"email_verified_at"`
+	PhoneVerifiedAt  *time.Time       `json:"phone_verified_at"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+}
+
+type VerificationChallenge struct {
+	ID          uuid.UUID           `json:"id"`
+	UserID      uuid.UUID           `json:"user_id"`
+	Channel     VerificationChannel `json:"channel"`
+	Destination string              `json:"destination"`
+	TokenHash   string              `json:"token_hash"`
+	CodeHash    string              `json:"code_hash"`
+	Status      VerificationStatus  `json:"status"`
+	Attempts    int16               `json:"attempts"`
+	MaxAttempts int16               `json:"max_attempts"`
+	LastSentAt  time.Time           `json:"last_sent_at"`
+	ExpiresAt   time.Time           `json:"expires_at"`
+	CreatedAt   time.Time           `json:"created_at"`
+	VerifiedAt  *time.Time          `json:"verified_at"`
 }
