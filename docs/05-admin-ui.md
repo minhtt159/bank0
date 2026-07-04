@@ -129,6 +129,16 @@ For high-risk actions (see §5), the maker submits and the action lands here as
 are both recorded in `admin_actions` (`actor_user_id`, `approved_by`). An admin
 cannot approve their own request.
 
+### 4.4b Limit requests (customer maker-checker)
+
+Customer-initiated transfer-limit changes (`POST /accounts/{id}/limit-requests`
+on the client surface) land in a **Limit requests** queue — same
+`admin_actions` shape (`action = 'limit_request'`), same rules: an admin
+applies (`approve_limit_change` runs `update_transfer_limit`) or rejects, the
+requester can never apply their own, and a raise is therefore never
+self-service. JSON twins: `GET /admin/limit-requests`,
+`POST /admin/limit-requests/{id}/approve|reject`.
+
 ### 4.5 Audit log
 
 `admin_actions` joined to operators: who did what, to which target, when, with the

@@ -23,6 +23,9 @@ JWT subject.
 | Auth | POST | `/auth/refresh` | refresh token | rotate → new access + refresh pair |
 | Auth | POST | `/auth/logout` | refresh token | revoke one refresh token |
 | Auth | POST | `/auth/logout-all` | bearer | revoke every refresh token for the caller |
+| Onboarding | POST | `/auth/register` | public | self-registration → locked `pending_verification` customer; `Idempotency-Key` required (replay returns the original body + `Idempotency-Replayed: true`); code dispatched out-of-band |
+| Onboarding | POST | `/auth/verify-contact` | public | consume the 6-digit code via the opaque `verify_token`; unlocks login (401 wrong/expired, 422 after 5 attempts, 404 unknown token) |
+| Onboarding | POST | `/auth/resend-code` | public | re-dispatch (60s DB cooldown → 429; unknown token → silent 202) |
 | Profile | GET | `/me` | bearer | the caller's own `User` (no password hash) |
 | Profile | PATCH | `/me` | bearer | self-service edit of name/email/phone (password/status/role can't be set here) |
 | Profile | POST | `/me/password` | bearer | change password (verify current); revokes other refresh families, spares the current session |
@@ -30,6 +33,8 @@ JWT subject.
 | Sessions | DELETE | `/me/sessions/{family_id}` | bearer | selective sign-out of one device (idempotent; 404 if not the caller's) |
 | Accounts | GET | `/users/{id}/accounts` | bearer | own accounts only (404 otherwise) |
 | Accounts | GET | `/accounts/{id}` | bearer | account + available balance |
+| Accounts | POST | `/me/accounts` | bearer | open a new account for the caller — server-minted ISO SE IBAN, default limit + per-user cap from `bank_settings`; `Idempotency-Key` required; cap → 409 `account_limit` |
+| Accounts | POST | `/accounts/{id}/limit-requests` | bearer | ask for a transfer-limit change on an OWNED account (403 otherwise); lands in the operator maker-checker queue — never self-applied |
 | Statement | GET | `/accounts/{id}/ledger?cursor&cursor_id&limit&from&to&direction&q&min_minor&max_minor` | bearer | composite-keyset cursor (`cursor`+`cursor_id`, fixes same-timestamp tie-skip), running balance, counterparty; server-side filters (date range, direction, free text, amount range) |
 | Beneficiaries | GET | `/beneficiaries` | bearer | saved payees (fuzzy search is client-side) |
 | Beneficiaries | GET | `/beneficiaries/resolve?iban=` | bearer | confirmation-of-payee: masked owner name |
@@ -37,7 +42,7 @@ JWT subject.
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
 | Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
-| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required |
+| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true` |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" — party-only, one open per (transfer, caller) |
@@ -46,10 +51,13 @@ JWT subject.
 | Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
 | Metrics | GET | `/metrics` | public | RED counters |
 
-Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`,
-`/readyz`, `/metrics`, `/docs`, `/openapi.yaml`) are registered on the parent
-router ahead of the JWT-guarded subrouter, so they aren't shadowed. `logout-all`
-needs the subject, so it stays behind `requireJWT`.
+Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`,
+`/auth/verify-contact`, `/auth/resend-code`, `/health`, `/readyz`, `/metrics`,
+`/docs`, `/openapi.yaml`) are registered on the parent router ahead of the
+JWT-guarded subrouter, so they aren't shadowed. `logout-all` needs the subject,
+so it stays behind `requireJWT`. The three onboarding routes share the strict
+per-IP login limiter; every `Transfer` carries the rail-ready `uetr`
+(bank-minted UUIDv4) and optional originator `end_to_end_id`.
 
 ---
 
@@ -221,6 +229,14 @@ are unchanged, so the ledger and ownership logic don't move.
   tables/functions — schema in
   [`00003_users.sql`](../db/migrations/00003_users.sql) and
   [`00008_features.sql`](../db/migrations/00008_features.sql).
-- **Open backlog** (onboarding/KYC, self-registration, notifications, statement
+- **Onboarding v1 is shipped**: public self-registration + contact verification
+  (§1 Onboarding rows; schema/functions in
+  [`00003_users.sql`](../db/migrations/00003_users.sql)) and customer
+  self-service account opening / limit requests (§1 Accounts rows). A
+  self-registered user is `locked` + `pending_verification` until a code is
+  verified; codes and the `verify_token` are stored hashed; failed attempts are
+  persisted from Go in a second statement (a `RAISE` rolls back the function's
+  own writes).
+- **Open backlog** (full KYC/document capture, notifications, statement
   export, multi-currency) lives in [`specs/`](specs/) — see
   [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).

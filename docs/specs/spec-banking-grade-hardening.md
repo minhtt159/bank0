@@ -1,6 +1,17 @@
 # Spec — Banking-grade hardening & guided-transfer v2
 
-> **Status: recommendation spec / roadmap. Not implemented.** Consolidated from a
+> **Status: recommendation spec / roadmap. Wave 0 + the Rec-18 pre-work are
+> SHIPPED (2026-07-04); the rest is open.** Shipped as-built: Rec 1 (ERRCODE →
+> HTTP map incl. 55006→409 / fingerprint→422 / 42501→403 / 28000→401, replay
+> honoured + `Idempotency-Replayed: true` on `/transfers`, `/auth/register`,
+> `/me/accounts`), Rec 2/29 (`cleanup_idempotency_keys` reaps committed
+> `in_progress` orphans >15 min — note bank0's claims complete inside ONE
+> transaction, so such orphans are unreachable today; the reap guards future
+> multi-statement flows like step-up MFA), and Rec 18 (bank-minted `uetr`
+> UUIDv4 + originator `end_to_end_id` on `transfers`, surfaced on the contract
+> and folded into the idempotency fingerprint). Rec 17 (RFC 9457) is
+> deliberately deferred: it changes the error content-type for all three
+> fraudbank clients and needs a coordinated bump. Consolidated from a
 > 2026-06-15 multi-track research pass (idempotency & exactly-once, ledger/money
 > correctness, payee verification & APP-fraud regulation, SCA & transaction risk,
 > ISO 20022 / API standards, anti-fraud UX → backend enablers, observability /
