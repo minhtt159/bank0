@@ -1,7 +1,18 @@
 # Spec — Banking-grade hardening & guided-transfer v2
 
-> **Status: recommendation spec / roadmap. Waves 0 AND 1 + the Rec-18 pre-work
-> are SHIPPED (2026-07-04); the rest is open.** Wave 1 as-built: Rec 21 (the
+> **Status: recommendation spec / roadmap. Waves 0, 1, 2 AND the Wave-3 recs
+> 11/12/14/15 + the Rec-18 pre-work are SHIPPED (2026-07-04); the rest is
+> open.** Wave 3 as-built: Rec 11 (recipient-risk/mule signals on
+> `/beneficiaries/resolve` — high on operator-flagged or fraud-reported
+> destinations, caller-scoped new-payee/first-payment signals), Rec 12 (the
+> PSR claim machine on disputes — scam_type, 15-BBD sla_due_at, decide with a
+> REAL clearing→victim reimbursement net of the bank_settings cap/excess,
+> vulnerable waiver, simulated pacs.004 recall states), Rec 14 (dynamic
+> linking — /auth/mfa/verify accepts a (debit,credit,amount) link committed
+> into the JWT txn_link; the step-up gate requires the linked factor, so a
+> generic fresh OTP no longer authorizes any payment), and Rec 15 (the TRA
+> seam — assess_transfer_risk() scores velocity/first-payment/flagged-
+> destination/account-age and ORs 'high' into the gate's trigger set). Wave 1 as-built: Rec 21 (the
 > `GET /me/events` feed + unread badge + mark-read, per spec-notifications-events
 > — emissions ride the source txns in post_transfer / issue_refresh_token /
 > resolve_dispute; append-only), Rec 9 (server-side CoP verdict on
@@ -170,8 +181,8 @@ reimbursement amount, SLA clock, recall status, or scam-type mapping.
 |---|-----|---|--------|
 | 9 | **Move the CoP/VOP verdict server-side onto `/beneficiaries/resolve`.** Return `{match_result: match\|close_match\|no_match\|unable, reason_code, suggested_name (the actual registered name on close_match, ≤140 chars), account_type: personal\|business, checked_at}` + a **gate status** `ok\|awaiting_acknowledgement\|blocked`. All three clients then gate identically *by construction.* bank0 is its own (intra-bank, simulated) VOP responder. *Hedge the literal VOP code tokens.* | P0 | M |
 | 10 | **Persist warning-shown / warning-acknowledged evidence** `{warning_id, category, reason_code, acked_at, device}` tied to the transfer attempt (reuse the `admin_actions` pattern). This is the IPR/PSR liability pivot and the input to the Consumer Standard of Caution; today only the local client risk seam fires. | P0 | M |
-| 11 | **Add a recipient-risk / mule signal to resolve:** `{recipient_risk: low\|medium\|high, mule_suspected, signals[]: new_payee\|guided_steer\|mule_flagged\|recently_changed_details, is_first_payment_to_payee}` — the seeded mule target resolves **high**. Generalise `guided_scenarios` into the rule seam. | P1 | M |
-| 12 | **Enrich disputes into a PSR claim machine:** status timeline + `sla_due_at` (business-day clock, stop-the-clock), `decision`, `reimbursed_amount_minor`, `recall_status` (requested/funds_returned/refused/none) + `recall_reason` (e.g. `FRAD`), `scam_type`, cap / excess / `vulnerable_flag`. A closed core can only *simulate* the interbank recall. **Two SEPA deadlines:** originator initiates the recall within **10 banking business days**; the beneficiary bank answers within **15 banking business days** *(exact EPC locator hedged).* | P1 | M |
+| 11 | **SHIPPED — recipient-risk / mule signal on resolve:** `{recipient_risk: low\|medium\|high, mule_suspected, signals[]: new_payee\|guided_steer\|mule_flagged\|recently_changed_details, is_first_payment_to_payee}` — the seeded mule target resolves **high**. Generalise `guided_scenarios` into the rule seam. | P1 | M |
+| 12 | **SHIPPED — disputes are a PSR claim machine:** status timeline + `sla_due_at` (business-day clock, stop-the-clock), `decision`, `reimbursed_amount_minor`, `recall_status` (requested/funds_returned/refused/none) + `recall_reason` (e.g. `FRAD`), `scam_type`, cap / excess / `vulnerable_flag`. A closed core can only *simulate* the interbank recall. **Two SEPA deadlines:** originator initiates the recall within **10 banking business days**; the beneficiary bank answers within **15 banking business days** *(exact EPC locator hedged).* | P1 | M |
 
 ### 3.4 SCA & transaction risk (PSD2, step-up, TRA)
 
@@ -189,8 +200,8 @@ data but isn't wired to a gate.
 | # | Rec | P | Effort |
 |---|-----|---|--------|
 | 13 | **SHIPPED — TOTP MFA + step-up as specced** (retired spec; as-built in ../06-client-api.md §6): RFC 6238, AES-256-GCM seed at rest, hashed recovery codes, 403 `step_up_required` before the key is claimed, `amr`/`auth_time`, same-key retry. | P0 | L |
-| 14 | **Bind the step-up challenge to `(debit│credit│amount)` for dynamic linking** (PSD2 RTS Art. 5 / WYSIWYS) — reuse the existing idempotency tuple so changing amount or payee invalidates the code. The reserved `webauthn` mfa_kind gives a future passkey-bound path. | P1 | M |
-| 15 | **Server-side TRA seam at `request_transfer` time** scoring prior pattern, velocity (count/value trailing 24h–90d), device/location anomaly, and known-mule lists (`guided_scenarios` already models a mule), emitting a risk decision the gate ORs into its trigger set. The client SDK is **advisory input only**; the authoritative decision lives server-side. *(TRA exemption ETV thresholds €500/€250/€100 → 0.005/0.010/0.015 % fraud-rate are conditional and revocable.)* | P1 | L |
+| 14 | **SHIPPED — step-up challenge bound to `(debit│credit│amount)` for dynamic linking** (PSD2 RTS Art. 5 / WYSIWYS) — reuse the existing idempotency tuple so changing amount or payee invalidates the code. The reserved `webauthn` mfa_kind gives a future passkey-bound path. | P1 | M |
+| 15 | **SHIPPED — server-side TRA seam (assess_transfer_risk, gate-time)** scoring prior pattern, velocity (count/value trailing 24h–90d), device/location anomaly, and known-mule lists (`guided_scenarios` already models a mule), emitting a risk decision the gate ORs into its trigger set. The client SDK is **advisory input only**; the authoritative decision lives server-side. *(TRA exemption ETV thresholds €500/€250/€100 → 0.005/0.010/0.015 % fraud-rate are conditional and revocable.)* | P1 | L |
 | 16 | **Gate beneficiary creation (RTS Art. 13) + expose `step_up_limit_minor`** so clients can pre-warn that an amount will demand step-up before submit. | P2 | S |
 
 ### 3.5 API & data standards (ISO 20022, RFC 9457, status vocabulary, rail IDs)

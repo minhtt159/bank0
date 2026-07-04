@@ -27,6 +27,10 @@ type clientClaims struct {
 	Username string   `json:"username"`
 	AMR      []string `json:"amr,omitempty"`
 	AuthTime int64    `json:"auth_time,omitempty"`
+	// TxnLink dynamically links a step-up OTP to ONE payment (PSD2 RTS Art. 5 /
+	// WYSIWYS): sha256(debit|credit|amount) committed at /auth/mfa/verify time.
+	// Changing amount or payee invalidates the factor.
+	TxnLink string `json:"txn_link,omitempty"`
 }
 
 // hasFreshOTP reports whether the token proves a recent second factor. Step-up
@@ -41,7 +45,7 @@ func (c *clientClaims) hasFreshOTP(maxAge time.Duration) bool {
 	return false
 }
 
-func (s *Server) issueJWT(userID uuid.UUID, role, username string, amr []string) (string, time.Time, error) {
+func (s *Server) issueJWT(userID uuid.UUID, role, username string, amr []string, txnLink string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(s.jwtTTL)
 	claims := clientClaims{
@@ -56,6 +60,7 @@ func (s *Server) issueJWT(userID uuid.UUID, role, username string, amr []string)
 		Username: username,
 		AMR:      amr,
 		AuthTime: now.Unix(),
+		TxnLink:  txnLink,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := tok.SignedString(s.jwtSecret)

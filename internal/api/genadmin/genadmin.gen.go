@@ -38,27 +38,129 @@ func (e CreateUserRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for DecideDisputeRequestDecision.
+const (
+	DecideDisputeRequestDecisionDeclined            DecideDisputeRequestDecision = "declined"
+	DecideDisputeRequestDecisionPartiallyReimbursed DecideDisputeRequestDecision = "partially_reimbursed"
+	DecideDisputeRequestDecisionReimbursed          DecideDisputeRequestDecision = "reimbursed"
+)
+
+// Valid indicates whether the value is a known member of the DecideDisputeRequestDecision enum.
+func (e DecideDisputeRequestDecision) Valid() bool {
+	switch e {
+	case DecideDisputeRequestDecisionDeclined:
+		return true
+	case DecideDisputeRequestDecisionPartiallyReimbursed:
+		return true
+	case DecideDisputeRequestDecisionReimbursed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DisputeCategory.
 const (
-	Duplicate    DisputeCategory = "duplicate"
-	Fraud        DisputeCategory = "fraud"
-	Other        DisputeCategory = "other"
-	Unrecognised DisputeCategory = "unrecognised"
-	WrongAmount  DisputeCategory = "wrong_amount"
+	DisputeCategoryDuplicate    DisputeCategory = "duplicate"
+	DisputeCategoryFraud        DisputeCategory = "fraud"
+	DisputeCategoryOther        DisputeCategory = "other"
+	DisputeCategoryUnrecognised DisputeCategory = "unrecognised"
+	DisputeCategoryWrongAmount  DisputeCategory = "wrong_amount"
 )
 
 // Valid indicates whether the value is a known member of the DisputeCategory enum.
 func (e DisputeCategory) Valid() bool {
 	switch e {
-	case Duplicate:
+	case DisputeCategoryDuplicate:
 		return true
-	case Fraud:
+	case DisputeCategoryFraud:
 		return true
-	case Other:
+	case DisputeCategoryOther:
 		return true
-	case Unrecognised:
+	case DisputeCategoryUnrecognised:
 		return true
-	case WrongAmount:
+	case DisputeCategoryWrongAmount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeDecision.
+const (
+	DisputeDecisionDeclined            DisputeDecision = "declined"
+	DisputeDecisionPartiallyReimbursed DisputeDecision = "partially_reimbursed"
+	DisputeDecisionPending             DisputeDecision = "pending"
+	DisputeDecisionReimbursed          DisputeDecision = "reimbursed"
+)
+
+// Valid indicates whether the value is a known member of the DisputeDecision enum.
+func (e DisputeDecision) Valid() bool {
+	switch e {
+	case DisputeDecisionDeclined:
+		return true
+	case DisputeDecisionPartiallyReimbursed:
+		return true
+	case DisputeDecisionPending:
+		return true
+	case DisputeDecisionReimbursed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeRecallStatus.
+const (
+	DisputeRecallStatusFundsReturned DisputeRecallStatus = "funds_returned"
+	DisputeRecallStatusNone          DisputeRecallStatus = "none"
+	DisputeRecallStatusRefused       DisputeRecallStatus = "refused"
+	DisputeRecallStatusRequested     DisputeRecallStatus = "requested"
+)
+
+// Valid indicates whether the value is a known member of the DisputeRecallStatus enum.
+func (e DisputeRecallStatus) Valid() bool {
+	switch e {
+	case DisputeRecallStatusFundsReturned:
+		return true
+	case DisputeRecallStatusNone:
+		return true
+	case DisputeRecallStatusRefused:
+		return true
+	case DisputeRecallStatusRequested:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeScamType.
+const (
+	DisputeScamTypeAdvanceFee    DisputeScamType = "advance_fee"
+	DisputeScamTypeImpersonation DisputeScamType = "impersonation"
+	DisputeScamTypeInvestment    DisputeScamType = "investment"
+	DisputeScamTypeInvoice       DisputeScamType = "invoice"
+	DisputeScamTypeOther         DisputeScamType = "other"
+	DisputeScamTypePurchase      DisputeScamType = "purchase"
+	DisputeScamTypeRomance       DisputeScamType = "romance"
+)
+
+// Valid indicates whether the value is a known member of the DisputeScamType enum.
+func (e DisputeScamType) Valid() bool {
+	switch e {
+	case DisputeScamTypeAdvanceFee:
+		return true
+	case DisputeScamTypeImpersonation:
+		return true
+	case DisputeScamTypeInvestment:
+		return true
+	case DisputeScamTypeInvoice:
+		return true
+	case DisputeScamTypeOther:
+		return true
+	case DisputeScamTypePurchase:
+		return true
+	case DisputeScamTypeRomance:
 		return true
 	default:
 		return false
@@ -83,6 +185,27 @@ func (e DisputeStatus) Valid() bool {
 	case DisputeStatusResolved:
 		return true
 	case DisputeStatusUnderReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RecallDisputeRequestStatus.
+const (
+	RecallDisputeRequestStatusFundsReturned RecallDisputeRequestStatus = "funds_returned"
+	RecallDisputeRequestStatusRefused       RecallDisputeRequestStatus = "refused"
+	RecallDisputeRequestStatusRequested     RecallDisputeRequestStatus = "requested"
+)
+
+// Valid indicates whether the value is a known member of the RecallDisputeRequestStatus enum.
+func (e RecallDisputeRequestStatus) Valid() bool {
+	switch e {
+	case RecallDisputeRequestStatusFundsReturned:
+		return true
+	case RecallDisputeRequestStatusRefused:
+		return true
+	case RecallDisputeRequestStatusRequested:
 		return true
 	default:
 		return false
@@ -196,20 +319,68 @@ type CreateUserRequest struct {
 // CreateUserRequestRole defines model for CreateUserRequest.Role.
 type CreateUserRequestRole string
 
+// DecideDisputeRequest defines model for DecideDisputeRequest.
+type DecideDisputeRequest struct {
+	Decision DecideDisputeRequestDecision `json:"decision"`
+	Note     *string                      `json:"note,omitempty"`
+
+	// ReimbursedAmountMinor Requested payout; capped + excess-adjusted by bank_settings policy in the DB.
+	ReimbursedAmountMinor *int64 `json:"reimbursed_amount_minor,omitempty"`
+
+	// Vulnerable Marks the customer vulnerable (excess waived).
+	Vulnerable *bool `json:"vulnerable,omitempty"`
+}
+
+// DecideDisputeRequestDecision defines model for DecideDisputeRequest.Decision.
+type DecideDisputeRequestDecision string
+
+// DecideDisputeResponse defines model for DecideDisputeResponse.
+type DecideDisputeResponse struct {
+	Decision *string             `json:"decision,omitempty"`
+	Id       *openapi_types.UUID `json:"id,omitempty"`
+
+	// PayoutMinor The amount actually credited back.
+	PayoutMinor *int64 `json:"payout_minor,omitempty"`
+}
+
 // Dispute defines model for Dispute.
 type Dispute struct {
-	Category       *DisputeCategory    `json:"category,omitempty"`
-	CreatedAt      *time.Time          `json:"created_at,omitempty"`
-	Id             *openapi_types.UUID `json:"id,omitempty"`
-	Reason         *string             `json:"reason,omitempty"`
-	ResolutionNote *string             `json:"resolution_note,omitempty"`
+	Category  *DisputeCategory    `json:"category,omitempty"`
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	Decision  *DisputeDecision    `json:"decision,omitempty"`
+	Id        *openapi_types.UUID `json:"id,omitempty"`
+	Reason    *string             `json:"reason,omitempty"`
+
+	// RecallReason e.g. FRAD
+	RecallReason *string `json:"recall_reason,omitempty"`
+
+	// RecallStatus Simulated interbank recall (pacs.004).
+	RecallStatus *DisputeRecallStatus `json:"recall_status,omitempty"`
+
+	// ReimbursedAmountMinor Actual payout, net of the excess (waived for vulnerable customers).
+	ReimbursedAmountMinor *int64           `json:"reimbursed_amount_minor,omitempty"`
+	ResolutionNote        *string          `json:"resolution_note,omitempty"`
+	ScamType              *DisputeScamType `json:"scam_type,omitempty"`
+
+	// SlaDueAt PSR-style business-day deadline (15 BBD from raise).
+	SlaDueAt       *time.Time          `json:"sla_due_at,omitempty"`
 	Status         *DisputeStatus      `json:"status,omitempty"`
 	TransferId     *openapi_types.UUID `json:"transfer_id,omitempty"`
 	UpdatedAt      *time.Time          `json:"updated_at,omitempty"`
+	VulnerableFlag *bool               `json:"vulnerable_flag,omitempty"`
 }
 
 // DisputeCategory defines model for Dispute.Category.
 type DisputeCategory string
+
+// DisputeDecision defines model for Dispute.Decision.
+type DisputeDecision string
+
+// DisputeRecallStatus Simulated interbank recall (pacs.004).
+type DisputeRecallStatus string
+
+// DisputeScamType defines model for Dispute.ScamType.
+type DisputeScamType string
 
 // DisputeStatus defines model for Dispute.Status.
 type DisputeStatus string
@@ -222,13 +393,20 @@ type DisputeQueueItem struct {
 	CreditIban  *string             `json:"credit_iban,omitempty"`
 	Currency    *string             `json:"currency,omitempty"`
 	DebitIban   *string             `json:"debit_iban,omitempty"`
+	Decision    *string             `json:"decision,omitempty"`
 	Id          *openapi_types.UUID `json:"id,omitempty"`
 
 	// RaisedBy Raiser username.
-	RaisedBy   *string             `json:"raised_by,omitempty"`
-	Reason     *string             `json:"reason,omitempty"`
-	Status     *string             `json:"status,omitempty"`
-	TransferId *openapi_types.UUID `json:"transfer_id,omitempty"`
+	RaisedBy              *string             `json:"raised_by,omitempty"`
+	Reason                *string             `json:"reason,omitempty"`
+	RecallReason          *string             `json:"recall_reason,omitempty"`
+	RecallStatus          *string             `json:"recall_status,omitempty"`
+	ReimbursedAmountMinor *int64              `json:"reimbursed_amount_minor,omitempty"`
+	ScamType              *string             `json:"scam_type,omitempty"`
+	SlaDueAt              *time.Time          `json:"sla_due_at,omitempty"`
+	Status                *string             `json:"status,omitempty"`
+	TransferId            *openapi_types.UUID `json:"transfer_id,omitempty"`
+	VulnerableFlag        *bool               `json:"vulnerable_flag,omitempty"`
 }
 
 // Error defines model for Error.
@@ -287,6 +465,22 @@ type PendingTransfer struct {
 // ReasonRequest defines model for ReasonRequest.
 type ReasonRequest struct {
 	Reason *string `json:"reason,omitempty"`
+}
+
+// RecallDisputeRequest defines model for RecallDisputeRequest.
+type RecallDisputeRequest struct {
+	// Reason e.g. FRAD
+	Reason *string                    `json:"reason,omitempty"`
+	Status RecallDisputeRequestStatus `json:"status"`
+}
+
+// RecallDisputeRequestStatus defines model for RecallDisputeRequest.Status.
+type RecallDisputeRequestStatus string
+
+// RecallDisputeResponse defines model for RecallDisputeResponse.
+type RecallDisputeResponse struct {
+	Id           *openapi_types.UUID `json:"id,omitempty"`
+	RecallStatus *string             `json:"recall_status,omitempty"`
 }
 
 // ReconcileResponse defines model for ReconcileResponse.
@@ -431,6 +625,12 @@ type SetAccountStatusJSONRequestBody = StatusRequest
 // WithdrawJSONRequestBody defines body for Withdraw for application/json ContentType.
 type WithdrawJSONRequestBody = AmountRequest
 
+// DecideDisputeJSONRequestBody defines body for DecideDispute for application/json ContentType.
+type DecideDisputeJSONRequestBody = DecideDisputeRequest
+
+// RecallDisputeJSONRequestBody defines body for RecallDispute for application/json ContentType.
+type RecallDisputeJSONRequestBody = RecallDisputeRequest
+
 // ResolveDisputeJSONRequestBody defines body for ResolveDispute for application/json ContentType.
 type ResolveDisputeJSONRequestBody = ResolveDisputeRequest
 
@@ -463,6 +663,12 @@ type ServerInterface interface {
 	// Operator dispute triage queue (filter by status, cursor-paginated)
 	// (GET /admin/disputes)
 	ListDisputes(w http.ResponseWriter, r *http.Request, params ListDisputesParams)
+	// Decide a PSR-style claim — reimburse (moves real money from clearing) or decline
+	// (POST /admin/disputes/{id}/decide)
+	DecideDispute(w http.ResponseWriter, r *http.Request, id Id)
+	// Advance the simulated interbank recall (none -> requested -> funds_returned|refused)
+	// (POST /admin/disputes/{id}/recall)
+	RecallDispute(w http.ResponseWriter, r *http.Request, id Id)
 	// Move a dispute to resolved/rejected (or under_review) with a note
 	// (POST /admin/disputes/{id}/resolve)
 	ResolveDispute(w http.ResponseWriter, r *http.Request, id Id)
@@ -737,6 +943,58 @@ func (siw *ServerInterfaceWrapper) ListDisputes(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListDisputes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DecideDispute operation middleware
+func (siw *ServerInterfaceWrapper) DecideDispute(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DecideDispute(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RecallDispute operation middleware
+func (siw *ServerInterfaceWrapper) RecallDispute(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecallDispute(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1228,6 +1486,10 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/accounts/{id}/withdraw", wrapper.Withdraw).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/admin/disputes", wrapper.ListDisputes).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/admin/disputes/{id}/decide", wrapper.DecideDispute).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/admin/disputes/{id}/recall", wrapper.RecallDispute).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/admin/disputes/{id}/resolve", wrapper.ResolveDispute).Methods(http.MethodPost)
 

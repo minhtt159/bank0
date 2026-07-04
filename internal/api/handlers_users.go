@@ -179,5 +179,5 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		s.mapDBError(w, r, err)
 		return
 	}
-	s.writeTokenPair(w, id, role, uname, refresh, []string{"pwd"})
+	s.writeTokenPair(w, id, role, uname, refresh, []string{"pwd"}, "")
 }

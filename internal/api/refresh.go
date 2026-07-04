@@ -10,8 +10,8 @@ import (
 // response (access token + the given refresh token). Login, Refresh and MfaVerify
 // share it; amr records the factors this token proves (["pwd"] or ["pwd","otp"]).
 // Returns false (after writing a 500) if the JWT can't be minted.
-func (s *Server) writeTokenPair(w http.ResponseWriter, userID uuid.UUID, role, username, refresh string, amr []string) bool {
-	token, exp, err := s.issueJWT(userID, role, username, amr)
+func (s *Server) writeTokenPair(w http.ResponseWriter, userID uuid.UUID, role, username, refresh string, amr []string, txnLink string) bool {
+	token, exp, err := s.issueJWT(userID, role, username, amr, txnLink)
 	if err != nil {
 		s.log.Error("issue jwt", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
@@ -56,7 +56,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	// A refresh is not a re-authentication of the second factor: step-up
 	// freshness is per-/auth/mfa/verify, never preserved across rotation.
-	s.writeTokenPair(w, userID, role, uname, newRefresh, []string{"pwd"})
+	s.writeTokenPair(w, userID, role, uname, newRefresh, []string{"pwd"}, "")
 }
 
 // Logout implements genclient.ServerInterface: revoke the presented refresh token

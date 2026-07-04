@@ -41,6 +41,87 @@ func (e DisputeCategory) Valid() bool {
 	}
 }
 
+// Defines values for DisputeDecision.
+const (
+	DisputeDecisionDeclined            DisputeDecision = "declined"
+	DisputeDecisionPartiallyReimbursed DisputeDecision = "partially_reimbursed"
+	DisputeDecisionPending             DisputeDecision = "pending"
+	DisputeDecisionReimbursed          DisputeDecision = "reimbursed"
+)
+
+// Valid indicates whether the value is a known member of the DisputeDecision enum.
+func (e DisputeDecision) Valid() bool {
+	switch e {
+	case DisputeDecisionDeclined:
+		return true
+	case DisputeDecisionPartiallyReimbursed:
+		return true
+	case DisputeDecisionPending:
+		return true
+	case DisputeDecisionReimbursed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeRecallStatus.
+const (
+	FundsReturned DisputeRecallStatus = "funds_returned"
+	None          DisputeRecallStatus = "none"
+	Refused       DisputeRecallStatus = "refused"
+	Requested     DisputeRecallStatus = "requested"
+)
+
+// Valid indicates whether the value is a known member of the DisputeRecallStatus enum.
+func (e DisputeRecallStatus) Valid() bool {
+	switch e {
+	case FundsReturned:
+		return true
+	case None:
+		return true
+	case Refused:
+		return true
+	case Requested:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisputeScamType.
+const (
+	DisputeScamTypeAdvanceFee    DisputeScamType = "advance_fee"
+	DisputeScamTypeImpersonation DisputeScamType = "impersonation"
+	DisputeScamTypeInvestment    DisputeScamType = "investment"
+	DisputeScamTypeInvoice       DisputeScamType = "invoice"
+	DisputeScamTypeOther         DisputeScamType = "other"
+	DisputeScamTypePurchase      DisputeScamType = "purchase"
+	DisputeScamTypeRomance       DisputeScamType = "romance"
+)
+
+// Valid indicates whether the value is a known member of the DisputeScamType enum.
+func (e DisputeScamType) Valid() bool {
+	switch e {
+	case DisputeScamTypeAdvanceFee:
+		return true
+	case DisputeScamTypeImpersonation:
+		return true
+	case DisputeScamTypeInvestment:
+		return true
+	case DisputeScamTypeInvoice:
+		return true
+	case DisputeScamTypeOther:
+		return true
+	case DisputeScamTypePurchase:
+		return true
+	case DisputeScamTypeRomance:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DisputeStatus.
 const (
 	Open        DisputeStatus = "open"
@@ -131,6 +212,39 @@ func (e RaiseDisputeRequestCategory) Valid() bool {
 	}
 }
 
+// Defines values for RaiseDisputeRequestScamType.
+const (
+	RaiseDisputeRequestScamTypeAdvanceFee    RaiseDisputeRequestScamType = "advance_fee"
+	RaiseDisputeRequestScamTypeImpersonation RaiseDisputeRequestScamType = "impersonation"
+	RaiseDisputeRequestScamTypeInvestment    RaiseDisputeRequestScamType = "investment"
+	RaiseDisputeRequestScamTypeInvoice       RaiseDisputeRequestScamType = "invoice"
+	RaiseDisputeRequestScamTypeOther         RaiseDisputeRequestScamType = "other"
+	RaiseDisputeRequestScamTypePurchase      RaiseDisputeRequestScamType = "purchase"
+	RaiseDisputeRequestScamTypeRomance       RaiseDisputeRequestScamType = "romance"
+)
+
+// Valid indicates whether the value is a known member of the RaiseDisputeRequestScamType enum.
+func (e RaiseDisputeRequestScamType) Valid() bool {
+	switch e {
+	case RaiseDisputeRequestScamTypeAdvanceFee:
+		return true
+	case RaiseDisputeRequestScamTypeImpersonation:
+		return true
+	case RaiseDisputeRequestScamTypeInvestment:
+		return true
+	case RaiseDisputeRequestScamTypeInvoice:
+		return true
+	case RaiseDisputeRequestScamTypeOther:
+		return true
+	case RaiseDisputeRequestScamTypePurchase:
+		return true
+	case RaiseDisputeRequestScamTypeRomance:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RegisterResponseVerifyChannel.
 const (
 	RegisterResponseVerifyChannelEmail RegisterResponseVerifyChannel = "email"
@@ -206,6 +320,54 @@ func (e ResolvedAccountMatchResult) Valid() bool {
 	case NoMatch:
 		return true
 	case Unable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolvedAccountRecipientRisk.
+const (
+	High   ResolvedAccountRecipientRisk = "high"
+	Low    ResolvedAccountRecipientRisk = "low"
+	Medium ResolvedAccountRecipientRisk = "medium"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedAccountRecipientRisk enum.
+func (e ResolvedAccountRecipientRisk) Valid() bool {
+	switch e {
+	case High:
+		return true
+	case Low:
+		return true
+	case Medium:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolvedAccountSignals.
+const (
+	FirstPayment   ResolvedAccountSignals = "first_payment"
+	MuleFlagged    ResolvedAccountSignals = "mule_flagged"
+	NewPayee       ResolvedAccountSignals = "new_payee"
+	RecentlyOpened ResolvedAccountSignals = "recently_opened"
+	Reported       ResolvedAccountSignals = "reported"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedAccountSignals enum.
+func (e ResolvedAccountSignals) Valid() bool {
+	switch e {
+	case FirstPayment:
+		return true
+	case MuleFlagged:
+		return true
+	case NewPayee:
+		return true
+	case RecentlyOpened:
+		return true
+	case Reported:
 		return true
 	default:
 		return false
@@ -337,25 +499,25 @@ func (e ListMyEventsParamsType) Valid() bool {
 
 // Defines values for ListMyTransfersParamsStatus.
 const (
-	Canceled ListMyTransfersParamsStatus = "canceled"
-	Failed   ListMyTransfersParamsStatus = "failed"
-	Pending  ListMyTransfersParamsStatus = "pending"
-	Posted   ListMyTransfersParamsStatus = "posted"
-	Reversed ListMyTransfersParamsStatus = "reversed"
+	ListMyTransfersParamsStatusCanceled ListMyTransfersParamsStatus = "canceled"
+	ListMyTransfersParamsStatusFailed   ListMyTransfersParamsStatus = "failed"
+	ListMyTransfersParamsStatusPending  ListMyTransfersParamsStatus = "pending"
+	ListMyTransfersParamsStatusPosted   ListMyTransfersParamsStatus = "posted"
+	ListMyTransfersParamsStatusReversed ListMyTransfersParamsStatus = "reversed"
 )
 
 // Valid indicates whether the value is a known member of the ListMyTransfersParamsStatus enum.
 func (e ListMyTransfersParamsStatus) Valid() bool {
 	switch e {
-	case Canceled:
+	case ListMyTransfersParamsStatusCanceled:
 		return true
-	case Failed:
+	case ListMyTransfersParamsStatusFailed:
 		return true
-	case Pending:
+	case ListMyTransfersParamsStatusPending:
 		return true
-	case Posted:
+	case ListMyTransfersParamsStatusPosted:
 		return true
-	case Reversed:
+	case ListMyTransfersParamsStatusReversed:
 		return true
 	default:
 		return false
@@ -462,18 +624,42 @@ type CreateTransferRequest struct {
 
 // Dispute defines model for Dispute.
 type Dispute struct {
-	Category       *DisputeCategory    `json:"category,omitempty"`
-	CreatedAt      *time.Time          `json:"created_at,omitempty"`
-	Id             *openapi_types.UUID `json:"id,omitempty"`
-	Reason         *string             `json:"reason,omitempty"`
-	ResolutionNote *string             `json:"resolution_note,omitempty"`
+	Category  *DisputeCategory    `json:"category,omitempty"`
+	CreatedAt *time.Time          `json:"created_at,omitempty"`
+	Decision  *DisputeDecision    `json:"decision,omitempty"`
+	Id        *openapi_types.UUID `json:"id,omitempty"`
+	Reason    *string             `json:"reason,omitempty"`
+
+	// RecallReason e.g. FRAD
+	RecallReason *string `json:"recall_reason,omitempty"`
+
+	// RecallStatus Simulated interbank recall (pacs.004).
+	RecallStatus *DisputeRecallStatus `json:"recall_status,omitempty"`
+
+	// ReimbursedAmountMinor Actual payout, net of the excess (waived for vulnerable customers).
+	ReimbursedAmountMinor *int64           `json:"reimbursed_amount_minor,omitempty"`
+	ResolutionNote        *string          `json:"resolution_note,omitempty"`
+	ScamType              *DisputeScamType `json:"scam_type,omitempty"`
+
+	// SlaDueAt PSR-style business-day deadline (15 BBD from raise).
+	SlaDueAt       *time.Time          `json:"sla_due_at,omitempty"`
 	Status         *DisputeStatus      `json:"status,omitempty"`
 	TransferId     *openapi_types.UUID `json:"transfer_id,omitempty"`
 	UpdatedAt      *time.Time          `json:"updated_at,omitempty"`
+	VulnerableFlag *bool               `json:"vulnerable_flag,omitempty"`
 }
 
 // DisputeCategory defines model for Dispute.Category.
 type DisputeCategory string
+
+// DisputeDecision defines model for Dispute.Decision.
+type DisputeDecision string
+
+// DisputeRecallStatus Simulated interbank recall (pacs.004).
+type DisputeRecallStatus string
+
+// DisputeScamType defines model for Dispute.ScamType.
+type DisputeScamType string
 
 // DisputeStatus defines model for Dispute.Status.
 type DisputeStatus string
@@ -614,7 +800,14 @@ type MfaRecoveryCodes struct {
 // MfaVerifyRequest defines model for MfaVerifyRequest.
 type MfaVerifyRequest struct {
 	// Code 6-digit TOTP, or a recovery code
-	Code     string `json:"code"`
+	Code string `json:"code"`
+
+	// Link Dynamic-linking commitment (PSD2 RTS Art. 5 / WYSIWYS): binds this OTP to ONE payment. REQUIRED to pass the transfer step-up gate; changing amount or payee invalidates the factor. Omit for a plain login verify.
+	Link *struct {
+		AmountMinor   int64              `json:"amount_minor"`
+		CreditAccount openapi_types.UUID `json:"credit_account"`
+		DebitAccount  openapi_types.UUID `json:"debit_account"`
+	} `json:"link,omitempty"`
 	MfaToken string `json:"mfa_token"`
 }
 
@@ -633,10 +826,16 @@ type RaiseDisputeRequest struct {
 
 	// Reason Free-text customer explanation (optional).
 	Reason *string `json:"reason,omitempty"`
+
+	// ScamType Optional APP-scam claim tag; starts the PSR business-day clock semantics.
+	ScamType *RaiseDisputeRequestScamType `json:"scam_type,omitempty"`
 }
 
 // RaiseDisputeRequestCategory defines model for RaiseDisputeRequest.Category.
 type RaiseDisputeRequestCategory string
+
+// RaiseDisputeRequestScamType Optional APP-scam claim tag; starts the PSR business-day clock semantics.
+type RaiseDisputeRequestScamType string
 
 // ReasonRequest defines model for ReasonRequest.
 type ReasonRequest struct {
@@ -684,15 +883,23 @@ type ResolvedAccount struct {
 	CheckedAt   *time.Time                  `json:"checked_at,omitempty"`
 
 	// Gate Server-driven continue gate; clients must not compute their own.
-	Gate *ResolvedAccountGate `json:"gate,omitempty"`
-	Iban *string              `json:"iban,omitempty"`
+	Gate                  *ResolvedAccountGate `json:"gate,omitempty"`
+	Iban                  *string              `json:"iban,omitempty"`
+	IsFirstPaymentToPayee *bool                `json:"is_first_payment_to_payee,omitempty"`
 
 	// MatchResult Server-side CoP/VOP verdict against the supplied name.
-	MatchResult     *ResolvedAccountMatchResult `json:"match_result,omitempty"`
-	OwnerNameMasked *string                     `json:"owner_name_masked,omitempty"`
+	MatchResult *ResolvedAccountMatchResult `json:"match_result,omitempty"`
+
+	// MuleSuspected Destination is operator-flagged or on a live fraud dispute.
+	MuleSuspected   *bool   `json:"mule_suspected,omitempty"`
+	OwnerNameMasked *string `json:"owner_name_masked,omitempty"`
 
 	// ReasonCode Stable machine token (MATCH/CLOSE_MATCH/NO_MATCH/NAME_NOT_SUPPLIED).
 	ReasonCode *string `json:"reason_code,omitempty"`
+
+	// RecipientRisk Server-decided destination risk badge (Rec 11).
+	RecipientRisk *ResolvedAccountRecipientRisk `json:"recipient_risk,omitempty"`
+	Signals       *[]ResolvedAccountSignals     `json:"signals,omitempty"`
 
 	// SuggestedName The registered name — present ONLY on close_match (the CoP-mandated disclosure).
 	SuggestedName *string `json:"suggested_name,omitempty"`
@@ -706,6 +913,12 @@ type ResolvedAccountGate string
 
 // ResolvedAccountMatchResult Server-side CoP/VOP verdict against the supplied name.
 type ResolvedAccountMatchResult string
+
+// ResolvedAccountRecipientRisk Server-decided destination risk badge (Rec 11).
+type ResolvedAccountRecipientRisk string
+
+// ResolvedAccountSignals defines model for ResolvedAccount.Signals.
+type ResolvedAccountSignals string
 
 // Session One active refresh-token family (a device/login). No token material.
 type Session struct {

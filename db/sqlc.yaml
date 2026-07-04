@@ -58,6 +58,16 @@ sql:
           - db_type: "pg_catalog.bool"
             go_type:
               type: "bool"
+          - db_type: "scam_type"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.bool"
+            nullable: true
+            go_type:
+              type: "bool"
+              pointer: true
           - db_type: "pg_catalog.int8"
             go_type:
               type: "int64"
