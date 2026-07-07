@@ -155,7 +155,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         if: steps.changed.outputs.run == 'true'
         with:
-          node-version: 22
+          node-version: 24
       - name: Build SPA
         if: steps.changed.outputs.run == 'true'
         working-directory: web/app
