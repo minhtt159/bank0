@@ -1,13 +1,16 @@
 // Worker /api proxy-contract test (Tier B "cheaper intermediate" from
 // docs/specs/spec-e2e-harness.md). Runs the REAL worker (../index.ts) in
-// workerd via @cloudflare/vitest-pool-workers, stubs the upstream API with
-// fetchMock, and asserts the four proxy invariants:
+// workerd via @cloudflare/vitest-pool-workers, stubs the upstream API by
+// swapping globalThis.fetch (vitest-pool-workers v0.13+ removed the old
+// cloudflare:test fetchMock), and asserts the four proxy invariants:
 //   1. path rewrite (+ query preservation)
 //   2. header forwarding (Authorization / Idempotency-Key survive; Host dropped)
 //   3. method + body forwarding
 //   4. SPA fallback / static asset handling (+ security headers on HTML)
-import { SELF, fetchMock } from "cloudflare:test";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+// SELF (not exports.default) is kept deliberately: the SPA-fallback tests need
+// the ASSETS binding, which exports.default.fetch does not expose.
+import { SELF } from "cloudflare:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // API_ORIGIN configured in vitest.config.ts.
 const UPSTREAM = "https://upstream.test";
@@ -20,42 +23,68 @@ interface Captured {
   body?: string;
 }
 
+interface Interceptor {
+  match: (pathWithSearch: string) => boolean;
+  fired: boolean;
+  captured?: Captured;
+}
+
+// Registered per test, drained in afterEach. The worker forwards /api/* via the
+// global fetch(); asset serving goes through env.ASSETS (a binding), so it is
+// never intercepted here.
+let interceptors: Interceptor[] = [];
+const realFetch = globalThis.fetch;
+
 beforeAll(() => {
-  // Any outbound fetch the worker makes that we did NOT explicitly intercept
-  // is a bug we want to see, not a silent pass-through to the real network.
-  fetchMock.activate();
-  fetchMock.disableNetConnect();
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const req = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(req.url);
+    // Any outbound fetch we did NOT explicitly intercept is a bug we want to
+    // see, not a silent pass-through to the real network.
+    if (url.origin !== UPSTREAM) {
+      throw new Error(`unexpected outbound fetch to ${url.href}`);
+    }
+    const pathWithSearch = url.pathname + url.search;
+    const ic = interceptors.find((i) => !i.fired && i.match(pathWithSearch));
+    if (!ic) {
+      throw new Error(`no interceptor matched upstream ${pathWithSearch}`);
+    }
+    ic.fired = true;
+    const hasBody = req.method !== "GET" && req.method !== "HEAD";
+    ic.captured = {
+      path: pathWithSearch,
+      method: req.method,
+      headers: Object.fromEntries(req.headers.entries()),
+      body: hasBody ? await req.text() : undefined,
+    };
+    return new Response("ok-from-upstream", { status: 200 });
+  }) as typeof fetch;
 });
 
 afterEach(() => {
   // Surface unused interceptors so a rewrite that never fired fails loudly.
-  fetchMock.assertNoPendingInterceptors();
+  const pending = interceptors.filter((i) => !i.fired).length;
+  interceptors = [];
+  if (pending) throw new Error(`${pending} upstream interceptor(s) never fired`);
+});
+
+afterAll(() => {
+  globalThis.fetch = realFetch;
 });
 
 // Intercept exactly one upstream call, capture what the worker sent, and reply
 // with a canned 200 so SELF.fetch resolves.
 function captureUpstream(expectedPath: string | RegExp): { get(): Captured } {
-  let captured: Captured | undefined;
-  fetchMock
-    .get(UPSTREAM)
-    .intercept({ path: expectedPath, method: () => true })
-    .reply((opts) => {
-      const headers =
-        opts.headers instanceof Headers
-          ? Object.fromEntries(opts.headers.entries())
-          : ((opts.headers as Record<string, string>) ?? {});
-      captured = {
-        path: opts.path,
-        method: opts.method,
-        headers,
-        body: typeof opts.body === "string" ? opts.body : undefined,
-      };
-      return { statusCode: 200, data: "ok-from-upstream" };
-    });
+  const ic: Interceptor = {
+    match: (p) =>
+      typeof expectedPath === "string" ? p === expectedPath : expectedPath.test(p),
+    fired: false,
+  };
+  interceptors.push(ic);
   return {
     get() {
-      if (!captured) throw new Error("upstream interceptor never fired");
-      return captured;
+      if (!ic.captured) throw new Error("upstream interceptor never fired");
+      return ic.captured;
     },
   };
 }

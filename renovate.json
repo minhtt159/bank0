@@ -8,12 +8,9 @@
   "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
-      "description": "Bundle non-major PWA (web/app) updates into one PR.",
+      "description": "Bundle all non-major Node/npm updates (web/app PWA + Cloudflare worker) into one PR.",
       "matchManagers": [
         "npm"
-      ],
-      "matchFileNames": [
-        "web/app/**"
       ],
       "matchUpdateTypes": [
         "minor",
@@ -21,23 +18,7 @@
         "pin",
         "digest"
       ],
-      "groupName": "web app (PWA) deps"
-    },
-    {
-      "description": "Bundle non-major Cloudflare worker updates into one PR.",
-      "matchManagers": [
-        "npm"
-      ],
-      "matchFileNames": [
-        "worker/**"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "pin",
-        "digest"
-      ],
-      "groupName": "cloudflare worker deps"
+      "groupName": "node deps"
     },
     {
       "description": "Gate JS major upgrades behind manual dashboard approval (breaking changes; no JS build in CI).",
