@@ -972,6 +972,7 @@ type Hold struct {
 }
 
 type IdempotencyKey struct {
+	OwnerID     uuid.UUID  `json:"owner_id"`
 	Key         string     `json:"key"`
 	Scope       string     `json:"scope"`
 	RequestHash string     `json:"request_hash"`
