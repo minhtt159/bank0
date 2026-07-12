@@ -801,31 +801,20 @@ RETURNS VOID LANGUAGE sql AS $$
        AND revoked_at IS NULL;
 $$;
 
--- revoke_user_refresh: "log out everywhere" / operator force-revoke. Returns the
--- number of live tokens revoked.
-CREATE OR REPLACE FUNCTION revoke_user_refresh(p_user_id UUID, p_reason TEXT DEFAULT 'forced')
-RETURNS INTEGER AS $$
-DECLARE v_n INTEGER;
-BEGIN
-    UPDATE refresh_tokens
-       SET revoked_at = now(), revoked_reason = COALESCE(p_reason, 'forced')
-     WHERE user_id = p_user_id AND revoked_at IS NULL;
-    GET DIAGNOSTICS v_n = ROW_COUNT;
-    RETURN v_n;
-END;
-$$ LANGUAGE plpgsql;
-
--- revoke_user_refresh_except_family: "log out everywhere else". Revokes every live
--- refresh family for the user EXCEPT the family the current session belongs to.
--- p_keep_family may be NULL (revoke all). Returns the count revoked.
-CREATE OR REPLACE FUNCTION revoke_user_refresh_except_family(
+-- revoke_user_refresh: bulk refresh-token revocation for a user. With p_keep_family
+-- NULL it is "log out everywhere" / operator force-revoke; with a family id it is
+-- "log out everywhere else", sparing the current session's family (e.g. after a
+-- password change). p_reason is recorded on each revoked token, so callers keep their
+-- own audit reason ('forced' vs 'password_change'). Returns the count revoked.
+CREATE OR REPLACE FUNCTION revoke_user_refresh(
     p_user_id     UUID,
-    p_keep_family UUID DEFAULT NULL
+    p_keep_family UUID  DEFAULT NULL,
+    p_reason      TEXT  DEFAULT 'forced'
 ) RETURNS INTEGER AS $$
 DECLARE v_n INTEGER;
 BEGIN
     UPDATE refresh_tokens
-       SET revoked_at = now(), revoked_reason = 'password_change'
+       SET revoked_at = now(), revoked_reason = COALESCE(p_reason, 'forced')
      WHERE user_id = p_user_id
        AND revoked_at IS NULL
        AND (p_keep_family IS NULL OR family_id <> p_keep_family);
@@ -918,8 +907,7 @@ DROP FUNCTION IF EXISTS create_verification_challenge(UUID, verification_channel
 DROP FUNCTION IF EXISTS cleanup_refresh_tokens();
 DROP FUNCTION IF EXISTS revoke_refresh_family_scoped(UUID, UUID);
 DROP FUNCTION IF EXISTS list_user_sessions(UUID);
-DROP FUNCTION IF EXISTS revoke_user_refresh_except_family(UUID, UUID);
-DROP FUNCTION IF EXISTS revoke_user_refresh(UUID, TEXT);
+DROP FUNCTION IF EXISTS revoke_user_refresh(UUID, UUID, TEXT);
 DROP FUNCTION IF EXISTS revoke_refresh_family(TEXT);
 DROP FUNCTION IF EXISTS revoke_refresh_token(TEXT, TEXT);
 DROP FUNCTION IF EXISTS rotate_refresh_token(TEXT, TEXT, INT, INT, TEXT, TEXT);

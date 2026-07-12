@@ -36,7 +36,7 @@ func TestHeldCacheTracksLifecycle(t *testing.T) {
 	}
 
 	// request -> active hold -> held rises; available drops; ledger unchanged.
-	req, err := pg.RequestTransfer(ctx, uuid.NewString(), a, b, 4_000, "pending", sqlc.TransferKindTransfer)
+	req, err := testRequestTransfer(ctx, pg, uuid.NewString(), a, b, 4_000, "pending", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestHeldCacheTracksLifecycle(t *testing.T) {
 	}
 
 	// request again, then cancel -> hold released -> held back to 0.
-	req2, _ := pg.RequestTransfer(ctx, uuid.NewString(), a, b, 1_500, "pending2", sqlc.TransferKindTransfer)
+	req2, _ := testRequestTransfer(ctx, pg, uuid.NewString(), a, b, 1_500, "pending2", sqlc.TransferKindTransfer)
 	if h := heldMinor(t, pg, a); h != 1_500 {
 		t.Errorf("held after request2 = %d, want 1500", h)
 	}

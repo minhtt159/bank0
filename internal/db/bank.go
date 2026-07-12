@@ -18,24 +18,6 @@ type TransferResult struct {
 	WasReplay  bool               `json:"was_replay"`
 }
 
-// Transfer runs the auto-post convenience function (request + post in one txn).
-// Idempotent on idempotencyKey.
-func (p *Postgres) Transfer(
-	ctx context.Context,
-	idempotencyKey string,
-	debit, credit uuid.UUID,
-	amountMinor int64,
-	description string,
-	kind sqlc.TransferKind,
-) (TransferResult, error) {
-	const q = `SELECT transfer_id, status, was_replay
-	           FROM transfer($1::text, $2::uuid, $3::uuid, $4::bigint, $5::text, $6::transfer_kind)`
-	var r TransferResult
-	err := p.Pool.QueryRow(ctx, q, idempotencyKey, debit, credit, amountMinor, description, kind).
-		Scan(&r.TransferID, &r.Status, &r.WasReplay)
-	return r, err
-}
-
 // ClientTransfer is the client-surface auto-post transfer: client_transfer enforces
 // (in the DB) that the caller owns the debit account, then runs transfer(). This
 // replaces the handler's separate ownership-probe round trip (TRANSFER-1). Non-
@@ -66,25 +48,6 @@ func (p *Postgres) OpenCustomerAccount(ctx context.Context, idempotencyKey strin
 		`SELECT account_id, was_replay FROM open_customer_account($1::text, $2::uuid)`,
 		idempotencyKey, userID).Scan(&accountID, &wasReplay)
 	return accountID, wasReplay, err
-}
-
-// RequestTransfer creates a transfer in the `pending` state (places a hold but
-// does not post). Used for deferred settlement and the maker-checker queue; an
-// operator later posts or cancels it. Idempotent on idempotencyKey.
-func (p *Postgres) RequestTransfer(
-	ctx context.Context,
-	idempotencyKey string,
-	debit, credit uuid.UUID,
-	amountMinor int64,
-	description string,
-	kind sqlc.TransferKind,
-) (TransferResult, error) {
-	const q = `SELECT transfer_id, status, was_replay
-	           FROM request_transfer($1::text, $2::uuid, $3::uuid, $4::bigint, $5::text, $6::transfer_kind)`
-	var r TransferResult
-	err := p.Pool.QueryRow(ctx, q, idempotencyKey, debit, credit, amountMinor, description, kind).
-		Scan(&r.TransferID, &r.Status, &r.WasReplay)
-	return r, err
 }
 
 // ApprovalCheck is the maker-checker verdict for an amount (API-8): whether a

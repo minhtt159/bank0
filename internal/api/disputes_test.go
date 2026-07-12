@@ -176,7 +176,10 @@ func TestHTTPDisputesClient(t *testing.T) {
 	}
 
 	// non-disputable (pending) transfer -> 422
-	pend, err := pg.RequestTransfer(context.Background(), uuid.NewString(), aliceAcct, bobAcct, 500, "pending", sqlc.TransferKindTransfer)
+	var pend struct{ TransferID uuid.UUID }
+	err := pg.Pool.QueryRow(context.Background(),
+		`SELECT transfer_id FROM request_transfer($1, $2, $3, 500, 'pending', 'transfer')`,
+		uuid.NewString(), aliceAcct, bobAcct).Scan(&pend.TransferID)
 	if err != nil {
 		t.Fatalf("request pending transfer: %v", err)
 	}

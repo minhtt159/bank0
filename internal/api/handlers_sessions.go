@@ -16,9 +16,8 @@ import (
 // refresh token via X-Refresh-Token, that family is flagged current:true. Client
 // surface only; never returns any token material. See docs/specs/spec-sessions-devices.md.
 func (s *Server) ListSessions(w http.ResponseWriter, r *http.Request, params genclient.ListSessionsParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	sessions, err := s.pg.ListUserSessions(r.Context(), subj)
@@ -43,9 +42,8 @@ func (s *Server) ListSessions(w http.ResponseWriter, r *http.Request, params gen
 // the caller's (never confirms a foreign family exists). Revoking the current family
 // signs THIS device out at its next refresh.
 func (s *Server) RevokeSession(w http.ResponseWriter, r *http.Request, familyID openapi_types.UUID) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	n, err := s.pg.RevokeUserFamily(r.Context(), subj, uuid.UUID(familyID))

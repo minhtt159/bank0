@@ -14,9 +14,7 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 			<h2>{ u.FullName }</h2>
 			<span class="muted">{ "@" + u.Username } · { string(u.Role) }</span>
 		</div>
-		if flash != "" {
-			<div class="flash">{ flash }</div>
-		}
+		@flashBar(flash)
 		<section class="block">
 			<h3>Details</h3>
 			<form hx-post={ "/console/users/" + u.ID.String() } hx-target="#rail">

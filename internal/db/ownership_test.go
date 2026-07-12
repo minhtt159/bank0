@@ -59,7 +59,7 @@ func TestClientPostCancelOwnership(t *testing.T) {
 	fund(t, pg, aAcct, 10_000)
 
 	// alice owns a pending transfer (debits her account).
-	req, err := pg.RequestTransfer(ctx, uuid.NewString(), aAcct, bAcct, 1_000, "pending", sqlc.TransferKindTransfer)
+	req, err := testRequestTransfer(ctx, pg, uuid.NewString(), aAcct, bAcct, 1_000, "pending", sqlc.TransferKindTransfer)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

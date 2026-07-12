@@ -16,9 +16,7 @@ templ DisputesPanel(canResolve bool) {
 }
 
 templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, prevURL string, nextURL string, flash string) {
-	if flash != "" {
-		<div class="flash">{ flash }</div>
-	}
+	@flashBar(flash)
 	if len(rows) == 0 {
 		<p class="muted">No disputes 🎉</p>
 	} else {

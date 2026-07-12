@@ -76,9 +76,8 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 // LogoutAll implements genclient.ServerInterface: revoke every refresh token for
 // the caller (log out everywhere). Behind requireJWT (needs the subject).
 func (s *Server) LogoutAll(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	if _, err := s.pg.RevokeUserRefresh(r.Context(), subj); err != nil {

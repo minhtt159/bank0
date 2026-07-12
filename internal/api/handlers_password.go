@@ -19,9 +19,8 @@ type changePasswordReq struct {
 // of the device they're using. 204 on success. See
 // docs/specs/spec-change-password.md.
 func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req changePasswordReq

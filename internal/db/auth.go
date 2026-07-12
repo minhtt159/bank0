@@ -188,7 +188,7 @@ func (p *Postgres) RevokeRefreshToken(ctx context.Context, tokenHash string) err
 func (p *Postgres) RevokeUserRefresh(ctx context.Context, userID uuid.UUID) (int, error) {
 	var n int
 	err := p.Pool.QueryRow(ctx,
-		`SELECT revoke_user_refresh($1::uuid, 'forced')`, userID).Scan(&n)
+		`SELECT revoke_user_refresh($1::uuid, NULL::uuid, 'forced')`, userID).Scan(&n)
 	return n, err
 }
 
@@ -205,7 +205,7 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 func (p *Postgres) RevokeUserRefreshExceptFamily(ctx context.Context, userID, keepFamily uuid.UUID) (int, error) {
 	var n int
 	err := p.Pool.QueryRow(ctx,
-		`SELECT revoke_user_refresh_except_family($1::uuid, $2::uuid)`, userID, nilIfZero(keepFamily)).Scan(&n)
+		`SELECT revoke_user_refresh($1::uuid, $2::uuid, 'password_change')`, userID, nilIfZero(keepFamily)).Scan(&n)
 	return n, err
 }
 

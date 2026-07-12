@@ -52,9 +52,8 @@ func toEventDTO(e sqlc.Event) eventDTO {
 // ListMyEvents implements genclient.ServerInterface (GET /me/events).
 // Bare array, newest first; paginate with cursor + cursor_id from the last row.
 func (s *Server) ListMyEvents(w http.ResponseWriter, r *http.Request, params genclient.ListMyEventsParams) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	q := sqlc.ListMyEventsParams{
@@ -86,9 +85,8 @@ func (s *Server) ListMyEvents(w http.ResponseWriter, r *http.Request, params gen
 
 // CountUnreadEvents implements genclient.ServerInterface (GET /me/events/unread).
 func (s *Server) CountUnreadEvents(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	n, err := s.pg.Queries.CountMyUnreadEvents(r.Context(), subj)
@@ -107,9 +105,8 @@ type markEventsReadReq struct {
 // MarkEventsRead implements genclient.ServerInterface (POST /me/events/read).
 // Omitted body/cursor = mark everything read. Idempotent.
 func (s *Server) MarkEventsRead(w http.ResponseWriter, r *http.Request) {
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req markEventsReadReq

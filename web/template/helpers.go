@@ -7,7 +7,6 @@ import (
 )
 
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
-func itoa(n int) string  { return strconv.Itoa(n) }
 
 // txt renders an `any` column as a string. sqlc emits interface{} for some
 // COALESCE(...::text, '') projections (e.g. disputes queue `raised_by`).

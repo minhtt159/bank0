@@ -5,7 +5,7 @@
 -- Holds the transfers table (the operation/intent carrying the lifecycle), the
 -- append-only ledger_entries source of truth, the idempotency_keys table, the
 -- ledger triggers (the ONE balance writer + the append-only guard), and every money
--- function: request_transfer, post_transfer, cancel/fail_transfer, the transfer()
+-- function: request_transfer, post_transfer, cancel_transfer, the transfer()
 -- auto-post, reverse_transfer (clawback), deposit/withdraw, and the client_*
 -- ownership wrappers (+ assert_caller_owns).
 --
@@ -326,7 +326,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- cancel_transfer / fail_transfer: pending -> canceled|failed, release the hold.
+-- cancel_transfer: pending -> canceled, release the hold. (Hold-expiry failure is
+-- written directly by expire_holds, 00007.)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION cancel_transfer(p_transfer_id UUID, p_reason TEXT DEFAULT '')
 RETURNS transfer_status AS $$
@@ -347,24 +348,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION fail_transfer(p_transfer_id UUID, p_reason TEXT DEFAULT '')
-RETURNS transfer_status AS $$
-DECLARE v_status transfer_status;
-BEGIN
-    SELECT status INTO v_status FROM transfers WHERE id = p_transfer_id FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
-    IF v_status = 'failed' THEN RETURN 'failed'; END IF;
-    IF v_status <> 'pending' THEN
-        RAISE EXCEPTION 'cannot fail transfer in state %', v_status USING ERRCODE = 'check_violation';
-    END IF;
-
-    UPDATE holds SET status = 'released', released_at = now()
-     WHERE transfer_id = p_transfer_id AND status = 'active';
-    UPDATE transfers SET status = 'failed', failure_reason = NULLIF(p_reason, '')
-     WHERE id = p_transfer_id;
-    RETURN 'failed';
-END;
-$$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- transfer: the auto-post convenience (request + post in one txn). Idempotent.
@@ -581,7 +564,6 @@ DROP FUNCTION IF EXISTS withdraw(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS reverse_transfer(UUID, TEXT, TEXT);
 DROP FUNCTION IF EXISTS transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, VARCHAR);
-DROP FUNCTION IF EXISTS fail_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS post_transfer(UUID);
 DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR);

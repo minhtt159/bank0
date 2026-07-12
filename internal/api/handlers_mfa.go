@@ -66,9 +66,8 @@ func (s *Server) MfaConfirm(w http.ResponseWriter, r *http.Request) {
 	if s.mfaUnavailable(w) {
 		return
 	}
-	subj, ok := clientSubject(r.Context())
+	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 		return
 	}
 	var req mfaConfirmReq

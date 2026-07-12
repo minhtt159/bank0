@@ -14,9 +14,7 @@ templ SettingsPanel(s sqlc.GetBankSettingsRow, canEdit bool, flash string) {
 			<h1>Settings</h1>
 			<span class="muted small">Bank policy — applies immediately, audited.</span>
 		</div>
-		if flash != "" {
-			<div class="flash">{ flash }</div>
-		}
+		@flashBar(flash)
 		if canEdit {
 			<form class="settings-form" hx-post="/console/settings" hx-target="#main-panel" hx-swap="innerHTML">
 				<label>
