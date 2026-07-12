@@ -29,6 +29,13 @@ func canActOnMoney(role string) bool {
 
 func canManageUsers(role string) bool { return role == string(sqlc.UserRoleAdmin) }
 
+// canCreateUsers gates registering users and editing per-user invitation quotas:
+// operators and admins. (Editing existing user details/status stays admin-only via
+// canManageUsers.)
+func canCreateUsers(role string) bool {
+	return role == string(sqlc.UserRoleOperator) || role == string(sqlc.UserRoleAdmin)
+}
+
 // canManageSettings gates editing bank policy (the Settings panel): admins only.
 // All staff may view it read-only.
 func canManageSettings(role string) bool { return role == string(sqlc.UserRoleAdmin) }

@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,12 +16,12 @@ import (
 // ---- users (main panel + rail) ------------------------------------------
 
 func (s *Server) consoleUsers(w http.ResponseWriter, r *http.Request) {
-	canManage := false
+	canCreate := false
 	if su, ok := userFromContext(r.Context()); ok {
-		canManage = canManageUsers(su.Role)
+		canCreate = canCreateUsers(su.Role)
 	}
 	s.html(w)
-	_ = template.UsersPanel(canManage).Render(r.Context(), w)
+	_ = template.UsersPanel(canCreate).Render(r.Context(), w)
 }
 
 func (s *Server) consoleUsersResults(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +45,7 @@ func (s *Server) consoleUsersResults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consoleNewUserForm(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireRole(w, r, canManageUsers); !ok {
+	if _, ok := s.requireRole(w, r, canCreateUsers); !ok {
 		return
 	}
 	s.html(w)
@@ -52,7 +53,7 @@ func (s *Server) consoleNewUserForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consoleCreateUser(w http.ResponseWriter, r *http.Request) {
-	actor, ok := s.requireRole(w, r, canManageUsers)
+	actor, ok := s.requireRole(w, r, canCreateUsers)
 	if !ok {
 		return
 	}
@@ -112,7 +113,36 @@ func (s *Server) renderUserDetail(w http.ResponseWriter, r *http.Request, id uui
 		role = su.Role
 	}
 	s.html(w)
-	_ = template.UserDetail(u, accts, canManageUsers(role), canActOnMoney(role), flash).Render(ctx, w)
+	_ = template.UserDetail(u, accts, canManageUsers(role), canActOnMoney(role), canCreateUsers(role), flash).Render(ctx, w)
+}
+
+// consoleSetInvites edits a user's remaining invitation quota. Operators and
+// admins may adjust it (canCreateUsers). The count must be a non-negative integer.
+func (s *Server) consoleSetInvites(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canCreateUsers)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		return
+	}
+	_ = r.ParseForm()
+	n, err := strconv.Atoi(strings.TrimSpace(r.PostFormValue("invites_remaining")))
+	if err != nil || n < 0 {
+		s.renderUserDetail(w, r, id, "Invitations must be a whole number of 0 or more.")
+		return
+	}
+	if err := s.pg.Queries.SetInvitesRemaining(r.Context(), sqlc.SetInvitesRemainingParams{
+		ID: id, InvitesRemaining: int32(n),
+	}); err != nil {
+		s.renderUserDetail(w, r, id, "Could not update invitations: "+s.dbFlash(r, err))
+		return
+	}
+	refresh(w)
+	s.audit(r.Context(), actor, "set_invites", &id, map[string]any{"invites_remaining": n})
+	s.renderUserDetail(w, r, id, fmt.Sprintf("Invitations remaining set to %d.", n))
 }
 
 func (s *Server) consoleUpdateUser(w http.ResponseWriter, r *http.Request) {

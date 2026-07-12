@@ -73,6 +73,11 @@ onboarded".)
 DB cooldown + Go IP rate-limit. This section is the **KYC continuation** beyond
 that v1.
 
+**Update (2026-07-13):** registration is now **invitation-gated** — `/auth/register`
+requires a single-use `invitation_code` and each verified customer mints codes from a
+lifetime `invites_remaining` quota (as-built:
+[`../06-client-api.md`](../06-client-api.md) §1). Open signup is no longer offered.
+
 **Extends existing domain** (users lifecycle) — *not* a new domain. KYC document
 capture is the one piece that is genuinely new and best **outsourced**.
 

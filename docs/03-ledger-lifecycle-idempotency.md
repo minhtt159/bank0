@@ -376,11 +376,17 @@ Two consequences:
 - **Cross-owner independence.** The *same* raw key submitted by two different
   customers is two independent claims — one customer's key can never collide with, or
   surface the stored `response` of, another's.
-- **Sentinel namespace for pre-auth / operator / system paths.** Callers with no
-  customer subject (self-`register`, operator `deposit`/`withdraw`/`reverse`,
-  maker-checker staging) use the all-zero sentinel
-  `00000000-0000-0000-0000-000000000000` as `owner_id`, which preserves the old
-  global semantics *within that one shared namespace*.
+- **Sentinel namespace for operator / system paths.** Callers with no customer
+  subject (operator `deposit`/`withdraw`/`reverse`, maker-checker staging) use the
+  all-zero sentinel `00000000-0000-0000-0000-000000000000` as `owner_id`, which
+  preserves the old global semantics *within that one shared namespace*.
+- **Dedicated registration sentinel.** Public `/auth/register` is also pre-auth
+  (no subject yet), but it does **not** share the all-zero namespace: it claims its
+  key under a separate owner UUID ending `…0001`, with the `invitation_code` folded
+  into the fingerprint. This closes a key-squatting vector — the all-zero namespace
+  also carries **deterministic** system keys (e.g. `dispute-reimburse-<id>`), so a
+  self-chosen registration key sharing it could pre-claim or collide with one.
+  Isolating registration in its own owner namespace makes that impossible.
 
 Replay and fingerprint-mismatch semantics are **unchanged within a namespace**: a
 replay still returns the stored result, and a same-key/different-`request_hash` reuse

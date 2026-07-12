@@ -3,11 +3,12 @@ package template
 import sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 
 // UsersPanel is the main-panel Users screen: search box + a results container
-// that lazy-loads the rows and reloads on bank0:refresh.
-templ UsersPanel(canManageUsers bool) {
+// that lazy-loads the rows and reloads on bank0:refresh. canCreate => operator/
+// admin (register users).
+templ UsersPanel(canCreate bool) {
 	@consolePanel("Users", "users-results", "/console/users/results", "") {
 		@searchBox("Search users by name, username, email…", "/console/users/results", "users-results")
-		if canManageUsers {
+		if canCreate {
 			<button class="primary sm" hx-get="/console/users/new" hx-target="#rail">+ New user</button>
 		}
 	}

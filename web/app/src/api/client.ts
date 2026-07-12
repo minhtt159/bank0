@@ -2,10 +2,15 @@ import { token, refreshToken, setAuth, clearAuth, logout } from "../store/auth";
 import type {
   Account,
   Beneficiary,
+  CreateInvitationResponse,
   Dispute,
   DisputeCategory,
+  Invitation,
   LedgerEntry,
   LoginResponse,
+  RegisterRequest,
+  RegisterResponse,
+  ResendCodeRequest,
   ResolvedAccount,
   Session,
   Transfer,
@@ -13,6 +18,8 @@ import type {
   TransferResult,
   TransferSuggestion,
   User,
+  VerifyContactRequest,
+  VerifyContactResponse,
 } from "./types";
 
 // All requests go to /api/* on our own origin; the Cloudflare Worker (prod) or
@@ -119,6 +126,23 @@ async function req<T>(method: string, path: string, opts: Opts = {}, retried = f
 export const api = {
   login: (username: string, password: string) =>
     req<LoginResponse>("POST", "/auth/login", { body: { username, password } }),
+
+  // Invitation-gated self-registration. Like login, these hit /auth/* so req()
+  // never attaches a bearer (no token yet) and never runs the 401-refresh loop —
+  // the real 4xx from the server is surfaced verbatim. register carries the
+  // caller-minted Idempotency-Key so a retried submission replays, never re-creates.
+  register: (body: RegisterRequest, idempotencyKey: string) =>
+    req<RegisterResponse>("POST", "/auth/register", { body, idempotencyKey }),
+  verifyContact: (body: VerifyContactRequest) =>
+    req<VerifyContactResponse>("POST", "/auth/verify-contact", { body }),
+  // Always 202 (anti-enumeration); 429 on cooldown is the only error worth showing.
+  resendCode: (body: ResendCodeRequest) =>
+    req<void>("POST", "/auth/resend-code", { body }),
+
+  // Member invitations (JWT-guarded). createInvitation spends one unit of the
+  // caller's lifetime budget; listInvitations returns a bare array (newest first).
+  createInvitation: () => req<CreateInvitationResponse>("POST", "/me/invitations", {}),
+  listInvitations: () => req<Invitation[]>("GET", "/me/invitations"),
   // Best-effort server-side revoke of the refresh token, then clear local state.
   logout: async () => {
     const rt = refreshToken.value;

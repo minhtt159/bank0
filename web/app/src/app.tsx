@@ -4,6 +4,8 @@ import type { ComponentChildren } from "preact";
 import { isAuthed } from "./store/auth";
 import { api } from "./api/client";
 import { Login } from "./routes/Login";
+import { Register } from "./routes/Register";
+import { Verify } from "./routes/Verify";
 import { Home } from "./routes/Home";
 import { Account } from "./routes/Account";
 import { Profile } from "./routes/Profile";
@@ -13,6 +15,7 @@ import { Activity } from "./routes/Activity";
 import { Disputes } from "./routes/Disputes";
 import { Devices } from "./routes/Devices";
 import { ChangePassword } from "./routes/ChangePassword";
+import { Invite } from "./routes/Invite";
 
 // Protected gates every authenticated screen: no token -> bounce to /login.
 function Protected({ children }: { children: ComponentChildren }) {
@@ -36,6 +39,7 @@ function Shell({ children }: { children: ComponentChildren }) {
         <a class="brand" href="/">bank0</a>
         <nav>
           <a href="/activity" class={path === "/activity" ? "active" : ""}>Activity</a>
+          <a href="/invite" class={path === "/invite" ? "active" : ""}>Invite</a>
           <a href="/profile" class={path === "/profile" ? "active" : ""}>Profile</a>
           <button class="link" onClick={() => api.logout()}>Sign out</button>
         </nav>
@@ -51,11 +55,14 @@ export function App() {
     <LocationProvider>
       <Router>
         <Route path="/login" component={Login} />
+        <Route path="/register" component={Register} />
+        <Route path="/verify" component={Verify} />
         <Route path="/" component={() => <Protected><Home /></Protected>} />
         <Route path="/accounts/:id" component={(p: { id: string }) => <Protected><Account id={p.id} /></Protected>} />
         <Route path="/profile" component={() => <Protected><Profile /></Protected>} />
         <Route path="/password" component={() => <Protected><ChangePassword /></Protected>} />
         <Route path="/devices" component={() => <Protected><Devices /></Protected>} />
+        <Route path="/invite" component={() => <Protected><Invite /></Protected>} />
         <Route path="/activity" component={() => <Protected><Activity /></Protected>} />
         <Route path="/disputes" component={() => <Protected><Disputes /></Protected>} />
         <Route path="/transfer" component={() => <Protected><Transfer /></Protected>} />

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/minhtt159/bank0/internal/config"
 	"github.com/minhtt159/bank0/internal/db"
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
 // capNotifier captures dispatched verification codes (the out-of-band channel)
@@ -71,6 +72,19 @@ func newRegTestServer(t *testing.T) (*httptest.Server, *db.Postgres, *capNotifie
 	return ts, pg, cap
 }
 
+// freshInviteCode spins up a throwaway verified inviter (mkUser => active/active)
+// and mints one single-use code via create_invitation — the DB-level shortcut for
+// tests that only need a valid code to get a registration past the invite gate.
+func freshInviteCode(t *testing.T, pg *db.Postgres) string {
+	t.Helper()
+	id, _ := mkUser(t, pg, sqlc.UserRoleCustomer)
+	inv, err := pg.CreateInvitation(context.Background(), id)
+	if err != nil {
+		t.Fatalf("create_invitation: %v", err)
+	}
+	return inv.Code
+}
+
 func postJSON(t *testing.T, url string, hdr map[string]string, body any) *http.Response {
 	t.Helper()
 	b, _ := json.Marshal(body)
@@ -95,14 +109,15 @@ func decodeBody(t *testing.T, resp *http.Response, dst any) {
 }
 
 func TestHTTPRegisterVerifyLoginFlow(t *testing.T) {
-	ts, _, cap := newRegTestServer(t)
+	ts, pg, cap := newRegTestServer(t)
 	uname := "flow" + uhex(10)
 	email := uname + "@example.com"
 	key := uuid.NewString()
+	invCode := freshInviteCode(t, pg) // the replay MUST reuse it (folded into the fingerprint)
 
 	// Register (no bearer needed): 201, body carries the verify_token, never the code.
 	resp := postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": key},
-		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "Flow T", "email": email})
+		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "Flow T", "email": email, "invitation_code": invCode})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register = %d, want 201: %s", resp.StatusCode, body(t, resp))
 	}
@@ -130,7 +145,7 @@ func TestHTTPRegisterVerifyLoginFlow(t *testing.T) {
 	// Replay the SAME registration: 201 again, same user_id, replay header, no dup dispatch.
 	sent := len(cap.codes)
 	r = postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": key},
-		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "Flow T", "email": email})
+		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "Flow T", "email": email, "invitation_code": invCode})
 	if r.StatusCode != http.StatusCreated {
 		t.Fatalf("replayed register = %d, want 201", r.StatusCode)
 	}
@@ -195,48 +210,55 @@ func TestHTTPRegisterVerifyLoginFlow(t *testing.T) {
 }
 
 func TestHTTPRegisterValidationAndThrottles(t *testing.T) {
-	ts, _, _ := newRegTestServer(t)
+	ts, pg, _ := newRegTestServer(t)
 
-	// Missing Idempotency-Key -> 400.
+	// Missing Idempotency-Key -> 400 (the generated wrapper rejects it before the handler).
 	r := postJSON(t, ts.URL+"/auth/register", nil,
-		map[string]string{"username": "x" + uhex(8), "password": "correct-horse-battery", "full_name": "X", "email": "x@example.com"})
+		map[string]string{"username": "x" + uhex(8), "password": "correct-horse-battery", "full_name": "X", "email": "x@example.com", "invitation_code": freshInviteCode(t, pg)})
 	if r.StatusCode != http.StatusBadRequest {
 		t.Errorf("no key = %d, want 400", r.StatusCode)
 	}
 
-	// Weak password -> 422.
+	// Missing invitation code -> 422 (the handler fast-fails an empty code).
 	r = postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": uuid.NewString()},
-		map[string]string{"username": "x" + uhex(8), "password": "short", "full_name": "X", "email": "x" + uhex(6) + "@example.com"})
+		map[string]string{"username": "x" + uhex(8), "password": "correct-horse-battery", "full_name": "X", "email": "x" + uhex(6) + "@example.com"})
+	if r.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("no invite code = %d, want 422", r.StatusCode)
+	}
+
+	// Weak password -> 422 (a valid code is supplied so we actually reach the policy check).
+	r = postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": uuid.NewString()},
+		map[string]string{"username": "x" + uhex(8), "password": "short", "full_name": "X", "email": "x" + uhex(6) + "@example.com", "invitation_code": freshInviteCode(t, pg)})
 	if r.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("weak password = %d, want 422", r.StatusCode)
 	}
 
 	// No contact channel -> 422.
 	r = postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": uuid.NewString()},
-		map[string]string{"username": "x" + uhex(8), "password": "correct-horse-battery", "full_name": "X"})
+		map[string]string{"username": "x" + uhex(8), "password": "correct-horse-battery", "full_name": "X", "invitation_code": freshInviteCode(t, pg)})
 	if r.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("no channel = %d, want 422", r.StatusCode)
 	}
 
-	// Duplicate username -> 409.
+	// Duplicate username -> 409. Each attempt needs its own unconsumed code.
 	uname := "dupu" + uhex(8)
 	r = postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": uuid.NewString()},
-		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "X", "email": "a" + uhex(6) + "@example.com"})
+		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "X", "email": "a" + uhex(6) + "@example.com", "invitation_code": freshInviteCode(t, pg)})
 	if r.StatusCode != http.StatusCreated {
 		t.Fatalf("first register = %d, want 201", r.StatusCode)
 	}
 	r = postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": uuid.NewString()},
-		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "X", "email": "b" + uhex(6) + "@example.com"})
+		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "X", "email": "b" + uhex(6) + "@example.com", "invitation_code": freshInviteCode(t, pg)})
 	if r.StatusCode != http.StatusConflict {
 		t.Errorf("duplicate register = %d, want 409", r.StatusCode)
 	}
 }
 
 func TestHTTPResendCode(t *testing.T) {
-	ts, _, cap := newRegTestServer(t)
+	ts, pg, cap := newRegTestServer(t)
 	uname := "rs" + uhex(10)
 	r := postJSON(t, ts.URL+"/auth/register", map[string]string{"Idempotency-Key": uuid.NewString()},
-		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "X", "email": uname + "@example.com"})
+		map[string]string{"username": uname, "password": "correct-horse-battery", "full_name": "X", "email": uname + "@example.com", "invitation_code": freshInviteCode(t, pg)})
 	if r.StatusCode != http.StatusCreated {
 		t.Fatalf("register = %d, want 201", r.StatusCode)
 	}

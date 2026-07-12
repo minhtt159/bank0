@@ -23,15 +23,17 @@ JWT subject.
 | Auth | POST | `/auth/refresh` | refresh token | rotate → new access + refresh pair |
 | Auth | POST | `/auth/logout` | refresh token | revoke one refresh token |
 | Auth | POST | `/auth/logout-all` | bearer | revoke every refresh token for the caller |
-| Onboarding | POST | `/auth/register` | public | self-registration → locked `pending_verification` customer; `Idempotency-Key` required (replay returns the original body + `Idempotency-Replayed: true`); code dispatched out-of-band |
+| Onboarding | POST | `/auth/register` | public | **invitation-gated** self-registration → locked `pending_verification` customer; body carries a single-use `invitation_code` (14-day expiry, not email-bound; empty → 422, unknown → 404, used/expired → 409); `Idempotency-Key` required (the code is folded into the fingerprint; replay returns the original body + `Idempotency-Replayed: true`); verification code dispatched out-of-band |
 | Onboarding | POST | `/auth/verify-contact` | public | consume the 6-digit code via the opaque `verify_token`; unlocks login (401 wrong/expired, 422 after 5 attempts, 404 unknown token) |
 | Onboarding | POST | `/auth/resend-code` | public | re-dispatch (60s DB cooldown → 429; unknown token → silent 202) |
 | MFA | POST | `/auth/mfa/enroll` | bearer | begin TOTP enrollment → otpauth URI + base32 secret (shown once); 409 if already enabled |
 | MFA | POST | `/auth/mfa/confirm` | bearer | first live code → MFA on + 10 one-time recovery codes (shown once, stored hashed) |
 | MFA | POST | `/auth/mfa/verify` | public | exchange the login-issued `mfa_token` + TOTP/recovery code → real token pair (`amr=["pwd","otp"]`); lockout → 429 |
-| Profile | GET | `/me` | bearer | the caller's own `User` (no password hash) |
+| Profile | GET | `/me` | bearer | the caller's own `User` (no password hash); includes `invites_remaining` (the caller's lifetime invite quota) |
 | Profile | PATCH | `/me` | bearer | self-service edit of name/email/phone (password/status/role can't be set here) |
 | Profile | POST | `/me/password` | bearer | change password (verify current); revokes other refresh families, spares the current session |
+| Invitations | POST | `/me/invitations` | bearer | mint a single-use invite code → **201** `{code, expires_at, invites_remaining}`; verified-active callers only (else **403**); decrements the caller's lifetime `invites_remaining`, **409** `invitation_limit` once exhausted (expired codes never refund) |
+| Invitations | GET | `/me/invitations` | bearer | the caller's issued invites — bare array `[{code, status, created_at, expires_at, consumed_at}]`; `status` is derived `pending`/`consumed`/`expired` |
 | Sessions | GET | `/me/sessions` | bearer | active devices (refresh-token families); `X-Refresh-Token` header flags the current one |
 | Sessions | DELETE | `/me/sessions/{family_id}` | bearer | selective sign-out of one device (idempotent; 404 if not the caller's) |
 | Accounts | GET | `/users/{id}/accounts` | bearer | own accounts only (404 otherwise) |
@@ -249,14 +251,20 @@ are unchanged, so the ledger and ownership logic don't move.
   tables/functions — schema in
   [`00003_users.sql`](../db/migrations/00003_users.sql) and
   [`00008_features.sql`](../db/migrations/00008_features.sql).
-- **Onboarding v1 is shipped**: public self-registration + contact verification
-  (§1 Onboarding rows; schema/functions in
+- **Onboarding v1 is shipped**: invitation-gated self-registration + contact
+  verification (§1 Onboarding/Invitations rows; schema/functions in
   [`00003_users.sql`](../db/migrations/00003_users.sql)) and customer
-  self-service account opening / limit requests (§1 Accounts rows). A
+  self-service account opening / limit requests (§1 Accounts rows). Registration
+  **requires** a single-use `invitation_code` (14-day expiry, not email-bound);
+  every verified customer mints codes from a lifetime `invites_remaining` quota
+  (`POST /me/invitations`) and lists their own (`GET /me/invitations`). A
   self-registered user is `locked` + `pending_verification` until a code is
   verified; codes and the `verify_token` are stored hashed; failed attempts are
   persisted from Go in a second statement (a `RAISE` rolls back the function's
-  own writes).
+  own writes). Registration idempotency claims land in a dedicated owner namespace
+  (UUID `…0001`), not the all-zero system/money sentinel, closing the
+  key-squatting vector on deterministic system keys
+  ([`03-...md`](03-ledger-lifecycle-idempotency.md) §3).
 - **Open backlog** (full KYC/document capture, notifications, statement
   export, multi-currency) lives in [`specs/`](specs/) — see
   [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).
