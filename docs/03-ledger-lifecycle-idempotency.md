@@ -363,6 +363,30 @@ either replays the (now `completed`) result or, if still `in_progress`, the API
 returns `409 Conflict / retry` (the safe answer: "your request is being
 processed").
 
+**Per-owner key namespace (as-built).** The `idempotency_keys` primary key is
+`(owner_id, key)`, not `key` alone — the raw client string is namespaced to the
+owning principal. `request_transfer` takes a `p_caller UUID` that the client path
+threads from the authenticated JWT subject (`client_transfer → transfer →
+request_transfer`); the `INSERT … ON CONFLICT (owner_id, key)` claims the key inside
+that owner's namespace. The abbreviated `(key)`/`ON CONFLICT (key)` in the §2 samples
+is the pre-namespace shorthand — the live functions key on `(owner_id, key)`.
+
+Two consequences:
+
+- **Cross-owner independence.** The *same* raw key submitted by two different
+  customers is two independent claims — one customer's key can never collide with, or
+  surface the stored `response` of, another's.
+- **Sentinel namespace for pre-auth / operator / system paths.** Callers with no
+  customer subject (self-`register`, operator `deposit`/`withdraw`/`reverse`,
+  maker-checker staging) use the all-zero sentinel
+  `00000000-0000-0000-0000-000000000000` as `owner_id`, which preserves the old
+  global semantics *within that one shared namespace*.
+
+Replay and fingerprint-mismatch semantics are **unchanged within a namespace**: a
+replay still returns the stored result, and a same-key/different-`request_hash` reuse
+still raises `check_violation` — the namespace only decides *whose* keyspace the claim
+lands in.
+
 ---
 
 ## 4. Triggers (structural invariants)

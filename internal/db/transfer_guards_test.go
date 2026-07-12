@@ -284,3 +284,93 @@ func genIban(t *testing.T, pg *Postgres) string {
 	}
 	return ibanStr
 }
+
+// clientTransferRes drives client_transfer — which namespaces the idempotency key
+// to the authenticated subject (Rec 3) — and returns the transfer id + replay flag.
+func clientTransferRes(ctx context.Context, pg *Postgres, subject uuid.UUID, key string, debit, credit uuid.UUID, amount int64) (uuid.UUID, bool, error) {
+	var tid uuid.UUID
+	var st string
+	var replay bool
+	err := pg.Pool.QueryRow(ctx,
+		`SELECT transfer_id, status, was_replay FROM client_transfer($1,$2,$3,$4,$5,$6)`,
+		subject, key, debit, credit, amount, "per-owner idem").Scan(&tid, &st, &replay)
+	return tid, replay, err
+}
+
+// TestIdempotencyKeyPerOwner: the idempotency namespace is bound to the owning
+// principal, so the SAME raw key used by two DIFFERENT customers yields two
+// independent claims — neither surfaces or collides with the other's result.
+func TestIdempotencyKeyPerOwner(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	alice := mkCustomer(t, pg)
+	aAcct := mkAccount(t, pg, alice)
+	bob := mkCustomer(t, pg)
+	bAcct := mkAccount(t, pg, bob)
+	sink := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, aAcct, 100_000)
+	fund(t, pg, bAcct, 100_000)
+
+	key := uuid.NewString() // the SAME raw idempotency key for both customers
+
+	aliceTid, aliceReplay, err := clientTransferRes(ctx, pg, alice, key, aAcct, sink, 1_000)
+	if err != nil {
+		t.Fatalf("alice transfer: %v", err)
+	}
+	if aliceReplay {
+		t.Error("alice's first use of the key must not be a replay")
+	}
+
+	// bob reuses the identical key in his OWN namespace: an independent claim that
+	// must succeed and must NOT surface alice's stored result.
+	bobTid, bobReplay, err := clientTransferRes(ctx, pg, bob, key, bAcct, sink, 2_000)
+	if err != nil {
+		t.Fatalf("bob transfer with same key: %v", err)
+	}
+	if bobReplay {
+		t.Error("bob's use of the same key in his own namespace must not be a replay")
+	}
+	if aliceTid == bobTid {
+		t.Fatalf("same key across owners must yield independent transfers; both = %s", aliceTid)
+	}
+	reconcileClean(t, pg)
+}
+
+// TestIdempotencyReplayWithinOwner: WITHIN one owner's namespace the replay and
+// fingerprint semantics are unchanged — an identical (owner,key,params) call is a
+// replay returning the original transfer; the same (owner,key) with different
+// params trips the fingerprint-mismatch check_violation (23514).
+func TestIdempotencyReplayWithinOwner(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	alice := mkCustomer(t, pg)
+	aAcct := mkAccount(t, pg, alice)
+	sink := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, aAcct, 100_000)
+
+	key := uuid.NewString()
+	tid1, replay1, err := clientTransferRes(ctx, pg, alice, key, aAcct, sink, 3_000)
+	if err != nil || replay1 {
+		t.Fatalf("first: err=%v replay=%v", err, replay1)
+	}
+
+	// identical (owner,key,params) -> replay, same transfer id, single debit.
+	tid2, replay2, err := clientTransferRes(ctx, pg, alice, key, aAcct, sink, 3_000)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if !replay2 || tid2 != tid1 {
+		t.Errorf("same (owner,key) replay should return original; tid1=%s tid2=%s replay=%v", tid1, tid2, replay2)
+	}
+	if lb, _ := balance(t, pg, aAcct); lb != 97_000 {
+		t.Errorf("replay must not double-debit; balance=%d want 97000", lb)
+	}
+
+	// same (owner,key), DIFFERENT amount -> fingerprint mismatch (23514).
+	if _, _, err := clientTransferRes(ctx, pg, alice, key, aAcct, sink, 5_000); err == nil {
+		t.Fatal("same (owner,key) with different amount must be rejected")
+	} else if got := sqlstate(err); got != "23514" {
+		t.Fatalf("fingerprint-mismatch SQLSTATE = %q, want 23514 (check_violation)", got)
+	}
+	reconcileClean(t, pg)
+}

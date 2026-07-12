@@ -315,14 +315,17 @@ BEGIN
         COALESCE(p_username::text,'') || '|' || COALESCE(p_email::text,'') || '|' ||
         COALESCE(p_phone_number,'')   || '|' || COALESCE(p_full_name,''), 'sha256'), 'hex');
 
-    INSERT INTO idempotency_keys (key, scope, request_hash, status)
-    VALUES (p_idempotency_key, 'register', v_hash, 'in_progress')
-    ON CONFLICT (key) DO NOTHING;
+    -- Pre-auth: there is no authenticated principal yet, so registration claims
+    -- live in the all-zero sentinel namespace (Rec 3 — global semantics preserved).
+    INSERT INTO idempotency_keys (owner_id, key, scope, request_hash, status)
+    VALUES ('00000000-0000-0000-0000-000000000000', p_idempotency_key, 'register', v_hash, 'in_progress')
+    ON CONFLICT (owner_id, key) DO NOTHING;
 
     IF NOT FOUND THEN
         SELECT ik.scope, ik.request_hash, ik.status, ik.response
           INTO v_ex_scope, v_ex_hash, v_ex_status, v_ex_resp
-          FROM idempotency_keys ik WHERE ik.key = p_idempotency_key;
+          FROM idempotency_keys ik
+         WHERE ik.owner_id = '00000000-0000-0000-0000-000000000000' AND ik.key = p_idempotency_key;
         IF v_ex_scope <> 'register' OR v_ex_hash <> v_hash THEN
             RAISE EXCEPTION 'idempotency key reused with different parameters'
                 USING ERRCODE = 'check_violation';
@@ -361,7 +364,7 @@ BEGIN
         'verify_channel', p_channel,
         'verify_token', p_verify_token);
     UPDATE idempotency_keys SET status = 'completed', response = v_resp
-     WHERE key = p_idempotency_key;
+     WHERE owner_id = '00000000-0000-0000-0000-000000000000' AND key = p_idempotency_key;
 
     RETURN QUERY SELECT v_id, FALSE, v_resp;
 END;

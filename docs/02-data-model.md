@@ -107,6 +107,7 @@ erDiagram
     }
 
     idempotency_keys {
+        uuid owner_id PK "owning principal; zero-uuid sentinel for system/anon"
         text key PK
         text scope "e.g. 'transfer'"
         text request_hash "fingerprint of params"
@@ -353,23 +354,28 @@ returns the funds to `available`.
 CREATE TYPE ik_status AS ENUM ('in_progress', 'completed');
 
 CREATE TABLE idempotency_keys (
-    key          TEXT PRIMARY KEY,
+    owner_id     UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+    key          TEXT NOT NULL,
     scope        TEXT NOT NULL,                  -- 'transfer', 'reversal', ...
     request_hash TEXT NOT NULL,                  -- SHA-256 of normalized params
     status       ik_status NOT NULL DEFAULT 'in_progress',
     transfer_id  UUID REFERENCES transfers(id),
     response     JSONB,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days'
+    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days',
+    PRIMARY KEY (owner_id, key)                  -- key namespaced to the owning principal
 );
 ```
 
-How this guarantees no double-post and keeps business logic out of the API is the
-subject of [`03-...md`](03-ledger-lifecycle-idempotency.md) §3. In short: the DB
-function does `INSERT ... ON CONFLICT (key) DO NOTHING`; a conflict means "seen
-before" → return the stored result; a conflict with a *different* `request_hash`
-raises (the client reused a key for a different request — surfaced loudly rather
-than silently mis-handled).
+`owner_id` namespaces the raw client key to the owning principal (the customer user id
+on client money/account paths; the all-zero sentinel for system/anonymous/operator
+ops), so the same raw key from two different owners is two independent claims. How this
+guarantees no double-post and keeps business logic out of the API is the subject of
+[`03-...md`](03-ledger-lifecycle-idempotency.md) §3. In short: the DB function does
+`INSERT ... ON CONFLICT (owner_id, key) DO NOTHING`; a conflict means "seen before" →
+return the stored result; a conflict with a *different* `request_hash` raises (the
+client reused a key for a different request — surfaced loudly rather than silently
+mis-handled).
 
 ### 3.7 `admin_actions` — operator audit
 

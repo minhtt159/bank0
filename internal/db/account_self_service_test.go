@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
 // Customer self-service account opening + limit-change maker-checker (00004/00006).
@@ -90,10 +92,12 @@ func TestOpenCustomerAccountReplayAndCap(t *testing.T) {
 		t.Errorf("accounts after replay = %d, want 1", n)
 	}
 
-	// Same key, different subject -> fingerprint mismatch.
+	// Per-owner namespace (Rec 3): the SAME key used by a DIFFERENT subject is an
+	// independent claim in its own namespace — it opens that user's own account
+	// rather than colliding with, or surfacing, owner's result.
 	other := mkCustomer(t, pg)
-	if _, _, err := pg.OpenCustomerAccount(ctx, key, other); sqlstate(err) != "23514" {
-		t.Errorf("cross-user key reuse SQLSTATE = %q, want 23514", sqlstate(err))
+	if oa, oreplay, err := pg.OpenCustomerAccount(ctx, key, other); err != nil || oreplay || oa == a1 {
+		t.Errorf("cross-user same key = (%s, replay=%v, err=%v); want a fresh account, no replay, no error", oa, oreplay, err)
 	}
 
 	// Cap: bank_settings.max_accounts_per_user (seeded 5). Fill up, then overflow.
@@ -183,6 +187,54 @@ func TestLimitChangeMakerChecker(t *testing.T) {
 	if final != want {
 		t.Errorf("rejected request must not change the limit: %d, want %d", final, want)
 	}
+}
+
+// TestUpdateTransferLimitGatesTransfers drives update_transfer_limit directly and
+// proves it changes the per-transaction ceiling request_transfer enforces: below the
+// amount the transfer is rejected and no money moves; once the limit is raised the
+// same transfer posts. NOTE: the over-limit RAISE carries no custom ERRCODE, so it
+// surfaces as P0001 'amount ... exceeds transfer limit ...' (mapDBError maps that to
+// 422) — NOT the 23514 'account limit' code, which belongs to the account-count cap
+// in open_customer_account.
+func TestUpdateTransferLimitGatesTransfers(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	a := mkAccount(t, pg, mkCustomer(t, pg))
+	b := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, a, 100_000)
+
+	const amount = 40_000
+
+	// Lower the debit account's limit below the amount -> the transfer is rejected.
+	if err := pg.Queries.UpdateTransferLimit(ctx, sqlc.UpdateTransferLimitParams{
+		AccountID: a, TransferLimitMinor: amount - 1,
+	}); err != nil {
+		t.Fatalf("lower limit: %v", err)
+	}
+	_, err := testTransfer(ctx, pg, uuid.NewString(), a, b, amount, "over limit", sqlc.TransferKindTransfer)
+	if err == nil {
+		t.Fatal("transfer above the limit must be rejected")
+	}
+	if got := sqlstate(err); got != "P0001" || !strings.Contains(strings.ToLower(err.Error()), "exceeds transfer limit") {
+		t.Errorf("over-limit err = %v (sqlstate %q), want P0001 'exceeds transfer limit'", err, got)
+	}
+	if lb, _ := balance(t, pg, a); lb != 100_000 {
+		t.Errorf("rejected transfer moved money: balance=%d, want 100000", lb)
+	}
+
+	// Raise the limit to exactly the amount; the same transfer now posts.
+	if err := pg.Queries.UpdateTransferLimit(ctx, sqlc.UpdateTransferLimitParams{
+		AccountID: a, TransferLimitMinor: amount,
+	}); err != nil {
+		t.Fatalf("raise limit: %v", err)
+	}
+	if _, err := testTransfer(ctx, pg, uuid.NewString(), a, b, amount, "at limit", sqlc.TransferKindTransfer); err != nil {
+		t.Fatalf("transfer at the raised limit: %v", err)
+	}
+	if lb, _ := balance(t, pg, a); lb != 60_000 {
+		t.Errorf("balance after transfer = %d, want 60000", lb)
+	}
+	reconcileClean(t, pg)
 }
 
 func TestTransferCarriesRailIdentifiers(t *testing.T) {

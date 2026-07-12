@@ -180,7 +180,7 @@ DECLARE
     v_req UUID;
 BEGIN
     SELECT id INTO v_ext FROM accounts WHERE system_code = 'EXTERNAL_CLEARING';
-    IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)' USING ERRCODE = 'XX000'; END IF;
 
     -- (1) Stage the PENDING transfer + the hold via request_transfer. Direction
     -- depends on p_kind.
@@ -192,7 +192,7 @@ BEGIN
         FROM request_transfer(p_idempotency_key, p_account_id, v_ext, p_amount_minor, p_description, 'withdrawal') t;
     ELSE
         RAISE EXCEPTION 'unsupported kind % for maker-checker staging', p_kind
-            USING ERRCODE = 'check_violation';
+            USING ERRCODE = 'XX000';
     END IF;
 
     -- (2) Enqueue the 4-eyes approval row.
