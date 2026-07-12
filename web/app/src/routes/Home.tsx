@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { userId } from "../store/auth";
 import { formatMinor } from "../lib/money";
 import type { Account } from "../api/types";
+import { ErrorBanner, Loading } from "../lib/feedback";
 
 export function Home() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -12,8 +13,8 @@ export function Home() {
     api.accounts(userId.value).then(setAccounts).catch((e) => setErr(e.message));
   }, []);
 
-  if (err) return <div class="error">{err}</div>;
-  if (!accounts) return <div class="center">Loading…</div>;
+  if (err) return <ErrorBanner>{err}</ErrorBanner>;
+  if (!accounts) return <Loading />;
   if (accounts.length === 0) return <div class="center">You have no accounts yet.</div>;
 
   return (

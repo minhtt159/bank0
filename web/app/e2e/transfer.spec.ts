@@ -18,6 +18,10 @@ test("customer adds a payee and completes a transfer end to end", async ({ page,
   await expect(page.getByText(/confirmation of payee/i)).toBeVisible();
   await page.getByRole("button", { name: /save payee/i }).click();
 
+  // Sub-cent / zero amounts are rejected client-side and never reach the API.
+  await page.getByPlaceholder("0.00").fill("0.001");
+  await expect(page.getByRole("button", { name: /^review$/i })).toBeDisabled();
+
   await page.getByPlaceholder("0.00").fill("1.00");
   await page.getByRole("button", { name: /^review$/i }).click();
   await expect(page.getByRole("heading", { name: "Confirm transfer" })).toBeVisible();

@@ -27,6 +27,7 @@ interface Interceptor {
   match: (pathWithSearch: string) => boolean;
   fired: boolean;
   captured?: Captured;
+  fail?: boolean; // when set, the mock fetch throws to simulate an upstream error
 }
 
 // Registered per test, drained in afterEach. The worker forwards /api/* via the
@@ -50,6 +51,9 @@ beforeAll(() => {
       throw new Error(`no interceptor matched upstream ${pathWithSearch}`);
     }
     ic.fired = true;
+    // Simulate the upstream being unreachable so the worker's try/catch -> 502
+    // path fires instead of a normal upstream response.
+    if (ic.fail) throw new Error("connection refused");
     const hasBody = req.method !== "GET" && req.method !== "HEAD";
     ic.captured = {
       path: pathWithSearch,
@@ -87,6 +91,18 @@ function captureUpstream(expectedPath: string | RegExp): { get(): Captured } {
       return ic.captured;
     },
   };
+}
+
+// Register a one-shot interceptor whose upstream call throws, so we can assert
+// the worker's controlled 502 (there is no reply-with-error primitive in the
+// current harness).
+function failUpstream(expectedPath: string | RegExp): void {
+  interceptors.push({
+    match: (p) =>
+      typeof expectedPath === "string" ? p === expectedPath : expectedPath.test(p),
+    fired: false,
+    fail: true,
+  });
 }
 
 describe("worker /api proxy contract", () => {
@@ -188,6 +204,16 @@ describe("worker /api proxy contract", () => {
 
       const body = await res.text();
       expect(body).toContain('"bank0"');
+    });
+  });
+
+  describe("5. upstream failure", () => {
+    it("returns a controlled JSON 502 when the upstream errors", async () => {
+      failUpstream("/transfers");
+      const res = await SELF.fetch("https://bank0.test/api/transfers");
+      expect(res.status).toBe(502);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect((await res.json()).error).toBe("bad_gateway");
     });
   });
 });

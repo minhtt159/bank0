@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
 import { formatMinor } from "../lib/money";
 import type { TransferListItem } from "../api/types";
+import { ErrorBanner } from "../lib/feedback";
 
 const PAGE = 25;
 type Filter = "all" | "out" | "in";
@@ -52,7 +53,7 @@ export function Activity() {
       <a class="muted" href="/">‹ Home</a>
       <h1>Activity</h1>
 
-      <input placeholder="Search payments" value={q}
+      <input placeholder="Search payments" aria-label="Search payments" value={q}
         onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
       <div class="row" style="gap:8px;margin:10px 0">
         {(["all", "out", "in"] as Filter[]).map((f) => (
@@ -63,7 +64,7 @@ export function Activity() {
         ))}
       </div>
 
-      {err && <div class="error">{err}</div>}
+      {err && <ErrorBanner>{err}</ErrorBanner>}
 
       <div class="card">
         {items.length === 0 && done && !busy && <div class="muted">No payments found.</div>}

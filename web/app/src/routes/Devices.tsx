@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError } from "../api/client";
 import type { Session } from "../api/types";
+import { ErrorBanner, Loading } from "../lib/feedback";
 
 export function Devices() {
   const [sessions, setSessions] = useState<Session[] | null>(null);
@@ -25,15 +26,15 @@ export function Devices() {
     }
   }
 
-  if (err && !sessions) return <div class="error">{err}</div>;
-  if (!sessions) return <div class="center">Loading…</div>;
+  if (err && !sessions) return <ErrorBanner>{err}</ErrorBanner>;
+  if (!sessions) return <Loading />;
 
   return (
     <>
       <a class="muted" href="/profile">‹ Profile</a>
       <h1>Devices &amp; sessions</h1>
       <p class="muted">Active sign-ins on your account. Revoke any you don't recognise.</p>
-      {err && <div class="error">{err}</div>}
+      {err && <ErrorBanner>{err}</ErrorBanner>}
       {sessions.length === 0 && <div class="center">No active sessions.</div>}
       {sessions.map((s) => (
         <div key={s.family_id} class="card">

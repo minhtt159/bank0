@@ -3,6 +3,7 @@ import { api, ApiError } from "../api/client";
 import { formatMinor } from "../lib/money";
 import { DISPUTE_CATEGORIES, disputeStatusLabel } from "../lib/labels";
 import type { Dispute, DisputeCategory, Transfer } from "../api/types";
+import { ErrorBanner, Loading } from "../lib/feedback";
 
 export function Receipt({ id }: { id: string }) {
   const [t, setT] = useState<Transfer | null>(null);
@@ -35,8 +36,8 @@ export function Receipt({ id }: { id: string }) {
     }
   }
 
-  if (err) return <div class="error">{err}</div>;
-  if (!t) return <div class="center">Loading…</div>;
+  if (err) return <ErrorBanner>{err}</ErrorBanner>;
+  if (!t) return <Loading />;
 
   const posted = t.status === "posted";
   // A dispute only makes sense once money has actually moved; the server is the
@@ -76,7 +77,7 @@ export function Receipt({ id }: { id: string }) {
         </div>
       ) : disputing ? (
         <form class="card" onSubmit={submitDispute}>
-          {disputeErr && <div class="error">{disputeErr}</div>}
+          {disputeErr && <ErrorBanner>{disputeErr}</ErrorBanner>}
           <label for="cat">What's wrong?</label>
           <select id="cat" value={category}
             onChange={(e) => setCategory((e.target as HTMLSelectElement).value as DisputeCategory)}>

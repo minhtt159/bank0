@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
 import { setAuth, isAuthed } from "../store/auth";
+import { ErrorBanner } from "../lib/feedback";
 
 export function Login() {
   const { route } = useLocation();
@@ -33,7 +34,7 @@ export function Login() {
     <div class="login-wrap">
       <div class="logo">bank0</div>
       <form onSubmit={submit}>
-        {err && <div class="error">{err}</div>}
+        {err && <ErrorBanner>{err}</ErrorBanner>}
         <label for="u">Username</label>
         <input id="u" autocomplete="username" value={username}
           onInput={(e) => setU((e.target as HTMLInputElement).value)} />
