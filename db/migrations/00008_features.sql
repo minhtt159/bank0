@@ -35,6 +35,20 @@ CREATE INDEX idx_beneficiaries_owner ON beneficiaries (owner_user_id);
 ALTER TABLE beneficiaries
     ADD CONSTRAINT beneficiaries_iban_checksum CHECK (iban_is_valid(iban));
 
+-- The ONE definition of the step-up "known payee" predicate: the credit account
+-- is one of the caller's saved beneficiaries. Used by both the Go gate (sqlc
+-- IsKnownPayee) and evaluate_transfer, so preview and enforcement can't diverge.
+-- (Prior-posted-transfer relaxation is a possible follow-up — change it HERE.)
+-- +goose StatementBegin
+CREATE FUNCTION is_known_payee(p_owner UUID, p_credit UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM beneficiaries
+         WHERE owner_user_id = p_owner
+           AND credit_account_id = p_credit);
+$$;
+-- +goose StatementEnd
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- guided_scenarios  (demo/config for fraudbank's "Guided transaction" APP-scam mode)
 -- Maps an active demo to a target ("mule") account that GET /transfers/suggestion
@@ -995,13 +1009,10 @@ BEGIN
     LIMIT 1;
     v_matched := FOUND;
 
-    -- "New payee" must mirror the submit-time gate (IsKnownPayee: saved
-    -- beneficiary), NOT assess_transfer_risk's first_payment_to_payee (prior
-    -- posted transfer) — else the preview under/over-promises the real step-up.
-    v_first := NOT EXISTS (
-        SELECT 1 FROM beneficiaries b
-         WHERE b.owner_user_id = p_caller
-           AND b.credit_account_id = p_credit);
+    -- "New payee" is the shared is_known_payee predicate — the SAME definition
+    -- the Go gate reads via sqlc, NOT assess_transfer_risk's
+    -- first_payment_to_payee — else the preview under/over-promises step-up.
+    v_first := NOT is_known_payee(p_caller, p_credit);
     v_stepup := (p_step_up_limit_minor > 0 AND p_amount_minor >= p_step_up_limit_minor)
                 OR v_band = 'high' OR v_first;
     IF v_stepup THEN v_method := 'otp'; END IF;
@@ -1058,6 +1069,7 @@ DROP FUNCTION IF EXISTS raise_dispute(UUID, UUID, dispute_category, TEXT, scam_t
 DROP FUNCTION IF EXISTS suggest_transfer_destinations(UUID, UUID, BIGINT);
 DROP FUNCTION IF EXISTS delete_beneficiary(UUID, UUID);
 DROP FUNCTION IF EXISTS add_beneficiary(UUID, TEXT, VARCHAR);
+DROP FUNCTION IF EXISTS is_known_payee(UUID, UUID);
 DROP FUNCTION IF EXISTS resolve_account_by_iban(VARCHAR, TEXT, UUID);
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS disputes;

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/minhtt159/bank0/internal/api/genadmin"
 	"github.com/minhtt159/bank0/internal/api/genclient"
+	"github.com/minhtt159/bank0/internal/db"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
@@ -96,6 +97,42 @@ type createTransferReq struct {
 }
 
 // CreateTransfer implements genclient.ServerInterface. Auto-posts by default;
+// stepUpGate is the ONE step-up decision for a would-be payment (SCA + dynamic
+// linking, Recs 13/14/15, PSD2 RTS Art. 5 / WYSIWYS). The axis — configured
+// per-payment limit, new (unsaved) payee via is_known_payee, or a high TRA
+// band — is computed in the DB by evaluate_transfer, the same call the intent
+// preview uses, so preview and enforcement cannot diverge. Go adds only the
+// JWT-side exemptions the DB cannot see: no MFA enrolled (the caller could
+// never satisfy a step-up; limits + maker-checker still apply), or a fresh OTP
+// whose txn_link commits to THIS exact (debit, credit, amount) — a generic
+// fresh OTP never authorizes an arbitrary payment. For exempt callers the
+// returned evaluation has step_up downgraded to allow and the method dropped.
+// gated=true means POST /transfers must refuse with 403 step_up_required.
+func (s *Server) stepUpGate(r *http.Request, subj, debit, credit uuid.UUID, amountMinor int64) (db.TransferEvaluation, bool, error) {
+	eval, err := s.pg.EvaluateTransfer(r.Context(), subj, debit, credit, amountMinor, s.cfg.Auth.StepUpLimitMinor)
+	if err != nil || eval.StepUpMethod == "" {
+		return eval, false, err
+	}
+	if claims, ok := clientClaimsFrom(r.Context()); !ok ||
+		!(claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) &&
+			claims.TxnLink == transferLinkHash(debit, credit, amountMinor)) {
+		enabled, err := s.pg.MFAEnabled(r.Context(), subj)
+		if err != nil {
+			return eval, false, err
+		}
+		if enabled {
+			return eval, true, nil // gated: must re-verify for this exact payment
+		}
+	}
+	// Exempt (fresh linked OTP, or no second factor): never advertise a step-up
+	// the submit would not enforce.
+	if eval.Decision == "step_up" {
+		eval.Decision = "allow"
+	}
+	eval.StepUpMethod = ""
+	return eval, false, nil
+}
+
 // idempotent on the Idempotency-Key header (bound by the generated wrapper).
 func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params genclient.CreateTransferParams) {
 	subj, ok := s.clientSubjectOr401(w, r)
@@ -116,48 +153,19 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
 		return
 	}
-	// Step-up gate (SCA + dynamic linking, Recs 13/14/15): an MFA-enabled caller
-	// on a gated transfer must present a FRESH otp factor whose txn_link commits
-	// to THIS exact (debit, credit, amount) — a generic fresh OTP no longer
-	// authorizes any payment in the window (PSD2 RTS Art. 5 / WYSIWYS). Gated =
-	// high value OR new payee OR the server-side TRA seam scores 'high'. Runs
-	// BEFORE client_transfer, so a rejected step-up writes nothing and never
-	// claims the idempotency key — the client verifies with the link and retries
-	// with the SAME key. Users without MFA are not gated (they could never
-	// satisfy it); the per-transfer limit + maker-checker still apply.
-	if claims, ok := clientClaimsFrom(r.Context()); ok &&
-		!(claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) &&
-			claims.TxnLink == transferLinkHash(debit, credit, req.AmountMinor)) {
-		enabled, err := s.pg.MFAEnabled(r.Context(), subj)
-		if err != nil {
-			s.mapDBError(w, r, err)
-			return
-		}
-		if enabled {
-			gated := s.cfg.Auth.StepUpLimitMinor > 0 && req.AmountMinor >= s.cfg.Auth.StepUpLimitMinor
-			if !gated {
-				known, err := s.pg.Queries.IsKnownPayee(r.Context(), sqlc.IsKnownPayeeParams{Owner: subj, Credit: credit})
-				if err != nil {
-					s.mapDBError(w, r, err)
-					return
-				}
-				gated = !known
-			}
-			if !gated {
-				// TRA seam (Rec 15): the authoritative risk decision ORs in.
-				risk, err := s.pg.AssessTransferRisk(r.Context(), subj, debit, credit, req.AmountMinor)
-				if err != nil {
-					s.mapDBError(w, r, err)
-					return
-				}
-				gated = risk.Band == "high"
-			}
-			if gated {
-				writeError(w, http.StatusForbidden, "step_up_required",
-					"this transfer requires re-verification linked to this exact payment (high value, new payee, or elevated risk)")
-				return
-			}
-		}
+	// Step-up gate (SCA + dynamic linking, Recs 13/14/15): ONE shared decision
+	// with the /transfers/intent preview — see stepUpGate. Runs BEFORE
+	// client_transfer, so a rejected step-up writes nothing and never claims
+	// the idempotency key — the client verifies with the link and retries with
+	// the SAME key. (Debit ownership is asserted inside evaluate_transfer,
+	// 42501 -> 403, before anything is written.)
+	if _, gated, err := s.stepUpGate(r, subj, debit, credit, req.AmountMinor); err != nil {
+		s.mapDBError(w, r, err)
+		return
+	} else if gated {
+		writeError(w, http.StatusForbidden, "step_up_required",
+			"this transfer requires re-verification linked to this exact payment (high value, new payee, or elevated risk)")
+		return
 	}
 	// Debit-account ownership is enforced inside client_transfer (one round trip, in
 	// the DB) — non-ownership raises 42501 -> 403. No separate probe.
@@ -203,38 +211,13 @@ func (s *Server) TransferIntent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
 		return
 	}
-	eval, err := s.pg.EvaluateTransfer(r.Context(), subj, debit, credit, req.AmountMinor, s.cfg.Auth.StepUpLimitMinor)
+	// The SAME shared gate decision POST /transfers enforces (see stepUpGate):
+	// exempt callers get step_up already downgraded to allow, so the preview
+	// never tells a customer to step up for a payment they can already make.
+	eval, _, err := s.stepUpGate(r, subj, debit, credit, req.AmountMinor)
 	if err != nil {
 		s.mapDBError(w, r, err)
 		return
-	}
-	// Mirror the CreateTransfer step-up gate exactly: the DB flags 'step_up' whenever
-	// the step-up axis fires (high value / new payee / high band), but the caller is
-	// only ACTUALLY gated when they have MFA enrolled AND lack a fresh OTP whose
-	// txn_link commits to THIS exact (debit, credit, amount). If they wouldn't be
-	// gated, the preflight downgrades step_up -> allow (and drops the method) so the
-	// client isn't told to step up for a payment it can already make.
-	if eval.Decision == "step_up" {
-		downgrade := false
-		if claims, ok := clientClaimsFrom(r.Context()); ok &&
-			claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) &&
-			claims.TxnLink == transferLinkHash(debit, credit, req.AmountMinor) {
-			downgrade = true // already re-verified for this exact payment
-		}
-		if !downgrade {
-			enabled, err := s.pg.MFAEnabled(r.Context(), subj)
-			if err != nil {
-				s.mapDBError(w, r, err)
-				return
-			}
-			if !enabled {
-				downgrade = true // no second factor -> could never be gated
-			}
-		}
-		if downgrade {
-			eval.Decision = "allow"
-			eval.StepUpMethod = ""
-		}
 	}
 
 	reasons := eval.ReasonCodes
