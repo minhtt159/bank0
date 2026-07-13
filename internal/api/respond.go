@@ -92,6 +92,14 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 			case strings.Contains(msg, "invitation code"):
 				// consumed / expired / (empty) invitation code — invalid state
 				writeError(w, http.StatusConflict, "invalid_state", msg)
+			case strings.Contains(msg, "blocked"):
+				// Rec 22 fraud gate: a warning rule refused the payment
+				// ('payment blocked: <headline>'). Crafted, caller-meaningful.
+				writeError(w, http.StatusUnprocessableEntity, "payment_blocked", msg)
+			case strings.Contains(msg, "acknowledgement"):
+				// Rec 22: a required fraud-warning acknowledgement is missing / too
+				// fresh / expired — re-acknowledge (respecting cooling-off) and retry.
+				writeError(w, http.StatusConflict, "ack_required", msg)
 			default: // raw constraint trip — don't leak the constraint name
 				writeError(w, http.StatusUnprocessableEntity, "unprocessable", "the request could not be processed")
 			}

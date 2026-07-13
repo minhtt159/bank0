@@ -61,6 +61,14 @@ templ Shell(username string, role string, pendingApprovals int) {
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"></path><path d="M4 14V4h13l-2.5 4 2.5 4z"></path></svg>
 						Disputes
 					</a>
+					<a class="navitem" hx-get="/console/warning-rules" hx-target="#main-panel">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.4 8-8 10-4.6-2-8-5-8-10V6z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+						Warning rules
+					</a>
+					<a class="navitem" hx-get="/console/watchlist" hx-target="#main-panel">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+						Watchlist
+					</a>
 					<a class="navitem" hx-get="/console/audit" hx-target="#main-panel">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6"></path><path d="M9 13h6"></path><path d="M9 17h6"></path></svg>
 						Audit log

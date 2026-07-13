@@ -279,6 +279,7 @@ const (
 	EventTypePaymentincoming EventType = "payment.incoming"
 	EventTypeDevicenew       EventType = "device.new"
 	EventTypeDisputeupdated  EventType = "dispute.updated"
+	EventTypeTransferheld    EventType = "transfer.held"
 )
 
 func (e *EventType) Scan(src interface{}) error {
@@ -628,11 +629,13 @@ func (ns NullTransferKind) Value() (driver.Value, error) {
 type TransferStatus string
 
 const (
-	TransferStatusPending  TransferStatus = "pending"
-	TransferStatusPosted   TransferStatus = "posted"
-	TransferStatusFailed   TransferStatus = "failed"
-	TransferStatusCanceled TransferStatus = "canceled"
-	TransferStatusReversed TransferStatus = "reversed"
+	TransferStatusPending     TransferStatus = "pending"
+	TransferStatusHeld        TransferStatus = "held"
+	TransferStatusUnderReview TransferStatus = "under_review"
+	TransferStatusPosted      TransferStatus = "posted"
+	TransferStatusFailed      TransferStatus = "failed"
+	TransferStatusCanceled    TransferStatus = "canceled"
+	TransferStatusReversed    TransferStatus = "reversed"
 )
 
 func (e *TransferStatus) Scan(src interface{}) error {
@@ -1069,6 +1072,8 @@ type Transfer struct {
 	Uetr            uuid.UUID      `json:"uetr"`
 	EndToEndID      *string        `json:"end_to_end_id"`
 	FailureReason   *string        `json:"failure_reason"`
+	HoldReason      *string        `json:"hold_reason"`
+	HoldExpiresAt   *time.Time     `json:"hold_expires_at"`
 	RequestedAt     time.Time      `json:"requested_at"`
 	PostedAt        *time.Time     `json:"posted_at"`
 	CreatedAt       time.Time      `json:"created_at"`
@@ -1119,4 +1124,29 @@ type WarningAck struct {
 	AmountMinor      *int64     `json:"amount_minor"`
 	Device           string     `json:"device"`
 	CreatedAt        time.Time  `json:"created_at"`
+}
+
+type WarningRule struct {
+	ID                uuid.UUID `json:"id"`
+	MatchReasonCode   *string   `json:"match_reason_code"`
+	MatchMinBand      *string   `json:"match_min_band"`
+	Category          string    `json:"category"`
+	Headline          string    `json:"headline"`
+	Body              string    `json:"body"`
+	Severity          string    `json:"severity"`
+	Decision          string    `json:"decision"`
+	RequiredAck       bool      `json:"required_ack"`
+	CoolingOffSeconds int32     `json:"cooling_off_seconds"`
+	Priority          int32     `json:"priority"`
+	Active            bool      `json:"active"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type WatchlistEntry struct {
+	ID        uuid.UUID `json:"id"`
+	Pattern   string    `json:"pattern"`
+	Reason    string    `json:"reason"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
 }

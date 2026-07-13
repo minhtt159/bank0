@@ -71,7 +71,11 @@ CREATE TYPE verification_status  AS ENUM ('pending', 'verified', 'expired', 'can
 CREATE TYPE account_kind    AS ENUM ('customer', 'system');
 CREATE TYPE account_status  AS ENUM ('active', 'frozen', 'closed');
 
-CREATE TYPE transfer_status AS ENUM ('pending', 'posted', 'failed', 'canceled', 'reversed');
+-- held         = customer-confirmable risk cooling-off (Rec 22 'review' decision);
+-- under_review = operator-only screening/AML review (Rec 25 watchlist match).
+-- Both sit between pending and posted: funds are still reserved by an active hold,
+-- no ledger entry exists yet, and release is one-way to posted (or canceled on lapse).
+CREATE TYPE transfer_status AS ENUM ('pending', 'held', 'under_review', 'posted', 'failed', 'canceled', 'reversed');
 CREATE TYPE transfer_kind   AS ENUM ('transfer', 'deposit', 'withdrawal', 'reversal', 'fee', 'adjustment');
 
 CREATE TYPE entry_direction AS ENUM ('debit', 'credit');
@@ -91,7 +95,8 @@ CREATE TYPE recall_status    AS ENUM ('none', 'requested', 'funds_returned', 're
 CREATE TYPE scam_type        AS ENUM ('impersonation', 'purchase', 'investment', 'romance', 'invoice', 'advance_fee', 'other');
 
 -- Notification-feed taxonomy (per-user events projection; table in the features file).
-CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.new', 'dispute.updated');
+-- transfer.held notifies the payer their payment was parked (held/under_review).
+CREATE TYPE event_type AS ENUM ('transfer.posted', 'payment.incoming', 'device.new', 'dispute.updated', 'transfer.held');
 
 -- MFA credential kinds (tables in the users file). webauthn is the reserved
 -- passkey path for future dynamic linking.

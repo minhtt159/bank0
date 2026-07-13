@@ -29,3 +29,16 @@ export function disputeStatusLabel(s: DisputeStatus): string {
       return s;
   }
 }
+
+// Customer-facing label for a transfer's status. The two fraud-hold states get
+// plain-language copy; everything else is title-cased (pending → "Pending").
+export function transferStatusLabel(s: string): string {
+  switch (s) {
+    case "held":
+      return "On hold — action needed";
+    case "under_review":
+      return "Under review";
+    default:
+      return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+}

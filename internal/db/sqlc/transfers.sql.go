@@ -46,6 +46,23 @@ func (q *Queries) ClientCancelTransfer(ctx context.Context, arg ClientCancelTran
 	return status, err
 }
 
+const clientConfirmTransfer = `-- name: ClientConfirmTransfer :one
+SELECT client_confirm_transfer($1::uuid, $2::uuid) AS status
+`
+
+type ClientConfirmTransferParams struct {
+	CallerSubject uuid.UUID `json:"caller_subject"`
+	ID            uuid.UUID `json:"id"`
+}
+
+// Caller-scoped confirm: releases the caller's own held transfer (Rec 22 cooling-off).
+func (q *Queries) ClientConfirmTransfer(ctx context.Context, arg ClientConfirmTransferParams) (TransferStatus, error) {
+	row := q.db.QueryRow(ctx, clientConfirmTransfer, arg.CallerSubject, arg.ID)
+	var status TransferStatus
+	err := row.Scan(&status)
+	return status, err
+}
+
 const clientPostTransfer = `-- name: ClientPostTransfer :one
 SELECT client_post_transfer($1::uuid, $2::uuid) AS status
 `
@@ -169,7 +186,8 @@ func (q *Queries) GetAccountLedger(ctx context.Context, arg GetAccountLedgerPara
 
 const getTransfer = `-- name: GetTransfer :one
 SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status, kind,
-       reverses_id, description, uetr, end_to_end_id, failure_reason, requested_at, posted_at, created_at, updated_at
+       reverses_id, description, uetr, end_to_end_id, failure_reason, hold_reason, hold_expires_at,
+       requested_at, posted_at, created_at, updated_at
 FROM transfers WHERE id = $1::uuid
 `
 
@@ -186,6 +204,8 @@ type GetTransferRow struct {
 	Uetr            uuid.UUID      `json:"uetr"`
 	EndToEndID      *string        `json:"end_to_end_id"`
 	FailureReason   *string        `json:"failure_reason"`
+	HoldReason      *string        `json:"hold_reason"`
+	HoldExpiresAt   *time.Time     `json:"hold_expires_at"`
 	RequestedAt     time.Time      `json:"requested_at"`
 	PostedAt        *time.Time     `json:"posted_at"`
 	CreatedAt       time.Time      `json:"created_at"`
@@ -208,6 +228,8 @@ func (q *Queries) GetTransfer(ctx context.Context, id uuid.UUID) (GetTransferRow
 		&i.Uetr,
 		&i.EndToEndID,
 		&i.FailureReason,
+		&i.HoldReason,
+		&i.HoldExpiresAt,
 		&i.RequestedAt,
 		&i.PostedAt,
 		&i.CreatedAt,
@@ -218,7 +240,8 @@ func (q *Queries) GetTransfer(ctx context.Context, id uuid.UUID) (GetTransferRow
 
 const getTransferDetail = `-- name: GetTransferDetail :one
 SELECT t.id, t.amount_minor, t.currency, t.status, t.kind, t.reverses_id,
-       t.description, t.failure_reason, t.requested_at, t.posted_at, t.idempotency_key,
+       t.description, t.failure_reason, t.hold_reason, t.hold_expires_at,
+       t.requested_at, t.posted_at, t.idempotency_key,
        COALESCE(da.iban, da.system_code, '') AS debit_label,
        COALESCE(ca.iban, ca.system_code, '') AS credit_label
 FROM transfers t
@@ -236,6 +259,8 @@ type GetTransferDetailRow struct {
 	ReversesID     *uuid.UUID     `json:"reverses_id"`
 	Description    string         `json:"description"`
 	FailureReason  *string        `json:"failure_reason"`
+	HoldReason     *string        `json:"hold_reason"`
+	HoldExpiresAt  *time.Time     `json:"hold_expires_at"`
 	RequestedAt    time.Time      `json:"requested_at"`
 	PostedAt       *time.Time     `json:"posted_at"`
 	IdempotencyKey *string        `json:"idempotency_key"`
@@ -255,6 +280,8 @@ func (q *Queries) GetTransferDetail(ctx context.Context, id uuid.UUID) (GetTrans
 		&i.ReversesID,
 		&i.Description,
 		&i.FailureReason,
+		&i.HoldReason,
+		&i.HoldExpiresAt,
 		&i.RequestedAt,
 		&i.PostedAt,
 		&i.IdempotencyKey,
@@ -307,7 +334,7 @@ func (q *Queries) HoldForTransfer(ctx context.Context, transferID uuid.UUID) ([]
 const listMyTransfers = `-- name: ListMyTransfers :many
 
 SELECT t.id, t.debit_account_id, t.credit_account_id, t.amount_minor, t.currency,
-       t.status, t.kind, t.description, t.requested_at, t.posted_at,
+       t.status, t.kind, t.description, t.hold_reason, t.hold_expires_at, t.requested_at, t.posted_at,
        CASE WHEN da.user_id = $1::uuid THEN 'out' ELSE 'in' END AS direction,
        CASE WHEN da.user_id = $1::uuid
             THEN COALESCE(ca.iban, ca.system_code, '')
@@ -360,6 +387,8 @@ type ListMyTransfersRow struct {
 	Status            TransferStatus `json:"status"`
 	Kind              TransferKind   `json:"kind"`
 	Description       string         `json:"description"`
+	HoldReason        *string        `json:"hold_reason"`
+	HoldExpiresAt     *time.Time     `json:"hold_expires_at"`
 	RequestedAt       time.Time      `json:"requested_at"`
 	PostedAt          *time.Time     `json:"posted_at"`
 	Direction         string         `json:"direction"`
@@ -404,6 +433,8 @@ func (q *Queries) ListMyTransfers(ctx context.Context, arg ListMyTransfersParams
 			&i.Status,
 			&i.Kind,
 			&i.Description,
+			&i.HoldReason,
+			&i.HoldExpiresAt,
 			&i.RequestedAt,
 			&i.PostedAt,
 			&i.Direction,

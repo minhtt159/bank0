@@ -1,10 +1,25 @@
 package template
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/google/uuid"
 )
+
+// jsonStr reads a top-level string field out of a JSONB column (admin_actions.detail
+// etc.). Non-object bodies, missing keys, or non-string values render as "".
+func jsonStr(raw []byte, key string) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return s
+}
 
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
 

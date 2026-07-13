@@ -116,9 +116,13 @@ a throwaway DB to confirm a new migration is reversible.
   do) → scope to the subject with `clientSubject(r.Context())`. Keep ops that need
   query/body params **client-only**: an op shared by both tags must be path-param
   only, else the two generated packages produce conflicting `Params` types.
-- **New DB logic:** write the PL/pgSQL in a new `db/migrations/NNNN_*.sql` (with a
-  working `-- +goose Down`); add a query in `db/queries/*.sql` and
-  `task generate:sqlc`. **sqlc cannot expand set-returning functions**
+- **New DB logic:** **incubation mode is ON** (no prod data yet): fold changes into
+  the existing 9 domain migration files **in place**, keep every `-- +goose Down`
+  reversible (`TestMigrationsReversible` gates this), and reset deployed DBs on
+  merge — goose will NOT re-run an edited version on a DB that already applied it.
+  Once real data exists, incubation ends and new logic goes in a new
+  `db/migrations/NNNN_*.sql` instead. Either way: add a query in `db/queries/*.sql`
+  and `task generate:sqlc`. **sqlc cannot expand set-returning functions**
   (`RETURNS TABLE`) — hand-write those with pgx in `internal/db/bank.go` or
   `auth.go` (see `Transfer`, `ResolveAccountByIban`, `RotateRefreshToken`).
 - **Raising inside a function that must persist a side effect:** a PL/pgSQL `RAISE`

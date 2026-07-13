@@ -8,7 +8,7 @@ import (
 
 // DashboardCards is the main-panel fragment (loaded via hx-get). It refreshes
 // itself when a bank0:refresh event fires on the body (after any mutation).
-templ DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, version string) {
+templ DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, screening int, version string) {
 	<div id="dashboard" hx-get="/console/dashboard" hx-trigger="bank0:refresh from:body, every 15s" hx-swap="outerHTML" hx-disinherit="*">
 		<div class="panel-head">
 			<h1>Dashboard</h1>
@@ -30,6 +30,7 @@ templ DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.Rec
 			<div class="card"><span>Customer money</span><strong>{ money.FormatMinor(stats.CustomerMoney) }</strong></div>
 			<div class="card"><span>Pending transfers</span><strong>{ i64(stats.PendingCount) }</strong></div>
 			<div class="card"><span>Active holds</span><strong>{ i64(stats.ActiveHolds) }</strong><span class="muted">{ money.FormatMinor(stats.HeldMinor) } reserved</span></div>
+			<div class="card"><span>Awaiting screening</span><strong>{ i64(int64(screening)) }</strong><span class="muted">payments under review</span></div>
 		</div>
 	</div>
 }

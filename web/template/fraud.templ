@@ -1,0 +1,255 @@
+package template
+
+import (
+	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+)
+
+// Fraud policy panels (Rec 22/25): the warning-rules engine and the AML watchlist.
+// Both mirror Settings — all staff view, only admins (canEdit) mutate. Lists are
+// small (no keyset paging) and re-fetch on bank0:refresh after any mutation.
+
+// opt renders a <select> option, marking it selected when it matches current.
+templ opt(value, label, current string) {
+	if value == current {
+		<option value={ value } selected>{ label }</option>
+	} else {
+		<option value={ value }>{ label }</option>
+	}
+}
+
+// ---- warning rules ------------------------------------------------------
+
+templ WarningRulesPanel() {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Warning rules</h1>
+			<span class="muted small">Fraud/decision policy — matched at payment time by evaluate_transfer.</span>
+		</div>
+		<div id="warning-rules-results" hx-get="/console/warning-rules/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
+// warnRuleFields renders the shared create/edit form body. rule carries current
+// values (a zero rule with sensible defaults for the create form).
+templ warnRuleFields(rule sqlc.WarningRule) {
+	<div class="grid2">
+		<label>Match reason code
+			<select name="match_reason_code">
+				@opt("", "— any —", deref(rule.MatchReasonCode))
+				@opt("destination_flagged", "destination_flagged", deref(rule.MatchReasonCode))
+				@opt("velocity_count_24h", "velocity_count_24h", deref(rule.MatchReasonCode))
+				@opt("velocity_value_24h", "velocity_value_24h", deref(rule.MatchReasonCode))
+				@opt("first_payment_to_payee", "first_payment_to_payee", deref(rule.MatchReasonCode))
+				@opt("new_debit_account", "new_debit_account", deref(rule.MatchReasonCode))
+			</select>
+		</label>
+		<label>Minimum risk band
+			<select name="match_min_band">
+				@opt("", "— any —", deref(rule.MatchMinBand))
+				@opt("low", "low", deref(rule.MatchMinBand))
+				@opt("medium", "medium", deref(rule.MatchMinBand))
+				@opt("high", "high", deref(rule.MatchMinBand))
+			</select>
+		</label>
+	</div>
+	<p class="muted small">At least one match key is required, or the rule would match every payment.</p>
+	<div class="grid2">
+		<label>Category
+			<select name="category">
+				@opt("risk_warning", "risk_warning", rule.Category)
+				@opt("high_value", "high_value", rule.Category)
+				@opt("guided_steer", "guided_steer", rule.Category)
+				@opt("cop_no_match", "cop_no_match", rule.Category)
+				@opt("cop_close_match", "cop_close_match", rule.Category)
+				@opt("cop_unable", "cop_unable", rule.Category)
+				@opt("other", "other", rule.Category)
+			</select>
+		</label>
+		<label>Severity
+			<select name="severity">
+				@opt("info", "info", rule.Severity)
+				@opt("warning", "warning", rule.Severity)
+				@opt("critical", "critical", rule.Severity)
+			</select>
+		</label>
+		<label>Decision
+			<select name="decision">
+				@opt("warn", "warn", rule.Decision)
+				@opt("review", "review (hold)", rule.Decision)
+				@opt("block", "block", rule.Decision)
+			</select>
+		</label>
+		<label>Priority
+			<input name="priority" type="number" value={ i64(int64(rule.Priority)) }/>
+		</label>
+		<label>Cooling-off (seconds)
+			<input name="cooling_off_seconds" type="number" min="0" max="86400" value={ i64(int64(rule.CoolingOffSeconds)) }/>
+		</label>
+	</div>
+	<label>Headline <input name="headline" value={ rule.Headline }/></label>
+	<label>Body <textarea name="body" rows="2">{ rule.Body }</textarea></label>
+	<div class="grid2">
+		<label class="check">
+			if rule.RequiredAck {
+				<input name="required_ack" type="checkbox" value="true" checked/>
+			} else {
+				<input name="required_ack" type="checkbox" value="true"/>
+			}
+			Require acknowledgement
+		</label>
+		<label class="check">
+			if rule.Active {
+				<input name="active" type="checkbox" value="true" checked/>
+			} else {
+				<input name="active" type="checkbox" value="true"/>
+			}
+			Active
+		</label>
+	</div>
+}
+
+// WarningRulesList: the full table (incl. inactive), a create form, and per-row
+// edit/toggle. Only admins (canEdit) see the forms and action buttons.
+templ WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) {
+	@flashBar(flash)
+	if canEdit {
+		<details class="editblock">
+			<summary>+ New warning rule</summary>
+			<form hx-post="/console/warning-rules" hx-target="#warning-rules-results">
+				@warnRuleFields(sqlc.WarningRule{Category: "risk_warning", Severity: "warning", Decision: "warn", Active: true})
+				<button class="primary" type="submit" hx-disabled-elt="this">Create rule</button>
+			</form>
+		</details>
+	}
+	if len(rules) == 0 {
+		<p class="muted">No warning rules configured.</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Match</th>
+					<th>Category</th>
+					<th>Decision</th>
+					<th>Severity</th>
+					<th>Ack</th>
+					<th class="num">Cool-off</th>
+					<th class="num">Priority</th>
+					<th>Active</th>
+					if canEdit {
+						<th>Manage</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, rule := range rules {
+					<tr>
+						<td class="mono small">{ orDash(rule.MatchReasonCode, nil) } / { orDash(rule.MatchMinBand, nil) }</td>
+						<td>{ rule.Category }</td>
+						<td><span class="pill">{ rule.Decision }</span></td>
+						<td>{ rule.Severity }</td>
+						<td>
+							if rule.RequiredAck {
+								yes
+							} else {
+								no
+							}
+						</td>
+						<td class="num">{ i64(int64(rule.CoolingOffSeconds)) }s</td>
+						<td class="num">{ i64(int64(rule.Priority)) }</td>
+						<td>
+							if rule.Active {
+								<span class="pill active">active</span>
+							} else {
+								<span class="pill">inactive</span>
+							}
+						</td>
+						if canEdit {
+							<td class="actions">
+								if rule.Active {
+									<button class="btn" hx-post={ "/console/warning-rules/" + rule.ID.String() + "/toggle" } hx-vals={ `{"active":"false"}` } hx-target="#warning-rules-results" hx-disabled-elt="this">Deactivate</button>
+								} else {
+									<button class="btn ok" hx-post={ "/console/warning-rules/" + rule.ID.String() + "/toggle" } hx-vals={ `{"active":"true"}` } hx-target="#warning-rules-results" hx-disabled-elt="this">Activate</button>
+								}
+								<details class="editblock">
+									<summary>Edit</summary>
+									<form hx-post={ "/console/warning-rules/" + rule.ID.String() } hx-target="#warning-rules-results">
+										@warnRuleFields(rule)
+										<button class="primary" type="submit" hx-disabled-elt="this">Save rule</button>
+									</form>
+								</details>
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+// ---- watchlist ----------------------------------------------------------
+
+templ WatchlistPanel() {
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Watchlist</h1>
+			<span class="muted small">Sanctions/AML name screening — matched payments are held for review.</span>
+		</div>
+		<div id="watchlist-results" hx-get="/console/watchlist/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
+}
+
+templ WatchlistList(entries []sqlc.WatchlistEntry, canEdit bool, flash string) {
+	@flashBar(flash)
+	if canEdit {
+		<details class="editblock">
+			<summary>+ New watchlist entry</summary>
+			<form hx-post="/console/watchlist" hx-target="#watchlist-results">
+				<label>Pattern (ILIKE, use % wildcards) <input name="pattern" autocomplete="off" required/></label>
+				<label>Reason <input name="reason"/></label>
+				<button class="primary" type="submit" hx-disabled-elt="this">Add entry</button>
+			</form>
+		</details>
+	}
+	if len(entries) == 0 {
+		<p class="muted">No watchlist entries.</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Pattern</th>
+					<th>Reason</th>
+					<th>Active</th>
+					<th>Added</th>
+					if canEdit {
+						<th>Manage</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, e := range entries {
+					<tr>
+						<td class="mono">{ e.Pattern }</td>
+						<td class="muted">{ e.Reason }</td>
+						<td>
+							if e.Active {
+								<span class="pill active">active</span>
+							} else {
+								<span class="pill">inactive</span>
+							}
+						</td>
+						<td class="muted">{ e.CreatedAt.Format("2006-01-02 15:04") }</td>
+						if canEdit {
+							<td class="actions">
+								if e.Active {
+									<button class="btn" hx-post={ "/console/watchlist/" + e.ID.String() + "/toggle" } hx-vals={ `{"active":"false"}` } hx-target="#watchlist-results" hx-disabled-elt="this">Deactivate</button>
+								} else {
+									<button class="btn ok" hx-post={ "/console/watchlist/" + e.ID.String() + "/toggle" } hx-vals={ `{"active":"true"}` } hx-target="#watchlist-results" hx-disabled-elt="this">Reactivate</button>
+								}
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}

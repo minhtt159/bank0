@@ -5,12 +5,24 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-// ApprovalsPanel: the maker-checker queue. High-value credits land here as
-// PENDING and need a second admin (≠ the maker) to approve or reject.
+// ApprovalsPanel: the maker-checker queue plus the AML screening queue. High-value
+// credits land in the four-eyes queue as PENDING and need a second admin (≠ the
+// maker) to approve or reject. Watchlist-matched client payments land in the
+// screening queue as UNDER_REVIEW and any operator can release (post) or refuse
+// (cancel) them. Both sections re-fetch on bank0:refresh, so acting on either keeps
+// both current.
 templ ApprovalsPanel(canApprove bool) {
-	@consolePanel("Approvals", "approvals-results", "/console/approvals/results", ", every 15s") {
-		<span class="muted small">Four-eyes: a different admin must approve high-value credits.</span>
-	}
+	<div class="panel">
+		<div class="panel-head">
+			<h1>Approvals</h1>
+			<span class="muted small">Four-eyes: a different admin must approve high-value credits.</span>
+		</div>
+		<h2 class="section-title">Four-eyes queue</h2>
+		<div id="approvals-results" hx-get="/console/approvals/results" hx-trigger="load, bank0:refresh from:body, every 15s" hx-swap="innerHTML" hx-disinherit="*"></div>
+		<h2 class="section-title">Screening queue (AML)</h2>
+		<span class="muted small">Payments parked for sanctions/watchlist review. Any operator may release or refuse.</span>
+		<div id="screenings-results" hx-get="/console/screenings/results" hx-trigger="load, bank0:refresh from:body, every 15s" hx-swap="innerHTML" hx-disinherit="*"></div>
+	</div>
 }
 
 templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, prevURL string, nextURL string, flash string) {
@@ -51,4 +63,63 @@ templ ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, prevURL
 		</table>
 	}
 	@pager(prevURL, nextURL, "approvals-results")
+}
+
+// ScreeningRows renders the AML screening queue (payments held under_review after a
+// watchlist hit). Approve reuses the maker-checker approve endpoint (which posts the
+// under_review transfer); reject reuses the reject endpoint (which cancels it). Both
+// re-render the four-eyes fragment and fire bank0:refresh, so this table reloads too.
+templ ScreeningRows(rows []sqlc.ListPendingScreeningsRow, canApprove bool, prevURL string, nextURL string, flash string) {
+	@flashBar(flash)
+	if len(rows) == 0 {
+		<p class="muted">No payments awaiting screening 🎉</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Held</th>
+					<th>Payer</th>
+					<th>From</th>
+					<th>To</th>
+					<th class="num">Amount</th>
+					<th>Reason</th>
+					<th>Deadline</th>
+					if canApprove {
+						<th>Decision</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, a := range rows {
+					<tr>
+						<td class="muted">{ a.CreatedAt.Format("2006-01-02 15:04") }</td>
+						<td>{ a.Maker }</td>
+						<td class="mono">{ a.DebitIban }</td>
+						<td class="mono">{ a.CreditIban }</td>
+						<td class="num"><strong>{ money.FormatMinor(a.AmountMinor) }</strong></td>
+						<td>
+							<span class="pill under_review">{ orDash(a.HoldReason, nil) }</span>
+							if jsonStr(a.Detail, "matched_name") != "" {
+								<span class="muted small">{ jsonStr(a.Detail, "matched_name") }</span>
+							}
+						</td>
+						<td class="muted">
+							if a.HoldExpiresAt != nil {
+								{ a.HoldExpiresAt.Format("2006-01-02 15:04") }
+							} else {
+								—
+							}
+						</td>
+						if canApprove {
+							<td class="actions">
+								<button class="btn ok" hx-post={ "/console/approvals/" + a.ID.String() + "/approve" } hx-target="#approvals-results" hx-disabled-elt="this" hx-confirm="Release and POST this payment? Screening checks are complete.">Release &amp; post</button>
+								<button class="btn danger" hx-post={ "/console/approvals/" + a.ID.String() + "/reject" } hx-target="#approvals-results" hx-disabled-elt="this" hx-confirm="Refuse and CANCEL this payment? The hold is released.">Refuse &amp; cancel</button>
+							</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+	@pager(prevURL, nextURL, "screenings-results")
 }

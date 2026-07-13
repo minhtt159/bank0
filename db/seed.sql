@@ -271,6 +271,43 @@ BEGIN
     END LOOP;
 END $$;
 
+--- fraud/AML demo policy: warning_rules + watchlist (Recs 22/25) ------------------
+-- The fraud gate in transfer() is inert until rules/watchlist exist (both tables
+-- ship EMPTY). Seed a small demo set so the client-path gate is demonstrable:
+--   * destination_flagged -> review (parks the payment 'held' for confirmation),
+--     with a cooling-off + required acknowledgement (the VOP liability pivot);
+--   * a HIGH assessed band -> warn + required ack;
+--   * a first payment to a new payee -> a soft warn (no ack).
+-- Watchlist entries name deterministic seeded personas (Grace Visser, Pavel Novak)
+-- so a payment to/from them parks 'under_review' for operator screening. Own block,
+-- idempotent: keyed on the stable rule headline / watchlist reason. Sentinel-caller
+-- seed transfers above are NOT gated (only real client-path payments are), so this
+-- never perturbs the seeded ledger.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM warning_rules WHERE headline = 'Possible scam payment') THEN
+        INSERT INTO warning_rules
+            (match_reason_code, match_min_band, category, headline, body, severity,
+             decision, required_ack, cooling_off_seconds, priority, active)
+        VALUES
+            ('destination_flagged', NULL, 'risk_warning', 'Possible scam payment',
+             'This account has been reported or flagged. Scammers pressure you to ignore warnings. Please pause and check.',
+             'critical', 'review', TRUE, 30, 100, TRUE),
+            (NULL, 'high', 'risk_warning', 'This payment looks risky',
+             'Several signals suggest this payment is unusual for you. Confirm you know and trust the recipient.',
+             'warning', 'warn', TRUE, 0, 50, TRUE),
+            ('first_payment_to_payee', NULL, 'risk_warning', 'First payment to this payee',
+             'This is your first payment to this account. Double-check the details before you send.',
+             'info', 'warn', FALSE, 0, 10, TRUE);
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM watchlist_entries WHERE reason = 'demo: sanctions screening') THEN
+        INSERT INTO watchlist_entries (pattern, reason, active) VALUES
+            ('%Visser%', 'demo: sanctions screening', TRUE),
+            ('%Novak%',  'demo: sanctions screening', TRUE);
+    END IF;
+END $$;
+
 SELECT 'seed complete: ' ||
        (SELECT count(*) FROM users    WHERE role = 'customer') || ' customers, ' ||
        (SELECT count(*) FROM accounts WHERE kind = 'customer') || ' accounts, ' ||

@@ -10,12 +10,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/minhtt159/bank0/internal/api/genadmin"
 	"github.com/minhtt159/bank0/internal/api/genclient"
+	"github.com/minhtt159/bank0/internal/db"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
 func validTransferStatus(s sqlc.TransferStatus) bool {
 	switch s {
-	case sqlc.TransferStatusPending, sqlc.TransferStatusPosted, sqlc.TransferStatusFailed,
+	case sqlc.TransferStatusPending, sqlc.TransferStatusHeld, sqlc.TransferStatusUnderReview,
+		sqlc.TransferStatusPosted, sqlc.TransferStatusFailed,
 		sqlc.TransferStatusCanceled, sqlc.TransferStatusReversed:
 		return true
 	}
@@ -95,6 +97,42 @@ type createTransferReq struct {
 }
 
 // CreateTransfer implements genclient.ServerInterface. Auto-posts by default;
+// stepUpGate is the ONE step-up decision for a would-be payment (SCA + dynamic
+// linking, Recs 13/14/15, PSD2 RTS Art. 5 / WYSIWYS). The axis — configured
+// per-payment limit, new (unsaved) payee via is_known_payee, or a high TRA
+// band — is computed in the DB by evaluate_transfer, the same call the intent
+// preview uses, so preview and enforcement cannot diverge. Go adds only the
+// JWT-side exemptions the DB cannot see: no MFA enrolled (the caller could
+// never satisfy a step-up; limits + maker-checker still apply), or a fresh OTP
+// whose txn_link commits to THIS exact (debit, credit, amount) — a generic
+// fresh OTP never authorizes an arbitrary payment. For exempt callers the
+// returned evaluation has step_up downgraded to allow and the method dropped.
+// gated=true means POST /transfers must refuse with 403 step_up_required.
+func (s *Server) stepUpGate(r *http.Request, subj, debit, credit uuid.UUID, amountMinor int64) (db.TransferEvaluation, bool, error) {
+	eval, err := s.pg.EvaluateTransfer(r.Context(), subj, debit, credit, amountMinor, s.cfg.Auth.StepUpLimitMinor)
+	if err != nil || eval.StepUpMethod == "" {
+		return eval, false, err
+	}
+	if claims, ok := clientClaimsFrom(r.Context()); !ok ||
+		!(claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) &&
+			claims.TxnLink == transferLinkHash(debit, credit, amountMinor)) {
+		enabled, err := s.pg.MFAEnabled(r.Context(), subj)
+		if err != nil {
+			return eval, false, err
+		}
+		if enabled {
+			return eval, true, nil // gated: must re-verify for this exact payment
+		}
+	}
+	// Exempt (fresh linked OTP, or no second factor): never advertise a step-up
+	// the submit would not enforce.
+	if eval.Decision == "step_up" {
+		eval.Decision = "allow"
+	}
+	eval.StepUpMethod = ""
+	return eval, false, nil
+}
+
 // idempotent on the Idempotency-Key header (bound by the generated wrapper).
 func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params genclient.CreateTransferParams) {
 	subj, ok := s.clientSubjectOr401(w, r)
@@ -115,48 +153,19 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
 		return
 	}
-	// Step-up gate (SCA + dynamic linking, Recs 13/14/15): an MFA-enabled caller
-	// on a gated transfer must present a FRESH otp factor whose txn_link commits
-	// to THIS exact (debit, credit, amount) — a generic fresh OTP no longer
-	// authorizes any payment in the window (PSD2 RTS Art. 5 / WYSIWYS). Gated =
-	// high value OR new payee OR the server-side TRA seam scores 'high'. Runs
-	// BEFORE client_transfer, so a rejected step-up writes nothing and never
-	// claims the idempotency key — the client verifies with the link and retries
-	// with the SAME key. Users without MFA are not gated (they could never
-	// satisfy it); the per-transfer limit + maker-checker still apply.
-	if claims, ok := clientClaimsFrom(r.Context()); ok &&
-		!(claims.hasFreshOTP(s.cfg.Auth.StepUpMaxAge) &&
-			claims.TxnLink == transferLinkHash(debit, credit, req.AmountMinor)) {
-		enabled, err := s.pg.MFAEnabled(r.Context(), subj)
-		if err != nil {
-			s.mapDBError(w, r, err)
-			return
-		}
-		if enabled {
-			gated := s.cfg.Auth.StepUpLimitMinor > 0 && req.AmountMinor >= s.cfg.Auth.StepUpLimitMinor
-			if !gated {
-				known, err := s.pg.Queries.IsKnownPayee(r.Context(), sqlc.IsKnownPayeeParams{Owner: subj, Credit: credit})
-				if err != nil {
-					s.mapDBError(w, r, err)
-					return
-				}
-				gated = !known
-			}
-			if !gated {
-				// TRA seam (Rec 15): the authoritative risk decision ORs in.
-				risk, err := s.pg.AssessTransferRisk(r.Context(), subj, debit, credit, req.AmountMinor)
-				if err != nil {
-					s.mapDBError(w, r, err)
-					return
-				}
-				gated = risk.Band == "high"
-			}
-			if gated {
-				writeError(w, http.StatusForbidden, "step_up_required",
-					"this transfer requires re-verification linked to this exact payment (high value, new payee, or elevated risk)")
-				return
-			}
-		}
+	// Step-up gate (SCA + dynamic linking, Recs 13/14/15): ONE shared decision
+	// with the /transfers/intent preview — see stepUpGate. Runs BEFORE
+	// client_transfer, so a rejected step-up writes nothing and never claims
+	// the idempotency key — the client verifies with the link and retries with
+	// the SAME key. (Debit ownership is asserted inside evaluate_transfer,
+	// 42501 -> 403, before anything is written.)
+	if _, gated, err := s.stepUpGate(r, subj, debit, credit, req.AmountMinor); err != nil {
+		s.mapDBError(w, r, err)
+		return
+	} else if gated {
+		writeError(w, http.StatusForbidden, "step_up_required",
+			"this transfer requires re-verification linked to this exact payment (high value, new payee, or elevated risk)")
+		return
 	}
 	// Debit-account ownership is enforced inside client_transfer (one round trip, in
 	// the DB) — non-ownership raises 42501 -> 403. No separate probe.
@@ -170,6 +179,94 @@ func (s *Server) CreateTransfer(w http.ResponseWriter, r *http.Request, params g
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+type transferIntentReq struct {
+	DebitAccount  string `json:"debit_account"`
+	CreditAccount string `json:"credit_account"`
+	AmountMinor   int64  `json:"amount_minor"`
+}
+
+// TransferIntent implements genclient.ServerInterface: the Rec 22 read-only
+// decision preflight. It runs the SAME server-side risk evaluation POST /transfers
+// applies, but reserves nothing, posts nothing, and writes no row. The numeric risk
+// score is never surfaced. Debit-account ownership is enforced in the DB
+// (evaluate_transfer -> 42501 -> 403), so a foreign debit is rejected there.
+func (s *Server) TransferIntent(w http.ResponseWriter, r *http.Request) {
+	subj, ok := s.clientSubjectOr401(w, r)
+	if !ok {
+		return
+	}
+	var req transferIntentReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	debit, err := uuid.Parse(req.DebitAccount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid debit_account")
+		return
+	}
+	credit, err := uuid.Parse(req.CreditAccount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid credit_account")
+		return
+	}
+	// The SAME shared gate decision POST /transfers enforces (see stepUpGate):
+	// exempt callers get step_up already downgraded to allow, so the preview
+	// never tells a customer to step up for a payment they can already make.
+	eval, _, err := s.stepUpGate(r, subj, debit, credit, req.AmountMinor)
+	if err != nil {
+		s.mapDBError(w, r, err)
+		return
+	}
+
+	reasons := eval.ReasonCodes
+	if reasons == nil {
+		reasons = []string{} // contract: reason_codes is always an array, never null
+	}
+	out := genclient.TransferIntent{
+		Decision:    genclient.TransferIntentDecision(eval.Decision),
+		RiskBand:    genclient.TransferIntentRiskBand(eval.RiskBand),
+		ReasonCodes: reasons,
+	}
+	if eval.StepUpMethod != "" {
+		out.StepUpMethod = &eval.StepUpMethod
+	}
+	// A warning is surfaced only when a warning rule actually matched.
+	if eval.RuleID != nil {
+		sev := genclient.TransferWarningSeverity(eval.Severity)
+		cool := int(eval.CoolingOffSeconds)
+		id := *eval.RuleID
+		out.Warning = &genclient.TransferWarning{
+			WarningId:         &id,
+			Category:          &eval.Category,
+			Severity:          &sev,
+			Headline:          &eval.Headline,
+			Body:              &eval.Body,
+			RequiredAck:       &eval.RequiredAck,
+			CoolingOffSeconds: &cool,
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ConfirmTransfer implements genclient.ServerInterface: the customer releases their
+// OWN held transfer (Rec 22 cooling-off), posting it. Ownership + state transitions
+// live in client_confirm_transfer (a foreign/unknown transfer -> 404; not-held /
+// under_review / expired window -> 409; already-posted is an idempotent no-op).
+func (s *Server) ConfirmTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	subj, ok := s.clientSubjectOr401(w, r)
+	if !ok {
+		return
+	}
+	status, err := s.pg.Queries.ClientConfirmTransfer(r.Context(), sqlc.ClientConfirmTransferParams{
+		CallerSubject: subj, ID: uuid.UUID(id),
+	})
+	if err != nil {
+		s.mapDBError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
 }
 
 // GetTransfer implements both ServerInterfaces (shared, path-only).

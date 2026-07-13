@@ -16,7 +16,7 @@ import (
 
 // DashboardCards is the main-panel fragment (loaded via hx-get). It refreshes
 // itself when a bank0:refresh event fires on the body (after any mutation).
-func DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, version string) templ.Component {
+func DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.ReconcileRow, screening int, version string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -153,7 +153,20 @@ func DashboardCards(stats sqlc.DashboardStatsRow, healthy bool, issues []db.Reco
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " reserved</span></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " reserved</span></div><div class=\"card\"><span>Awaiting screening</span><strong>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var9 string
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(i64(int64(screening)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/dashboard.templ`, Line: 33, Col: 83}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</strong><span class=\"muted\">payments under review</span></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

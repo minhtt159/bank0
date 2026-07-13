@@ -24,10 +24,6 @@ ORDER BY created_at;
 SELECT delete_beneficiary(sqlc.arg(owner)::uuid, sqlc.arg(id)::uuid);
 
 -- name: IsKnownPayee :one
--- Step-up "new payee" check: the credit account is one of the caller's saved
--- beneficiaries. (Prior-posted-transfer relaxation is a possible follow-up.)
-SELECT EXISTS (
-    SELECT 1 FROM beneficiaries
-     WHERE owner_user_id = sqlc.arg(owner)::uuid
-       AND credit_account_id = sqlc.arg(credit)::uuid
-) AS known;
+-- Step-up "new payee" check. ONE definition, shared with evaluate_transfer:
+-- the is_known_payee() DB function (00008). Change the predicate THERE.
+SELECT is_known_payee(sqlc.arg(owner)::uuid, sqlc.arg(credit)::uuid) AS known;

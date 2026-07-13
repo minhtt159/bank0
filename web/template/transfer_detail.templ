@@ -28,6 +28,20 @@ templ TransferDetail(t sqlc.GetTransferDetailRow, legs []sqlc.TransferLegsRow, h
 			if t.FailureReason != nil {
 				<div class="kv"><span>Reason</span><span>{ deref(t.FailureReason) }</span></div>
 			}
+			if t.Status == "held" || t.Status == "under_review" {
+				<div class="kv">
+					<span>Hold</span>
+					<span>
+						<span class={ "pill " + string(t.Status) }>{ string(t.Status) }</span>
+						if t.HoldReason != nil {
+							{ deref(t.HoldReason) }
+						}
+					</span>
+				</div>
+				if t.HoldExpiresAt != nil {
+					<div class="kv"><span>Hold expires</span><span class="muted">{ t.HoldExpiresAt.Format("2006-01-02 15:04") }</span></div>
+				}
+			}
 			<div class="kv"><span>Idempotency</span><span class="mono">{ deref(t.IdempotencyKey) }</span></div>
 			if t.ReversesID != nil {
 				<div class="kv">

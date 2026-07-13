@@ -37,6 +37,11 @@ CREATE TABLE transfers (
     uetr              UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     end_to_end_id     VARCHAR(35),
     failure_reason    TEXT,
+    -- Hold lifecycle (Recs 22/25): why a transfer is parked (held/under_review) and
+    -- when its confirmation/review window lapses. Both are set by place_transfer_hold
+    -- and KEPT after release (posted/canceled) for audit — hence the one-way CHECK.
+    hold_reason       TEXT,
+    hold_expires_at   TIMESTAMPTZ,
     requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     posted_at         TIMESTAMPTZ,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -48,7 +53,9 @@ CREATE TABLE transfers (
     -- posted_at is set once a transfer reaches the ledger; a reversed transfer
     -- was posted, so it keeps its posted_at.
     CHECK ((posted_at IS NOT NULL) = (status IN ('posted', 'reversed'))),
-    CHECK ((kind = 'reversal')  = (reverses_id IS NOT NULL))
+    CHECK ((kind = 'reversal')  = (reverses_id IS NOT NULL)),
+    -- one-way: a parked transfer MUST carry an expiry; released rows may keep it.
+    CHECK (hold_expires_at IS NOT NULL OR status NOT IN ('held', 'under_review'))
 );
 
 -- Now that transfers exists, wire up holds.transfer_id (declared FK-less in 00004).
@@ -113,6 +120,10 @@ CREATE INDEX idx_transfers_debit_req   ON transfers (debit_account_id, requested
 CREATE INDEX idx_transfers_credit_req  ON transfers (credit_account_id, requested_at DESC, id DESC);
 -- fuzzy transfer-description search (trigram GIN).
 CREATE INDEX idx_transfers_desc_trgm   ON transfers USING gin (description gin_trgm_ops);
+-- parked-transfer sweep + operator review queue (held/under_review by expiry).
+CREATE INDEX idx_transfers_review      ON transfers (hold_expires_at) WHERE status IN ('held', 'under_review');
+-- reversal lookup (reverse_transfer's already-reversed short-circuit, Rec 4).
+CREATE INDEX idx_transfers_reverses    ON transfers (reverses_id) WHERE reverses_id IS NOT NULL;
 
 -- idempotency key TTL cleanup.
 CREATE INDEX idx_idempotency_expiry    ON idempotency_keys (expires_at);
@@ -284,8 +295,15 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────────────────────────────────────────
 -- post_transfer: pending -> posted. Writes the two ledger legs (the balance
 -- trigger does the rest), captures the hold. Idempotent on an already-posted row.
+-- p_allow_from is the set of source states the caller may post FROM: it defaults to
+-- {pending} so the plain admin/sqlc 1-arg call can never release a risk/screening
+-- hold. The internal release paths pass the source state explicitly:
+-- client_confirm_transfer -> {held}; approve_request (screening) -> {under_review}.
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION post_transfer(p_transfer_id UUID) RETURNS transfer_status AS $$
+CREATE OR REPLACE FUNCTION post_transfer(
+    p_transfer_id UUID,
+    p_allow_from  transfer_status[] DEFAULT ARRAY['pending']::transfer_status[]
+) RETURNS transfer_status AS $$
 DECLARE
     v_t      transfers%ROWTYPE;
     v_debit  accounts%ROWTYPE;
@@ -295,7 +313,7 @@ BEGIN
     IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
 
     IF v_t.status = 'posted' THEN RETURN 'posted'; END IF;          -- idempotent no-op
-    IF v_t.status <> 'pending' THEN
+    IF NOT (v_t.status = ANY(p_allow_from)) THEN
         RAISE EXCEPTION 'cannot post transfer in state %', v_t.status USING ERRCODE = 'check_violation';
     END IF;
 
@@ -340,8 +358,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- cancel_transfer: pending -> canceled, release the hold. (Hold-expiry failure is
--- written directly by expire_holds, 00007.)
+-- cancel_transfer: {pending, held, under_review} -> canceled, release the hold.
+-- Held/under_review are cancellable too (customer withdraws a held payment; an
+-- operator rejects a screening row; the sweep lapses either). (Hold-expiry failure
+-- is written directly by expire_holds, 00007.)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION cancel_transfer(p_transfer_id UUID, p_reason TEXT DEFAULT '')
 RETURNS transfer_status AS $$
@@ -350,7 +370,7 @@ BEGIN
     SELECT status INTO v_status FROM transfers WHERE id = p_transfer_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
     IF v_status = 'canceled' THEN RETURN 'canceled'; END IF;        -- idempotent
-    IF v_status <> 'pending' THEN
+    IF v_status NOT IN ('pending', 'held', 'under_review') THEN
         RAISE EXCEPTION 'cannot cancel transfer in state %', v_status USING ERRCODE = 'check_violation';
     END IF;
 
@@ -359,6 +379,78 @@ BEGIN
     UPDATE transfers SET status = 'canceled', failure_reason = NULLIF(p_reason, '')
      WHERE id = p_transfer_id;
     RETURN 'canceled';
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- place_transfer_hold: pending -> held | under_review. Parks a transfer for a
+-- customer confirmation window (held) or operator screening/review (under_review)
+-- WITHOUT touching the ledger — the authorization hold stays 'active' (funds still
+-- reserved), only its expires_at is extended to cover the (longer) window. Because
+-- no hold-status edge is crossed, the held_minor cache is untouched. Records an
+-- admin_actions row (screening_hold = the operator queue entry for under_review;
+-- risk_hold = audit-only for held) with the initiating customer as actor, and
+-- notifies the payer via a transfer.held event. business_days is 1..4.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION place_transfer_hold(
+    p_transfer_id   UUID,
+    p_new_status    transfer_status,
+    p_reason        TEXT,
+    p_business_days INT,
+    p_actor         UUID,
+    p_detail        JSONB DEFAULT '{}'
+) RETURNS transfer_status AS $$
+DECLARE
+    v_t       transfers%ROWTYPE;
+    v_expires TIMESTAMPTZ;
+    v_action  TEXT;
+    v_debit   accounts%ROWTYPE;
+BEGIN
+    IF p_new_status NOT IN ('held', 'under_review') THEN
+        RAISE EXCEPTION 'place_transfer_hold: % is not a hold state', p_new_status USING ERRCODE = 'XX000';
+    END IF;
+    IF p_business_days < 1 OR p_business_days > 4 THEN
+        RAISE EXCEPTION 'place_transfer_hold: business days must be 1..4 (got %)', p_business_days USING ERRCODE = 'XX000';
+    END IF;
+
+    SELECT * INTO v_t FROM transfers WHERE id = p_transfer_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
+    IF v_t.status <> 'pending' THEN
+        RAISE EXCEPTION 'cannot place a hold on a transfer in state %', v_t.status USING ERRCODE = 'check_violation';
+    END IF;
+
+    v_expires := add_business_days(now(), p_business_days);
+    UPDATE transfers
+       SET status = p_new_status, hold_reason = p_reason, hold_expires_at = v_expires
+     WHERE id = p_transfer_id;
+    -- Keep the funds reserved: extend the active hold to the window's end. No
+    -- active<->non-active edge, so the held_minor cache stays correct untouched.
+    UPDATE holds SET expires_at = v_expires
+     WHERE transfer_id = p_transfer_id AND status = 'active';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'no active hold for transfer %', p_transfer_id USING ERRCODE = 'XX000';
+    END IF;
+
+    v_action := CASE WHEN p_new_status = 'under_review' THEN 'screening_hold' ELSE 'risk_hold' END;
+    INSERT INTO admin_actions (actor_user_id, action, target_id, detail)
+    VALUES (p_actor, v_action, p_transfer_id,
+            COALESCE(p_detail, '{}'::jsonb) ||
+            jsonb_build_object('reason', p_reason, 'hold_status', p_new_status, 'hold_expires_at', v_expires));
+
+    SELECT * INTO v_debit FROM accounts WHERE id = v_t.debit_account_id;
+    IF v_debit.user_id IS NOT NULL THEN
+        PERFORM emit_event(v_debit.user_id, 'transfer.held',
+            'Payment held',
+            CASE WHEN p_new_status = 'under_review'
+                 THEN 'Your payment is being reviewed and will be released once checks complete.'
+                 ELSE 'Your payment needs your confirmation before it can be sent.' END,
+            p_transfer_id, v_t.debit_account_id,
+            jsonb_build_object('hold_status', p_new_status, 'reason', p_reason,
+                               'hold_expires_at', v_expires,
+                               'amount_minor', v_t.amount_minor, 'currency', v_t.currency));
+    END IF;
+
+    RETURN p_new_status;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -379,14 +471,68 @@ CREATE OR REPLACE FUNCTION transfer(
     -- Sentinel (system/operator) by default; client_transfer passes the subject.
     p_caller          UUID          DEFAULT '00000000-0000-0000-0000-000000000000'
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
-DECLARE v_id UUID; v_status transfer_status; v_replay BOOLEAN;
+DECLARE
+    v_id       UUID;
+    v_status   transfer_status;
+    v_replay   BOOLEAN;
+    v_sentinel UUID := '00000000-0000-0000-0000-000000000000';
+    v_eval     RECORD;
+    v_hit      RECORD;
 BEGIN
     SELECT r.transfer_id, r.status, r.was_replay INTO v_id, v_status, v_replay
     FROM request_transfer(p_idempotency_key, p_debit_account, p_credit_account,
                           p_amount_minor, p_description, p_kind,
                           INTERVAL '15 minutes', p_end_to_end_id, p_caller) r;
 
-    IF NOT v_replay AND v_status = 'pending' THEN
+    -- Replay short-circuits BEFORE any gate: a replayed key returns the live status
+    -- verbatim (posted/held/under_review/…) and never re-runs screening/evaluation.
+    IF v_replay OR v_status <> 'pending' THEN
+        RETURN QUERY SELECT v_id, v_status, v_replay;
+        RETURN;
+    END IF;
+
+    -- System/operator (sentinel) callers bypass the fraud/AML gates entirely:
+    -- deposits, withdrawals, reversals, dispute reimbursement, maker-checker
+    -- staging and seeds must post as before, never park behind a fraud gate.
+    IF p_caller = v_sentinel THEN
+        v_status := post_transfer(v_id);
+        RETURN QUERY SELECT v_id, v_status, v_replay;
+        RETURN;
+    END IF;
+
+    -- (1) AML screening gate (Rec 25): a watchlist hit on either party parks the
+    -- payment for operator review (under_review) for 4 business days.
+    SELECT * INTO v_hit FROM screen_payment(p_debit_account, p_credit_account);
+    IF FOUND THEN
+        v_status := place_transfer_hold(v_id, 'under_review', 'screening', 4, p_caller,
+            jsonb_build_object('watchlist_entry_id', v_hit.entry_id,
+                               'matched_name', v_hit.matched_name, 'side', v_hit.side));
+        RETURN QUERY SELECT v_id, v_status, v_replay;
+        RETURN;
+    END IF;
+
+    -- (2) Fraud/warning decision gate (Rec 22). exclude_transfer = v_id so the
+    -- just-inserted pending row doesn't inflate its own velocity math (intent and
+    -- submit agree). step_up axis is not enforced in the DB auto-post path (0).
+    SELECT * INTO v_eval
+    FROM evaluate_transfer(p_caller, p_debit_account, p_credit_account, p_amount_minor, 0, v_id);
+
+    IF v_eval.decision = 'block' THEN
+        RAISE EXCEPTION 'payment blocked: %', COALESCE(NULLIF(v_eval.headline, ''), 'this payment cannot be sent')
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF v_eval.required_ack THEN
+        PERFORM assert_warning_ack(p_caller, v_eval.category, p_debit_account,
+                                   p_credit_account, p_amount_minor, v_eval.cooling_off_seconds);
+    END IF;
+
+    IF v_eval.decision = 'review' THEN
+        v_status := place_transfer_hold(v_id, 'held',
+                                        COALESCE(NULLIF(v_eval.category, ''), 'risk_warning'), 1, p_caller,
+                                        jsonb_build_object('rule_id', v_eval.rule_id,
+                                                           'reasons', to_jsonb(v_eval.reason_codes)));
+    ELSE
         v_status := post_transfer(v_id);
     END IF;
 
@@ -432,7 +578,20 @@ BEGIN
 
     SELECT * INTO v_orig FROM transfers WHERE id = p_transfer_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'transfer % not found', p_transfer_id; END IF;
-    IF v_orig.status = 'reversed' THEN RAISE EXCEPTION 'transfer % already reversed', p_transfer_id; END IF;
+    -- Rec 4: a second reverse (under a DIFFERENT key) is idempotent, not an error.
+    -- Look up the existing reversal via reverses_id, complete THIS newly-claimed key
+    -- pointing at it, and return its id — so every reverse of the same transfer,
+    -- across any key, converges on one reversal.
+    IF v_orig.status = 'reversed' THEN
+        SELECT id INTO v_rev_id FROM transfers WHERE reverses_id = p_transfer_id LIMIT 1;
+        IF v_rev_id IS NULL THEN
+            RAISE EXCEPTION 'transfer % marked reversed but no reversal row exists', p_transfer_id
+                USING ERRCODE = 'XX000';
+        END IF;
+        UPDATE idempotency_keys SET status = 'completed', transfer_id = v_rev_id
+         WHERE owner_id = '00000000-0000-0000-0000-000000000000' AND key = p_idempotency_key;
+        RETURN v_rev_id;
+    END IF;
     IF v_orig.status <> 'posted' THEN
         RAISE EXCEPTION 'can only reverse a posted transfer (state %)', v_orig.status
             USING ERRCODE = 'check_violation';
@@ -563,15 +722,46 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION client_cancel_transfer(p_caller_subject UUID, p_transfer_id UUID, p_reason TEXT DEFAULT '')
 RETURNS transfer_status AS $$
-DECLARE v_owner UUID;
+DECLARE v_owner UUID; v_status transfer_status;
 BEGIN
-    SELECT a.user_id INTO v_owner
+    SELECT a.user_id, t.status INTO v_owner, v_status
     FROM transfers t JOIN accounts a ON a.id = t.debit_account_id
     WHERE t.id = p_transfer_id;
     IF v_owner IS NULL OR v_owner <> p_caller_subject THEN
         RAISE EXCEPTION 'transfer % not found', p_transfer_id;
     END IF;
+    -- under_review is operator-only (screening/AML): the customer cannot cancel it.
+    IF v_status = 'under_review' THEN
+        RAISE EXCEPTION 'cannot cancel a transfer under review';   -- P0001 -> 409
+    END IF;
     RETURN cancel_transfer(p_transfer_id, p_reason);
+END;
+$$ LANGUAGE plpgsql;
+
+-- client_confirm_transfer: the customer releases their OWN held transfer (the Rec 22
+-- cooling-off 'held' state). Ownership like client_post_transfer (a foreign/unknown
+-- transfer -> 'not found' -> 404, hiding existence). Already-posted is an idempotent
+-- no-op; a non-held state or a lapsed confirmation window -> P0001 'cannot …' (409).
+-- Releases the hold via post_transfer(id, {held}); under_review is NOT confirmable
+-- here (operator-only).
+CREATE OR REPLACE FUNCTION client_confirm_transfer(p_caller_subject UUID, p_transfer_id UUID)
+RETURNS transfer_status AS $$
+DECLARE v_owner UUID; v_status transfer_status; v_expires TIMESTAMPTZ;
+BEGIN
+    SELECT a.user_id, t.status, t.hold_expires_at INTO v_owner, v_status, v_expires
+    FROM transfers t JOIN accounts a ON a.id = t.debit_account_id
+    WHERE t.id = p_transfer_id;
+    IF v_owner IS NULL OR v_owner <> p_caller_subject THEN
+        RAISE EXCEPTION 'transfer % not found', p_transfer_id;
+    END IF;
+    IF v_status = 'posted' THEN RETURN 'posted'; END IF;          -- idempotent
+    IF v_status <> 'held' THEN
+        RAISE EXCEPTION 'cannot confirm a transfer in state %', v_status;   -- P0001 -> 409
+    END IF;
+    IF v_expires IS NOT NULL AND v_expires < now() THEN
+        RAISE EXCEPTION 'cannot confirm: the confirmation window has expired';   -- P0001 -> 409
+    END IF;
+    RETURN post_transfer(p_transfer_id, ARRAY['held']::transfer_status[]);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -579,6 +769,7 @@ $$ LANGUAGE plpgsql;
 
 -- +goose Down
 -- +goose StatementBegin
+DROP FUNCTION IF EXISTS client_confirm_transfer(UUID, UUID);
 DROP FUNCTION IF EXISTS client_cancel_transfer(UUID, UUID, TEXT);
 DROP FUNCTION IF EXISTS client_post_transfer(UUID, UUID);
 DROP FUNCTION IF EXISTS client_transfer(UUID, TEXT, UUID, UUID, BIGINT, TEXT, VARCHAR);
@@ -587,8 +778,9 @@ DROP FUNCTION IF EXISTS withdraw(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS reverse_transfer(UUID, TEXT, TEXT);
 DROP FUNCTION IF EXISTS transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, VARCHAR, UUID);
+DROP FUNCTION IF EXISTS place_transfer_hold(UUID, transfer_status, TEXT, INT, UUID, JSONB);
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
-DROP FUNCTION IF EXISTS post_transfer(UUID);
+DROP FUNCTION IF EXISTS post_transfer(UUID, transfer_status[]);
 DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR, UUID);
 -- +goose StatementEnd
 DROP TRIGGER IF EXISTS trg_ledger_immutable     ON ledger_entries;

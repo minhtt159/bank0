@@ -124,22 +124,22 @@ func (e DisputeScamType) Valid() bool {
 
 // Defines values for DisputeStatus.
 const (
-	Open        DisputeStatus = "open"
-	Rejected    DisputeStatus = "rejected"
-	Resolved    DisputeStatus = "resolved"
-	UnderReview DisputeStatus = "under_review"
+	DisputeStatusOpen        DisputeStatus = "open"
+	DisputeStatusRejected    DisputeStatus = "rejected"
+	DisputeStatusResolved    DisputeStatus = "resolved"
+	DisputeStatusUnderReview DisputeStatus = "under_review"
 )
 
 // Valid indicates whether the value is a known member of the DisputeStatus enum.
 func (e DisputeStatus) Valid() bool {
 	switch e {
-	case Open:
+	case DisputeStatusOpen:
 		return true
-	case Rejected:
+	case DisputeStatusRejected:
 		return true
-	case Resolved:
+	case DisputeStatusResolved:
 		return true
-	case UnderReview:
+	case DisputeStatusUnderReview:
 		return true
 	default:
 		return false
@@ -349,19 +349,19 @@ func (e ResolvedAccountMatchResult) Valid() bool {
 
 // Defines values for ResolvedAccountRecipientRisk.
 const (
-	High   ResolvedAccountRecipientRisk = "high"
-	Low    ResolvedAccountRecipientRisk = "low"
-	Medium ResolvedAccountRecipientRisk = "medium"
+	ResolvedAccountRecipientRiskHigh   ResolvedAccountRecipientRisk = "high"
+	ResolvedAccountRecipientRiskLow    ResolvedAccountRecipientRisk = "low"
+	ResolvedAccountRecipientRiskMedium ResolvedAccountRecipientRisk = "medium"
 )
 
 // Valid indicates whether the value is a known member of the ResolvedAccountRecipientRisk enum.
 func (e ResolvedAccountRecipientRisk) Valid() bool {
 	switch e {
-	case High:
+	case ResolvedAccountRecipientRiskHigh:
 		return true
-	case Low:
+	case ResolvedAccountRecipientRiskLow:
 		return true
-	case Medium:
+	case ResolvedAccountRecipientRiskMedium:
 		return true
 	default:
 		return false
@@ -389,6 +389,54 @@ func (e ResolvedAccountSignals) Valid() bool {
 	case RecentlyOpened:
 		return true
 	case Reported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransferIntentDecision.
+const (
+	Allow  TransferIntentDecision = "allow"
+	Block  TransferIntentDecision = "block"
+	Review TransferIntentDecision = "review"
+	StepUp TransferIntentDecision = "step_up"
+	Warn   TransferIntentDecision = "warn"
+)
+
+// Valid indicates whether the value is a known member of the TransferIntentDecision enum.
+func (e TransferIntentDecision) Valid() bool {
+	switch e {
+	case Allow:
+		return true
+	case Block:
+		return true
+	case Review:
+		return true
+	case StepUp:
+		return true
+	case Warn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransferIntentRiskBand.
+const (
+	TransferIntentRiskBandHigh   TransferIntentRiskBand = "high"
+	TransferIntentRiskBandLow    TransferIntentRiskBand = "low"
+	TransferIntentRiskBandMedium TransferIntentRiskBand = "medium"
+)
+
+// Valid indicates whether the value is a known member of the TransferIntentRiskBand enum.
+func (e TransferIntentRiskBand) Valid() bool {
+	switch e {
+	case TransferIntentRiskBandHigh:
+		return true
+	case TransferIntentRiskBandLow:
+		return true
+	case TransferIntentRiskBandMedium:
 		return true
 	default:
 		return false
@@ -428,6 +476,27 @@ func (e TransferSuggestionSource) Valid() bool {
 	}
 }
 
+// Defines values for TransferWarningSeverity.
+const (
+	Critical TransferWarningSeverity = "critical"
+	Info     TransferWarningSeverity = "info"
+	Warning  TransferWarningSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the TransferWarningSeverity enum.
+func (e TransferWarningSeverity) Valid() bool {
+	switch e {
+	case Critical:
+		return true
+	case Info:
+		return true
+	case Warning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VerifyContactResponseChannel.
 const (
 	VerifyContactResponseChannelEmail VerifyContactResponseChannel = "email"
@@ -454,6 +523,7 @@ const (
 	GuidedSteer   WarningAckRequestCategory = "guided_steer"
 	HighValue     WarningAckRequestCategory = "high_value"
 	Other         WarningAckRequestCategory = "other"
+	RiskWarning   WarningAckRequestCategory = "risk_warning"
 )
 
 // Valid indicates whether the value is a known member of the WarningAckRequestCategory enum.
@@ -470,6 +540,8 @@ func (e WarningAckRequestCategory) Valid() bool {
 	case HighValue:
 		return true
 	case Other:
+		return true
+	case RiskWarning:
 		return true
 	default:
 		return false
@@ -520,25 +592,31 @@ func (e ListMyEventsParamsType) Valid() bool {
 
 // Defines values for ListMyTransfersParamsStatus.
 const (
-	Canceled ListMyTransfersParamsStatus = "canceled"
-	Failed   ListMyTransfersParamsStatus = "failed"
-	Pending  ListMyTransfersParamsStatus = "pending"
-	Posted   ListMyTransfersParamsStatus = "posted"
-	Reversed ListMyTransfersParamsStatus = "reversed"
+	ListMyTransfersParamsStatusCanceled    ListMyTransfersParamsStatus = "canceled"
+	ListMyTransfersParamsStatusFailed      ListMyTransfersParamsStatus = "failed"
+	ListMyTransfersParamsStatusHeld        ListMyTransfersParamsStatus = "held"
+	ListMyTransfersParamsStatusPending     ListMyTransfersParamsStatus = "pending"
+	ListMyTransfersParamsStatusPosted      ListMyTransfersParamsStatus = "posted"
+	ListMyTransfersParamsStatusReversed    ListMyTransfersParamsStatus = "reversed"
+	ListMyTransfersParamsStatusUnderReview ListMyTransfersParamsStatus = "under_review"
 )
 
 // Valid indicates whether the value is a known member of the ListMyTransfersParamsStatus enum.
 func (e ListMyTransfersParamsStatus) Valid() bool {
 	switch e {
-	case Canceled:
+	case ListMyTransfersParamsStatusCanceled:
 		return true
-	case Failed:
+	case ListMyTransfersParamsStatusFailed:
 		return true
-	case Pending:
+	case ListMyTransfersParamsStatusHeld:
 		return true
-	case Posted:
+	case ListMyTransfersParamsStatusPending:
 		return true
-	case Reversed:
+	case ListMyTransfersParamsStatusPosted:
+		return true
+	case ListMyTransfersParamsStatusReversed:
+		return true
+	case ListMyTransfersParamsStatusUnderReview:
 		return true
 	default:
 		return false
@@ -996,17 +1074,61 @@ type Transfer struct {
 	Description     *string             `json:"description,omitempty"`
 
 	// EndToEndId Originator-supplied ISO 20022 EndToEndId, when given.
-	EndToEndId    *string             `json:"end_to_end_id,omitempty"`
-	FailureReason *string             `json:"failure_reason,omitempty"`
-	Id            *openapi_types.UUID `json:"id,omitempty"`
-	Kind          *string             `json:"kind,omitempty"`
-	PostedAt      *time.Time          `json:"posted_at,omitempty"`
-	RequestedAt   *time.Time          `json:"requested_at,omitempty"`
-	ReversesId    *openapi_types.UUID `json:"reverses_id,omitempty"`
-	Status        *string             `json:"status,omitempty"`
+	EndToEndId    *string `json:"end_to_end_id,omitempty"`
+	FailureReason *string `json:"failure_reason,omitempty"`
+
+	// HoldExpiresAt When the hold/review window lapses and the transfer auto-cancels; null when not parked.
+	HoldExpiresAt *time.Time `json:"hold_expires_at,omitempty"`
+
+	// HoldReason Why a held/under_review transfer is parked (e.g. 'screening', a warning category); null otherwise.
+	HoldReason  *string             `json:"hold_reason,omitempty"`
+	Id          *openapi_types.UUID `json:"id,omitempty"`
+	Kind        *string             `json:"kind,omitempty"`
+	PostedAt    *time.Time          `json:"posted_at,omitempty"`
+	RequestedAt *time.Time          `json:"requested_at,omitempty"`
+	ReversesId  *openapi_types.UUID `json:"reverses_id,omitempty"`
+
+	// Status pending | held | under_review | posted | failed | canceled | reversed.
+	Status *string `json:"status,omitempty"`
 
 	// Uetr Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays.
 	Uetr *openapi_types.UUID `json:"uetr,omitempty"`
+}
+
+// TransferIntent The read-only decision preview for a would-be transfer. No money moves and no row is written. Deliberately carries NO numeric risk score.
+type TransferIntent struct {
+	// Decision Collapsed outcome. allow = proceed; warn = show the warning, may proceed; step_up = re-verification linked to this exact payment is required; review = submitting parks the payment as `held` for customer confirmation; block = submitting is refused (422 payment_blocked).
+	Decision TransferIntentDecision `json:"decision"`
+
+	// ReasonCodes Machine tokens explaining the band (e.g. first_payment_to_payee). Always an array, never null.
+	ReasonCodes []string `json:"reason_codes"`
+
+	// RiskBand Server-authoritative risk band.
+	RiskBand TransferIntentRiskBand `json:"risk_band"`
+
+	// StepUpMethod Second-factor method to use when decision is step_up (e.g. 'otp'); null otherwise.
+	StepUpMethod *string `json:"step_up_method,omitempty"`
+
+	// Warning The customer-facing warning to show; present only when a warning rule matched, else null.
+	Warning *TransferWarning `json:"warning,omitempty"`
+}
+
+// TransferIntentDecision Collapsed outcome. allow = proceed; warn = show the warning, may proceed; step_up = re-verification linked to this exact payment is required; review = submitting parks the payment as `held` for customer confirmation; block = submitting is refused (422 payment_blocked).
+type TransferIntentDecision string
+
+// TransferIntentRiskBand Server-authoritative risk band.
+type TransferIntentRiskBand string
+
+// TransferIntentRequest defines model for TransferIntentRequest.
+type TransferIntentRequest struct {
+	// AmountMinor Amount in minor units (never a float).
+	AmountMinor int64 `json:"amount_minor"`
+
+	// CreditAccount Destination account.
+	CreditAccount openapi_types.UUID `json:"credit_account"`
+
+	// DebitAccount Account to debit; must be owned by the caller.
+	DebitAccount openapi_types.UUID `json:"debit_account"`
 }
 
 // TransferListItem A transfer in the caller's cross-account history (direction is caller-relative).
@@ -1022,12 +1144,20 @@ type TransferListItem struct {
 	Description       *string             `json:"description,omitempty"`
 
 	// Direction Relative to the caller.
-	Direction   *TransferListItemDirection `json:"direction,omitempty"`
-	Id          *openapi_types.UUID        `json:"id,omitempty"`
-	Kind        *string                    `json:"kind,omitempty"`
-	PostedAt    *time.Time                 `json:"posted_at,omitempty"`
-	RequestedAt *time.Time                 `json:"requested_at,omitempty"`
-	Status      *string                    `json:"status,omitempty"`
+	Direction *TransferListItemDirection `json:"direction,omitempty"`
+
+	// HoldExpiresAt When the hold/review window lapses (auto-cancel); null when not parked.
+	HoldExpiresAt *time.Time `json:"hold_expires_at,omitempty"`
+
+	// HoldReason Why a held/under_review transfer is parked; null otherwise.
+	HoldReason  *string             `json:"hold_reason,omitempty"`
+	Id          *openapi_types.UUID `json:"id,omitempty"`
+	Kind        *string             `json:"kind,omitempty"`
+	PostedAt    *time.Time          `json:"posted_at,omitempty"`
+	RequestedAt *time.Time          `json:"requested_at,omitempty"`
+
+	// Status pending | held | under_review | posted | failed | canceled | reversed.
+	Status *string `json:"status,omitempty"`
 }
 
 // TransferListItemDirection Relative to the caller.
@@ -1060,6 +1190,28 @@ type TransferSuggestion struct {
 
 // TransferSuggestionSource Always 'scenario' from the backend; the client synthesises 'own_account' for its empty-menu fallback.
 type TransferSuggestionSource string
+
+// TransferWarning The copy + acknowledgement policy for a matched warning rule.
+type TransferWarning struct {
+	Body *string `json:"body,omitempty"`
+
+	// Category Warning category (mirrors warning_acks.category); the value to record on POST /me/warning-acks.
+	Category *string `json:"category,omitempty"`
+
+	// CoolingOffSeconds Minimum seconds between acknowledging and submitting (0 = none).
+	CoolingOffSeconds *int    `json:"cooling_off_seconds,omitempty"`
+	Headline          *string `json:"headline,omitempty"`
+
+	// RequiredAck When true, an acknowledgement must be recorded before the payment can be submitted.
+	RequiredAck *bool                    `json:"required_ack,omitempty"`
+	Severity    *TransferWarningSeverity `json:"severity,omitempty"`
+
+	// WarningId The matched warning rule's id.
+	WarningId *openapi_types.UUID `json:"warning_id,omitempty"`
+}
+
+// TransferWarningSeverity defines model for TransferWarning.Severity.
+type TransferWarningSeverity string
 
 // UnreadCount defines model for UnreadCount.
 type UnreadCount struct {
@@ -1323,6 +1475,9 @@ type RecordWarningAckJSONRequestBody = WarningAckRequest
 // CreateTransferJSONRequestBody defines body for CreateTransfer for application/json ContentType.
 type CreateTransferJSONRequestBody = CreateTransferRequest
 
+// TransferIntentJSONRequestBody defines body for TransferIntent for application/json ContentType.
+type TransferIntentJSONRequestBody = TransferIntentRequest
+
 // CancelTransferJSONRequestBody defines body for CancelTransfer for application/json ContentType.
 type CancelTransferJSONRequestBody = ReasonRequest
 
@@ -1433,15 +1588,21 @@ type ServerInterface interface {
 	// Create a transfer (auto-posts by default). Idempotent.
 	// (POST /transfers)
 	CreateTransfer(w http.ResponseWriter, r *http.Request, params CreateTransferParams)
+	// Preview the fraud decision for a would-be transfer (moves no money).
+	// (POST /transfers/intent)
+	TransferIntent(w http.ResponseWriter, r *http.Request)
 	// Guided-transfer demo: up to 3 candidate destination accounts (other users', randomly sampled + shuffled, optionally including a short-listed mule). The client picks one at random; an empty array means "no candidate — fall back to the caller's own account". Read-only; never moves money.
 	// (GET /transfers/suggestion)
 	SuggestTransferDestinations(w http.ResponseWriter, r *http.Request, params SuggestTransferDestinationsParams)
 	// Get a transfer
 	// (GET /transfers/{id})
 	GetTransfer(w http.ResponseWriter, r *http.Request, id Id)
-	// Cancel a pending transfer (releases the hold). Idempotent.
+	// Cancel a pending or held transfer (releases the hold). Idempotent.
 	// (POST /transfers/{id}/cancel)
 	CancelTransfer(w http.ResponseWriter, r *http.Request, id Id)
+	// Confirm (release) a held transfer, posting it. Idempotent.
+	// (POST /transfers/{id}/confirm)
+	ConfirmTransfer(w http.ResponseWriter, r *http.Request, id Id)
 	// Raise a dispute on a transfer the caller is a party to ("I don't recognise this"). One open dispute per (transfer, caller).
 	// (POST /transfers/{id}/dispute)
 	RaiseDispute(w http.ResponseWriter, r *http.Request, id Id)
@@ -2508,6 +2669,20 @@ func (siw *ServerInterfaceWrapper) CreateTransfer(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// TransferIntent operation middleware
+func (siw *ServerInterfaceWrapper) TransferIntent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TransferIntent(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SuggestTransferDestinations operation middleware
 func (siw *ServerInterfaceWrapper) SuggestTransferDestinations(w http.ResponseWriter, r *http.Request) {
 
@@ -2597,6 +2772,32 @@ func (siw *ServerInterfaceWrapper) CancelTransfer(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CancelTransfer(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmTransfer operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmTransfer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id Id
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", mux.Vars(r)["id"], &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmTransfer(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2865,11 +3066,15 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 
 	r.HandleFunc(options.BaseURL+"/transfers", wrapper.CreateTransfer).Methods(http.MethodPost)
 
+	r.HandleFunc(options.BaseURL+"/transfers/intent", wrapper.TransferIntent).Methods(http.MethodPost)
+
 	r.HandleFunc(options.BaseURL+"/transfers/suggestion", wrapper.SuggestTransferDestinations).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}", wrapper.GetTransfer).Methods(http.MethodGet)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}/cancel", wrapper.CancelTransfer).Methods(http.MethodPost)
+
+	r.HandleFunc(options.BaseURL+"/transfers/{id}/confirm", wrapper.ConfirmTransfer).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/transfers/{id}/dispute", wrapper.RaiseDispute).Methods(http.MethodPost)
 

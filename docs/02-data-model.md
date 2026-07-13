@@ -83,7 +83,7 @@ erDiagram
         uuid credit_account_id FK
         bigint amount_minor "> 0"
         char currency "EUR"
-        transfer_status status "pending|posted|failed|canceled|reversed"
+        transfer_status status "pending|held|under_review|posted|failed|canceled|reversed"
         transfer_kind kind "transfer|deposit|withdrawal|reversal|fee|adjustment"
         uuid reverses_id FK "self, nullable"
         text description
@@ -257,7 +257,7 @@ Key points:
 
 ```sql
 CREATE TYPE transfer_status AS ENUM
-    ('pending', 'posted', 'failed', 'canceled', 'reversed');
+    ('pending', 'held', 'under_review', 'posted', 'failed', 'canceled', 'reversed');
 CREATE TYPE transfer_kind   AS ENUM
     ('transfer', 'deposit', 'withdrawal', 'reversal', 'fee', 'adjustment');
 
@@ -275,6 +275,8 @@ CREATE TABLE transfers (
     uetr              UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),  -- bank-minted UUIDv4 (SWIFT UETR)
     end_to_end_id     VARCHAR(35),                       -- originator ISO 20022 EndToEndId
     failure_reason    TEXT,
+    hold_reason       TEXT,                              -- why parked (held/under_review); kept after release
+    hold_expires_at   TIMESTAMPTZ,                       -- confirmation/review window (business-day clock)
     requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     posted_at         TIMESTAMPTZ,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -286,7 +288,9 @@ CREATE TABLE transfers (
     -- posted_at is set once a transfer hits the ledger; a reversed transfer was
     -- posted, so it keeps its posted_at:
     CHECK ((posted_at IS NOT NULL) = (status IN ('posted','reversed'))),
-    CHECK ((kind = 'reversal')  = (reverses_id IS NOT NULL)) -- reverses_id iff reversal
+    CHECK ((kind = 'reversal')  = (reverses_id IS NOT NULL)), -- reverses_id iff reversal
+    -- one-way: a parked transfer MUST carry an expiry; released rows may keep it.
+    CHECK (hold_expires_at IS NOT NULL OR status NOT IN ('held', 'under_review'))
 );
 ```
 
@@ -354,7 +358,7 @@ CREATE TABLE holds (
     CHECK (amount_minor > 0)
 );
 
--- only one active hold per pending transfer
+-- only one active hold per in-flight (pending/held/under_review) transfer
 CREATE UNIQUE INDEX uq_holds_active_transfer
     ON holds (transfer_id) WHERE status = 'active';
 CREATE INDEX idx_holds_active_account

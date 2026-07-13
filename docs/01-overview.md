@@ -7,8 +7,10 @@ the **database**; the Go services on top are thin transport.
 
 Single currency (EUR), amounts as integer minor units. It **models** the payment
 lifecycle (authorization holds, settlement, reversal) rather than connecting to
-real rails (SEPA/SWIFT/cards); interest, statements, and KYC/AML are out of scope
-and can be layered on without reshaping the core.
+real rails (SEPA/SWIFT/cards); interest, statements, and KYC are out of scope
+and can be layered on without reshaping the core. A per-payment AML name-screening
+gate does ship (watchlist match parks a payment `under_review` for operator
+review — see [03](03-ledger-lifecycle-idempotency.md) / [05](05-admin-ui.md)).
 
 ---
 

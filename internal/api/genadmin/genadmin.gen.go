@@ -529,14 +529,22 @@ type Transfer struct {
 	Description     *string             `json:"description,omitempty"`
 
 	// EndToEndId Originator-supplied ISO 20022 EndToEndId, when given.
-	EndToEndId    *string             `json:"end_to_end_id,omitempty"`
-	FailureReason *string             `json:"failure_reason,omitempty"`
-	Id            *openapi_types.UUID `json:"id,omitempty"`
-	Kind          *string             `json:"kind,omitempty"`
-	PostedAt      *time.Time          `json:"posted_at,omitempty"`
-	RequestedAt   *time.Time          `json:"requested_at,omitempty"`
-	ReversesId    *openapi_types.UUID `json:"reverses_id,omitempty"`
-	Status        *string             `json:"status,omitempty"`
+	EndToEndId    *string `json:"end_to_end_id,omitempty"`
+	FailureReason *string `json:"failure_reason,omitempty"`
+
+	// HoldExpiresAt When the hold/review window lapses and the transfer auto-cancels; null when not parked.
+	HoldExpiresAt *time.Time `json:"hold_expires_at,omitempty"`
+
+	// HoldReason Why a held/under_review transfer is parked (e.g. 'screening', a warning category); null otherwise.
+	HoldReason  *string             `json:"hold_reason,omitempty"`
+	Id          *openapi_types.UUID `json:"id,omitempty"`
+	Kind        *string             `json:"kind,omitempty"`
+	PostedAt    *time.Time          `json:"posted_at,omitempty"`
+	RequestedAt *time.Time          `json:"requested_at,omitempty"`
+	ReversesId  *openapi_types.UUID `json:"reverses_id,omitempty"`
+
+	// Status pending | held | under_review | posted | failed | canceled | reversed.
+	Status *string `json:"status,omitempty"`
 
 	// Uetr Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays.
 	Uetr *openapi_types.UUID `json:"uetr,omitempty"`
