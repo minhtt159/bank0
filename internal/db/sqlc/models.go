@@ -972,6 +972,7 @@ type Hold struct {
 }
 
 type IdempotencyKey struct {
+	OwnerID     uuid.UUID  `json:"owner_id"`
 	Key         string     `json:"key"`
 	Scope       string     `json:"scope"`
 	RequestHash string     `json:"request_hash"`
@@ -980,6 +981,16 @@ type IdempotencyKey struct {
 	Response    []byte     `json:"response"`
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   time.Time  `json:"expires_at"`
+}
+
+type Invitation struct {
+	ID         uuid.UUID  `json:"id"`
+	Code       string     `json:"code"`
+	InviterID  uuid.UUID  `json:"inviter_id"`
+	InviteeID  *uuid.UUID `json:"invitee_id"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	ConsumedAt *time.Time `json:"consumed_at"`
 }
 
 type LedgerEntry struct {
@@ -1076,6 +1087,7 @@ type User struct {
 	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
 	EmailVerifiedAt  *time.Time       `json:"email_verified_at"`
 	PhoneVerifiedAt  *time.Time       `json:"phone_verified_at"`
+	InvitesRemaining int32            `json:"invites_remaining"`
 	CreatedAt        time.Time        `json:"created_at"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 }

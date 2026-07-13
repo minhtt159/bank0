@@ -36,6 +36,7 @@ erDiagram
     transfers ||--o| transfers : "reverses"
     idempotency_keys ||--o| transfers : "yields"
     users ||--o{ admin_actions : "performed by"
+    users ||--o{ invitations : "issues"
 
     users {
         uuid id PK "uuidv7()"
@@ -46,8 +47,19 @@ erDiagram
         varchar phone_number UK "nullable"
         user_role role "customer | operator | admin | auditor"
         user_status status "active | locked | closed"
+        int invites_remaining "lifetime invite quota, default 10"
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    invitations {
+        uuid id PK "uuidv7()"
+        text code UK "plaintext, redisplayable"
+        uuid inviter_id FK
+        uuid invitee_id FK "set on consume, nullable"
+        timestamptz created_at
+        timestamptz expires_at "14 days"
+        timestamptz consumed_at "nullable"
     }
 
     accounts {
@@ -107,6 +119,7 @@ erDiagram
     }
 
     idempotency_keys {
+        uuid owner_id PK "owning principal; zero-uuid sentinel for system/anon"
         text key PK
         text scope "e.g. 'transfer'"
         text request_hash "fingerprint of params"
@@ -156,6 +169,7 @@ CREATE TABLE users (
     role              user_role   NOT NULL DEFAULT 'customer',
     status            user_status NOT NULL DEFAULT 'active',
     onboarding_status onboarding_status NOT NULL DEFAULT 'active',  -- self-reg lifecycle
+    invites_remaining INT NOT NULL DEFAULT 10 CHECK (invites_remaining >= 0),  -- lifetime invite quota
     email_verified_at TIMESTAMPTZ,
     phone_verified_at TIMESTAMPTZ,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -177,6 +191,17 @@ are born `active` on both axes. The companion **`verification_challenges`**
 table (same file) holds one row per (user, channel) code dispatch — token and
 code stored as sha256 only, ≤5 attempts, 15-min TTL, 60-s resend cooldown, and a
 partial unique index allowing one *pending* challenge per (user, channel).
+
+Registration is **invitation-gated**. The **`invitations`** table (same file)
+records each issued code: `id uuidv7`, `code` (UNIQUE, stored **plaintext by
+design** — it must be redisplayable to the inviter), `inviter_id`, `invitee_id`
+(set on consume), `created_at`, `expires_at` (14-day), `consumed_at`; the
+`pending`/`consumed`/`expired` status is *derived*, not stored. `/auth/register`
+requires a valid pending code (empty → 422, unknown → 404, used/expired → 409),
+and the code is single-use and **not** email-bound. Minting a code
+(`create_invitation`) is gated on the inviter being active + verified and on the
+per-user `invites_remaining` quota (`INT NOT NULL DEFAULT 10 CHECK >= 0`,
+decremented on generate; expired codes do **not** refund).
 
 ### 3.2 `accounts`
 
@@ -353,23 +378,31 @@ returns the funds to `available`.
 CREATE TYPE ik_status AS ENUM ('in_progress', 'completed');
 
 CREATE TABLE idempotency_keys (
-    key          TEXT PRIMARY KEY,
+    owner_id     UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+    key          TEXT NOT NULL,
     scope        TEXT NOT NULL,                  -- 'transfer', 'reversal', ...
     request_hash TEXT NOT NULL,                  -- SHA-256 of normalized params
     status       ik_status NOT NULL DEFAULT 'in_progress',
     transfer_id  UUID REFERENCES transfers(id),
     response     JSONB,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days'
+    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days',
+    PRIMARY KEY (owner_id, key)                  -- key namespaced to the owning principal
 );
 ```
 
-How this guarantees no double-post and keeps business logic out of the API is the
-subject of [`03-...md`](03-ledger-lifecycle-idempotency.md) §3. In short: the DB
-function does `INSERT ... ON CONFLICT (key) DO NOTHING`; a conflict means "seen
-before" → return the stored result; a conflict with a *different* `request_hash`
-raises (the client reused a key for a different request — surfaced loudly rather
-than silently mis-handled).
+`owner_id` namespaces the raw client key to the owning principal (the customer user id
+on client money/account paths; the all-zero sentinel `…0000` for system/money/operator
+ops; a **dedicated registration sentinel `…0001`** for `/auth/register`, so a
+self-chosen registration key can't squat a deterministic system key like
+`dispute-reimburse-<id>`), so the same raw key from two different owners is two
+independent claims. How this
+guarantees no double-post and keeps business logic out of the API is the subject of
+[`03-...md`](03-ledger-lifecycle-idempotency.md) §3. In short: the DB function does
+`INSERT ... ON CONFLICT (owner_id, key) DO NOTHING`; a conflict means "seen before" →
+return the stored result; a conflict with a *different* `request_hash` raises (the
+client reused a key for a different request — surfaced loudly rather than silently
+mis-handled).
 
 ### 3.7 `admin_actions` — operator audit
 

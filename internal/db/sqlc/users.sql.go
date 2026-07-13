@@ -47,7 +47,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (uuid.UU
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, created_at, updated_at
+SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, invites_remaining, created_at, updated_at
 FROM users WHERE id = $1::uuid
 `
 
@@ -60,6 +60,7 @@ type GetUserByIDRow struct {
 	Role             UserRole         `json:"role"`
 	Status           UserStatus       `json:"status"`
 	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
+	InvitesRemaining int32            `json:"invites_remaining"`
 	CreatedAt        time.Time        `json:"created_at"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 }
@@ -76,10 +77,25 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.Role,
 		&i.Status,
 		&i.OnboardingStatus,
+		&i.InvitesRemaining,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setInvitesRemaining = `-- name: SetInvitesRemaining :exec
+UPDATE users SET invites_remaining = $1::int WHERE id = $2::uuid
+`
+
+type SetInvitesRemainingParams struct {
+	InvitesRemaining int32     `json:"invites_remaining"`
+	ID               uuid.UUID `json:"id"`
+}
+
+func (q *Queries) SetInvitesRemaining(ctx context.Context, arg SetInvitesRemainingParams) error {
+	_, err := q.db.Exec(ctx, setInvitesRemaining, arg.InvitesRemaining, arg.ID)
+	return err
 }
 
 const updateUserInfo = `-- name: UpdateUserInfo :exec

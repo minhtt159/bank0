@@ -549,6 +549,9 @@ type User struct {
 	FullName  *string             `json:"full_name,omitempty"`
 	Id        *openapi_types.UUID `json:"id,omitempty"`
 
+	// InvitesRemaining Lifetime invitation budget still available to the user.
+	InvitesRemaining *int `json:"invites_remaining,omitempty"`
+
 	// OnboardingStatus Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'.
 	OnboardingStatus *string    `json:"onboarding_status,omitempty"`
 	PhoneNumber      *string    `json:"phone_number,omitempty"`

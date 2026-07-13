@@ -26,9 +26,9 @@ var (
 )
 
 type Server struct {
-	cfg       config.Config
-	log       *slog.Logger
-	pg        *db.Postgres
+	cfg        config.Config
+	log        *slog.Logger
+	pg         *db.Postgres
 	spec       []byte        // raw openapi.yaml, served at /openapi.yaml
 	jwtSecret  []byte        // HS256 signing key for the client surface
 	jwtTTL     time.Duration // access-token lifetime
@@ -151,14 +151,20 @@ func (s *Server) Router() http.Handler {
 		r.Handle("/auth/mfa/verify", s.rateLimit(s.loginLimiter, s.clientIP, http.HandlerFunc(s.MfaVerify))).Methods(http.MethodPost)
 		cr := r.PathPrefix("/").Subrouter()
 		cr.Use(s.requireJWT)
-		genclient.HandlerFromMux(s, cr)
+		genclient.HandlerWithOptions(s, genclient.GorillaServerOptions{
+			BaseRouter:       cr,
+			ErrorHandlerFunc: bindingErrorJSON,
+		})
 	}
 	if portalOn {
 		// Everything else on the portal (admin JSON API + console) needs a session.
 		pr := r.PathPrefix("/").Subrouter()
 		pr.Use(s.requireSession)
 		pr.Use(s.csrfGuard) // same-origin guard on cookie-authed mutations (CSRF)
-		genadmin.HandlerFromMux(s, pr)
+		genadmin.HandlerWithOptions(s, genadmin.GorillaServerOptions{
+			BaseRouter:       pr,
+			ErrorHandlerFunc: bindingErrorJSON,
+		})
 		s.registerConsole(pr)
 	}
 	s.log.Info("router built", "mode", mode)

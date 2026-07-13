@@ -37,6 +37,14 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, errorBody{Error: code, Message: msg})
 }
 
+// bindingErrorJSON is the oapi-codegen ErrorHandlerFunc for BOTH generated
+// packages (genclient/genadmin). The generated default emits text/plain via
+// http.Error; this replaces it so a malformed path/query/header param yields the
+// standard JSON error shape, matching every other error the API returns.
+func bindingErrorJSON(w http.ResponseWriter, _ *http.Request, err error) {
+	writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+}
+
 // mapDBError is the ONLY place the API encodes business knowledge: it translates
 // the typed errors the PL/pgSQL functions raise into HTTP status codes. Every
 // rule itself still lives in the database (see docs/03-...md §5).
@@ -78,6 +86,12 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 			case strings.Contains(msg, "already handled"):
 				// maker-checker double-resolve (approve/reject raced or repeated)
 				writeError(w, http.StatusConflict, "invalid_state", msg)
+			case strings.Contains(msg, "invitation limit"):
+				// invitation budget exhausted — a conflict with current state
+				writeError(w, http.StatusConflict, "invitation_limit", msg)
+			case strings.Contains(msg, "invitation code"):
+				// consumed / expired / (empty) invitation code — invalid state
+				writeError(w, http.StatusConflict, "invalid_state", msg)
 			default: // raw constraint trip — don't leak the constraint name
 				writeError(w, http.StatusUnprocessableEntity, "unprocessable", "the request could not be processed")
 			}
@@ -96,6 +110,9 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 			return
 		case "42501": // insufficient_privilege: caller doesn't own the debit account
 			writeError(w, http.StatusForbidden, "forbidden", "you do not have access to this resource")
+			return
+		case "22P02": // invalid_text_representation (e.g. a malformed UUID reached the DB)
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid input")
 			return
 		case "P0001": // generic RAISE EXCEPTION — disambiguate by message
 			switch {
@@ -132,9 +149,31 @@ func dbErrorMessage(err error) string {
 	}
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) {
-		return pg.Message
+		// Echo the Postgres message ONLY for crafted SQLSTATEs whose text is a
+		// developer-authored, operator-safe business message. Any other PgError
+		// (a raw constraint name, a generic engine error) gets a curated message so
+		// schema internals don't leak into the console flash banner; the full error
+		// is already logged by dbFlash.
+		if craftedFlashCodes[pg.Code] {
+			return pg.Message
+		}
+		return "database error"
 	}
 	return "internal error"
+}
+
+// craftedFlashCodes is the whitelist of SQLSTATEs whose raw Postgres message is a
+// developer-authored, operator-safe string (mirrors the crafted branches in
+// mapDBError). Every other PgError is curated to a generic "database error".
+var craftedFlashCodes = map[string]bool{
+	"P0001": true, // generic RAISE EXCEPTION (business message)
+	"23514": true, // check_violation (insufficient funds, key reuse, ...)
+	"55006": true, // object_in_use (request still in progress)
+	"23001": true, // restrict_violation (append-only guards)
+	"28000": true, // invalid_authorization_specification
+	"28P01": true, // invalid_password
+	"42501": true, // insufficient_privilege
+	"53400": true, // configuration_limit_exceeded (resend cooldown)
 }
 
 // dbFlash is the console-flash counterpart to mapDBError: it returns the
@@ -170,4 +209,3 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 func decodeOptionalJSON(r *http.Request, dst any) {
 	_ = json.NewDecoder(r.Body).Decode(dst)
 }
-

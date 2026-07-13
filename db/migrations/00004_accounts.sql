@@ -242,14 +242,15 @@ BEGIN
         RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = 'check_violation';
     END IF;
 
-    INSERT INTO idempotency_keys (key, scope, request_hash, status)
-    VALUES (p_idempotency_key, 'open_account', v_hash, 'in_progress')
-    ON CONFLICT (key) DO NOTHING;
+    -- Namespace the claim to the opening user (Rec 3): the customer owns the key.
+    INSERT INTO idempotency_keys (owner_id, key, scope, request_hash, status)
+    VALUES (p_user_id, p_idempotency_key, 'open_account', v_hash, 'in_progress')
+    ON CONFLICT (owner_id, key) DO NOTHING;
 
     IF NOT FOUND THEN
         SELECT ik.scope, ik.request_hash, ik.status, ik.response
           INTO v_ex_scope, v_ex_hash, v_ex_status, v_ex_resp
-          FROM idempotency_keys ik WHERE ik.key = p_idempotency_key;
+          FROM idempotency_keys ik WHERE ik.owner_id = p_user_id AND ik.key = p_idempotency_key;
         IF v_ex_scope <> 'open_account' OR v_ex_hash <> v_hash THEN
             RAISE EXCEPTION 'idempotency key reused with different parameters'
                 USING ERRCODE = 'check_violation';
@@ -282,7 +283,7 @@ BEGIN
 
     UPDATE idempotency_keys
        SET status = 'completed', response = jsonb_build_object('account_id', v_id)
-     WHERE key = p_idempotency_key;
+     WHERE owner_id = p_user_id AND key = p_idempotency_key;
 
     RETURN QUERY SELECT v_id, FALSE;
 END;

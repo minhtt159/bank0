@@ -41,7 +41,7 @@ gated action — there is no route→role middleware; the portal subrouter carri
 | Role | Can | Cannot |
 |------|-----|--------|
 | `auditor` | read everything: accounts, ledgers, transfers, reconcile, audit log | change anything |
-| `operator` | + create accounts, freeze/unfreeze, cancel *pending* transfers, post credits/withdrawals up to the maker-checker threshold | reverse posted transfers, post above-threshold moves directly (they route to Approvals), manage users |
+| `operator` | + create accounts, freeze/unfreeze, cancel *pending* transfers, post credits/withdrawals up to the maker-checker threshold, **create users + set a user's invite quota** (`canCreateUsers`) | reverse posted transfers, post above-threshold moves directly (they route to Approvals), other user management (roles, status) |
 | `admin` | + reverse posted transfers, approve maker-checker items (a different admin than the maker), manage all users | (nothing app-level; still audited) |
 | `customer` | no console access | — |
 
@@ -179,8 +179,11 @@ emits an `admin_actions` `dispute_raised` row — the flag-only fraud-engine sea
 auto-freeze).
 
 > **Admin-JSON RBAC.** The JSON admin API enforces roles **per handler**, not just
-> a valid session: money / account / dispute mutations require `canActOnMoney`,
-> user creation requires `canManageUsers`; reads stay open to any staff. See
+> a valid session: money / account / dispute mutations require `canActOnMoney`;
+> creating users and editing a user's invite quota
+> (`POST /console/users/{id}/invites`, audited as `set_invites`) require the
+> `canCreateUsers` gate (operator|admin); other user management (role, status)
+> stays admin-only (`canManageUsers`); reads stay open to any staff. See
 > [`10-security-review.md`](10-security-review.md).
 
 ---

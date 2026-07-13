@@ -4,8 +4,9 @@
 > They run against the API as-is — auth (login / refresh / rotation), accounts,
 > ledger, beneficiaries, transfers, disputes, and the guided-transfer suggestion
 > all work with no bank0-specific backend changes. **Now also shipped:**
-> self-registration + contact verification (`/auth/register`,
-> `/auth/verify-contact`, `/auth/resend-code`), customer account opening
+> invitation-gated self-registration + contact verification (`/auth/register`
+> takes a single-use `invitation_code`; `/auth/verify-contact`,
+> `/auth/resend-code`; issue codes via `/me/invitations`), customer account opening
 > (`POST /me/accounts`, server-minted IBAN), transfer-limit requests
 > (`POST /accounts/{id}/limit-requests` + the operator queue), and rail-ready
 > transfer ids (`uetr`, `end_to_end_id`) — see [`06-client-api.md`](06-client-api.md) §1.

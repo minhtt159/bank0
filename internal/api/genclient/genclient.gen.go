@@ -170,6 +170,27 @@ func (e EventType) Valid() bool {
 	}
 }
 
+// Defines values for InvitationStatus.
+const (
+	InvitationStatusConsumed InvitationStatus = "consumed"
+	InvitationStatusExpired  InvitationStatus = "expired"
+	InvitationStatusPending  InvitationStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the InvitationStatus enum.
+func (e InvitationStatus) Valid() bool {
+	switch e {
+	case InvitationStatusConsumed:
+		return true
+	case InvitationStatusExpired:
+		return true
+	case InvitationStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OpenAccountRequestKind.
 const (
 	Customer OpenAccountRequestKind = "customer"
@@ -499,25 +520,25 @@ func (e ListMyEventsParamsType) Valid() bool {
 
 // Defines values for ListMyTransfersParamsStatus.
 const (
-	ListMyTransfersParamsStatusCanceled ListMyTransfersParamsStatus = "canceled"
-	ListMyTransfersParamsStatusFailed   ListMyTransfersParamsStatus = "failed"
-	ListMyTransfersParamsStatusPending  ListMyTransfersParamsStatus = "pending"
-	ListMyTransfersParamsStatusPosted   ListMyTransfersParamsStatus = "posted"
-	ListMyTransfersParamsStatusReversed ListMyTransfersParamsStatus = "reversed"
+	Canceled ListMyTransfersParamsStatus = "canceled"
+	Failed   ListMyTransfersParamsStatus = "failed"
+	Pending  ListMyTransfersParamsStatus = "pending"
+	Posted   ListMyTransfersParamsStatus = "posted"
+	Reversed ListMyTransfersParamsStatus = "reversed"
 )
 
 // Valid indicates whether the value is a known member of the ListMyTransfersParamsStatus enum.
 func (e ListMyTransfersParamsStatus) Valid() bool {
 	switch e {
-	case ListMyTransfersParamsStatusCanceled:
+	case Canceled:
 		return true
-	case ListMyTransfersParamsStatusFailed:
+	case Failed:
 		return true
-	case ListMyTransfersParamsStatusPending:
+	case Pending:
 		return true
-	case ListMyTransfersParamsStatusPosted:
+	case Posted:
 		return true
-	case ListMyTransfersParamsStatusReversed:
+	case Reversed:
 		return true
 	default:
 		return false
@@ -609,6 +630,16 @@ type ChangePasswordRequest struct {
 
 	// RefreshToken Opaque refresh token of the session performing the change; its family is spared from revocation. Optional: if omitted, ALL families are revoked and the caller must re-login elsewhere.
 	RefreshToken *string `json:"refresh_token,omitempty"`
+}
+
+// CreateInvitationResponse defines model for CreateInvitationResponse.
+type CreateInvitationResponse struct {
+	// Code Single-use invitation code to share with an invitee.
+	Code      *string    `json:"code,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// InvitesRemaining Inviter's remaining lifetime budget after this mint.
+	InvitesRemaining *int `json:"invites_remaining,omitempty"`
 }
 
 // CreateTransferRequest defines model for CreateTransferRequest.
@@ -705,6 +736,20 @@ type Health struct {
 type IdResponse struct {
 	Id *openapi_types.UUID `json:"id,omitempty"`
 }
+
+// Invitation defines model for Invitation.
+type Invitation struct {
+	Code       string     `json:"code"`
+	ConsumedAt *time.Time `json:"consumed_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+
+	// Status Derived (never stored): consumed > expired > pending.
+	Status InvitationStatus `json:"status"`
+}
+
+// InvitationStatus Derived (never stored): consumed > expired > pending.
+type InvitationStatus string
 
 // LedgerEntry defines model for LedgerEntry.
 type LedgerEntry struct {
@@ -849,11 +894,14 @@ type RefreshRequest struct {
 
 // RegisterRequest At least one of email/phone_number is required (enforced server-side).
 type RegisterRequest struct {
-	Email       *string `json:"email,omitempty"`
-	FullName    string  `json:"full_name"`
-	Password    string  `json:"password"`
-	PhoneNumber *string `json:"phone_number,omitempty"`
-	Username    string  `json:"username"`
+	Email    *string `json:"email,omitempty"`
+	FullName string  `json:"full_name"`
+
+	// InvitationCode Single-use invitation code from an existing member.
+	InvitationCode string  `json:"invitation_code"`
+	Password       string  `json:"password"`
+	PhoneNumber    *string `json:"phone_number,omitempty"`
+	Username       string  `json:"username"`
 }
 
 // RegisterResponse defines model for RegisterResponse.
@@ -1031,6 +1079,9 @@ type User struct {
 	Email     *string             `json:"email,omitempty"`
 	FullName  *string             `json:"full_name,omitempty"`
 	Id        *openapi_types.UUID `json:"id,omitempty"`
+
+	// InvitesRemaining Lifetime invitation budget still available to the user.
+	InvitesRemaining *int `json:"invites_remaining,omitempty"`
 
 	// OnboardingStatus Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'.
 	OnboardingStatus *string    `json:"onboarding_status,omitempty"`
@@ -1310,7 +1361,7 @@ type ServerInterface interface {
 	// Rotate a refresh token for a new access + refresh token pair
 	// (POST /auth/refresh)
 	Refresh(w http.ResponseWriter, r *http.Request)
-	// Public self-registration. Creates a locked, pending-verification customer. Idempotent.
+	// Invitation-gated self-registration. Requires a valid invitation code; creates a locked, pending-verification customer. Idempotent.
 	// (POST /auth/register)
 	Register(w http.ResponseWriter, r *http.Request, params RegisterParams)
 	// Re-dispatch a verification code (cooldown-throttled)
@@ -1358,6 +1409,12 @@ type ServerInterface interface {
 	// Unread-event count for the caller (notification badge)
 	// (GET /me/events/unread)
 	CountUnreadEvents(w http.ResponseWriter, r *http.Request)
+	// List the caller's invitations (newest first; status is derived)
+	// (GET /me/invitations)
+	ListInvitations(w http.ResponseWriter, r *http.Request)
+	// Mint a single-use invitation code (spends one unit of the caller's lifetime budget)
+	// (POST /me/invitations)
+	CreateInvitation(w http.ResponseWriter, r *http.Request)
 	// Change the authenticated customer's password (revokes other sessions)
 	// (POST /me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
@@ -2146,6 +2203,34 @@ func (siw *ServerInterfaceWrapper) CountUnreadEvents(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListInvitations operation middleware
+func (siw *ServerInterfaceWrapper) ListInvitations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInvitations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateInvitation operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvitation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInvitation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangePassword operation middleware
 func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
@@ -2763,6 +2848,10 @@ func HandlerWithOptions(si ServerInterface, options GorillaServerOptions) http.H
 	r.HandleFunc(options.BaseURL+"/me/events/read", wrapper.MarkEventsRead).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/me/events/unread", wrapper.CountUnreadEvents).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/me/invitations", wrapper.ListInvitations).Methods(http.MethodGet)
+
+	r.HandleFunc(options.BaseURL+"/me/invitations", wrapper.CreateInvitation).Methods(http.MethodPost)
 
 	r.HandleFunc(options.BaseURL+"/me/password", wrapper.ChangePassword).Methods(http.MethodPost)
 

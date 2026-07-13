@@ -19,22 +19,12 @@
 > |------|--------|-----------------|
 > | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
 >
-> **Already shipped** (no longer tracked here; as-built in the reference docs):
-> self-service profile (`PATCH /me`), password change (`POST /me/password`),
-> sessions/devices (`GET`/`DELETE /me/sessions`), keyset ledger pagination + filters,
-> list-my-transfers (`GET /transfers`), disputes, guided-transfer v1
-> (`GET /transfers/suggestion` — the v2 "mule menu" in
-> [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) §5 supersedes it),
-> the e2e harness (Go split-mode, Worker proxy, Playwright PWA),
-> **self-registration v1** (`/auth/register` + contact verification + onboarding
-> state — §1's KYC continuation below remains open), **customer account opening +
-> limit requests** (`POST /me/accounts`, server-minted ISO IBANs, the operator
-> limit-request queue), the **`/me/events` notification feed** (phase 1, poll) +
-> **warning-ack evidence** + the **server-side CoP verdict**, **TOTP MFA +
-> step-up** (as-built: [`../06-client-api.md`](../06-client-api.md) §6), and the hardening
-> roadmap's Wave-0 idempotency items (ERRCODE→HTTP map, replay header, stale-key
-> sweep, `uetr`/`end_to_end_id`). See
-> [`../06-client-api.md`](../06-client-api.md) / [`../05-admin-ui.md`](../05-admin-ui.md).
+> **Already shipped** items are no longer re-listed here — the as-built truth lives in
+> the reference docs ([`../06-client-api.md`](../06-client-api.md) /
+> [`../05-admin-ui.md`](../05-admin-ui.md)) and `db/migrations/`. For the fraud/payment
+> hardening roadmap specifically, the shipped-vs-open status (Waves 0–2, the Wave-3
+> subset, per-owner idempotency, guided-transfer v2, and what remains) is tracked at the
+> top of [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md).
 >
 > The gap backlog and BFF decision are in
 > [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md); the auth/MFA design in
@@ -82,6 +72,11 @@ onboarded".)
 `verification_challenges` table (hash-at-rest codes), email/phone verification,
 DB cooldown + Go IP rate-limit. This section is the **KYC continuation** beyond
 that v1.
+
+**Update (2026-07-13):** registration is now **invitation-gated** — `/auth/register`
+requires a single-use `invitation_code` and each verified customer mints codes from a
+lifetime `invites_remaining` quota (as-built:
+[`../06-client-api.md`](../06-client-api.md) §1). Open signup is no longer offered.
 
 **Extends existing domain** (users lifecycle) — *not* a new domain. KYC document
 capture is the one piece that is genuinely new and best **outsourced**.

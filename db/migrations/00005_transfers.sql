@@ -76,15 +76,23 @@ CREATE TABLE ledger_entries (
 -- ─────────────────────────────────────────────────────────────────────────────
 -- idempotency_keys  (DB-enforced replay safety for money moves)
 -- ─────────────────────────────────────────────────────────────────────────────
+-- owner_id namespaces the key to the owning principal (the customer user id on the
+-- client money/account paths; the all-zero sentinel for system/anonymous/operator
+-- ops). The PK is (owner_id, key) so one customer's key can never collide with, or
+-- surface the stored result of, another's — replay/fingerprint semantics still hold
+-- WITHIN a namespace, but the same raw key across two different owners is two
+-- independent claims.
 CREATE TABLE idempotency_keys (
-    key          TEXT PRIMARY KEY,
+    owner_id     UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+    key          TEXT NOT NULL,
     scope        TEXT NOT NULL,
     request_hash TEXT NOT NULL,
     status       ik_status NOT NULL DEFAULT 'in_progress',
     transfer_id  UUID REFERENCES transfers(id),
     response     JSONB,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days'
+    expires_at   TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days',
+    PRIMARY KEY (owner_id, key)
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -130,7 +138,8 @@ DECLARE
 BEGIN
     SELECT balance_minor INTO v_balance FROM accounts WHERE id = NEW.account_id FOR UPDATE;
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'ledger entry references missing account %', NEW.account_id;
+        RAISE EXCEPTION 'ledger entry references missing account %', NEW.account_id
+            USING ERRCODE = 'XX000';
     END IF;
 
     v_balance := v_balance + v_delta;
@@ -173,7 +182,11 @@ CREATE OR REPLACE FUNCTION request_transfer(
     p_description     TEXT          DEFAULT '',
     p_kind            transfer_kind DEFAULT 'transfer',
     p_hold_ttl        INTERVAL      DEFAULT INTERVAL '15 minutes',
-    p_end_to_end_id   VARCHAR(35)   DEFAULT NULL
+    p_end_to_end_id   VARCHAR(35)   DEFAULT NULL,
+    -- Owning principal for the idempotency namespace. The client path threads the
+    -- authenticated subject (via client_transfer -> transfer); operator/system
+    -- callers keep the all-zero sentinel and thus the old global semantics.
+    p_caller          UUID          DEFAULT '00000000-0000-0000-0000-000000000000'
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
 DECLARE
     v_hash      TEXT := encode(digest(
@@ -191,13 +204,14 @@ BEGIN
         RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = 'check_violation';
     END IF;
 
-    -- (a) Idempotency gate: first writer wins.
-    INSERT INTO idempotency_keys (key, scope, request_hash, status)
-    VALUES (p_idempotency_key, 'transfer', v_hash, 'in_progress')
-    ON CONFLICT (key) DO NOTHING;
+    -- (a) Idempotency gate: first writer wins, within the caller's namespace.
+    INSERT INTO idempotency_keys (owner_id, key, scope, request_hash, status)
+    VALUES (p_caller, p_idempotency_key, 'transfer', v_hash, 'in_progress')
+    ON CONFLICT (owner_id, key) DO NOTHING;
 
     IF NOT FOUND THEN
-        SELECT * INTO v_existing FROM idempotency_keys WHERE key = p_idempotency_key;
+        SELECT * INTO v_existing FROM idempotency_keys
+         WHERE owner_id = p_caller AND key = p_idempotency_key;
         IF v_existing.request_hash <> v_hash THEN
             RAISE EXCEPTION 'idempotency key % reused with different parameters', p_idempotency_key
                 USING ERRCODE = 'check_violation';
@@ -261,7 +275,7 @@ BEGIN
     UPDATE idempotency_keys
        SET status = 'completed', transfer_id = v_id,
            response = jsonb_build_object('transfer_id', v_id, 'status', 'pending')
-     WHERE key = p_idempotency_key;
+     WHERE owner_id = p_caller AND key = p_idempotency_key;
 
     RETURN QUERY SELECT v_id, 'pending'::transfer_status, FALSE;
 END;
@@ -360,14 +374,17 @@ CREATE OR REPLACE FUNCTION transfer(
     p_amount_minor    BIGINT,
     p_description     TEXT          DEFAULT '',
     p_kind            transfer_kind DEFAULT 'transfer',
-    p_end_to_end_id   VARCHAR(35)   DEFAULT NULL
+    p_end_to_end_id   VARCHAR(35)   DEFAULT NULL,
+    -- Owning principal for the idempotency namespace; forwarded to request_transfer.
+    -- Sentinel (system/operator) by default; client_transfer passes the subject.
+    p_caller          UUID          DEFAULT '00000000-0000-0000-0000-000000000000'
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
 DECLARE v_id UUID; v_status transfer_status; v_replay BOOLEAN;
 BEGIN
     SELECT r.transfer_id, r.status, r.was_replay INTO v_id, v_status, v_replay
     FROM request_transfer(p_idempotency_key, p_debit_account, p_credit_account,
                           p_amount_minor, p_description, p_kind,
-                          INTERVAL '15 minutes', p_end_to_end_id) r;
+                          INTERVAL '15 minutes', p_end_to_end_id, p_caller) r;
 
     IF NOT v_replay AND v_status = 'pending' THEN
         v_status := post_transfer(v_id);
@@ -398,12 +415,14 @@ DECLARE
     v_cp       accounts%ROWTYPE;
     v_hash     TEXT := encode(digest('reverse|' || p_transfer_id::text, 'sha256'), 'hex');
 BEGIN
-    INSERT INTO idempotency_keys (key, scope, request_hash, status)
-    VALUES (p_idempotency_key, 'reversal', v_hash, 'in_progress')
-    ON CONFLICT (key) DO NOTHING;
+    -- Operator clawback: keeps the all-zero sentinel namespace (global semantics).
+    INSERT INTO idempotency_keys (owner_id, key, scope, request_hash, status)
+    VALUES ('00000000-0000-0000-0000-000000000000', p_idempotency_key, 'reversal', v_hash, 'in_progress')
+    ON CONFLICT (owner_id, key) DO NOTHING;
 
     IF NOT FOUND THEN
-        SELECT * INTO v_existing FROM idempotency_keys WHERE key = p_idempotency_key;
+        SELECT * INTO v_existing FROM idempotency_keys
+         WHERE owner_id = '00000000-0000-0000-0000-000000000000' AND key = p_idempotency_key;
         IF v_existing.request_hash <> v_hash THEN
             RAISE EXCEPTION 'idempotency key % reused with different parameters', p_idempotency_key
                 USING ERRCODE = 'check_violation';
@@ -440,7 +459,8 @@ BEGIN
            (v_rev_id, v_orig.debit_account_id,  'credit', v_orig.amount_minor, v_orig.currency, 0);
 
     UPDATE transfers SET status = 'reversed' WHERE id = p_transfer_id;
-    UPDATE idempotency_keys SET status = 'completed', transfer_id = v_rev_id WHERE key = p_idempotency_key;
+    UPDATE idempotency_keys SET status = 'completed', transfer_id = v_rev_id
+     WHERE owner_id = '00000000-0000-0000-0000-000000000000' AND key = p_idempotency_key;
     RETURN v_rev_id;
 END;
 $$ LANGUAGE plpgsql;
@@ -460,7 +480,7 @@ CREATE OR REPLACE FUNCTION deposit(
 DECLARE v_ext UUID; v_id UUID;
 BEGIN
     SELECT id INTO v_ext FROM accounts WHERE system_code = 'EXTERNAL_CLEARING';
-    IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)' USING ERRCODE = 'XX000'; END IF;
     SELECT t.transfer_id INTO v_id
     FROM transfer(p_idempotency_key, v_ext, p_account_id, p_amount_minor, p_description, 'deposit') t;
     RETURN v_id;
@@ -476,7 +496,7 @@ CREATE OR REPLACE FUNCTION withdraw(
 DECLARE v_ext UUID; v_id UUID;
 BEGIN
     SELECT id INTO v_ext FROM accounts WHERE system_code = 'EXTERNAL_CLEARING';
-    IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)'; END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)' USING ERRCODE = 'XX000'; END IF;
     SELECT t.transfer_id INTO v_id
     FROM transfer(p_idempotency_key, p_account_id, v_ext, p_amount_minor, p_description, 'withdrawal') t;
     RETURN v_id;
@@ -514,10 +534,13 @@ CREATE OR REPLACE FUNCTION client_transfer(
 ) RETURNS TABLE (transfer_id UUID, status transfer_status, was_replay BOOLEAN) AS $$
 BEGIN
     PERFORM assert_caller_owns(p_caller_subject, p_debit_account);
+    -- Namespace the idempotency key to the authenticated subject so one customer's
+    -- key can never collide with another's (Rec 3).
     RETURN QUERY
         SELECT t.transfer_id, t.status, t.was_replay
         FROM transfer(p_idempotency_key, p_debit_account, p_credit_account,
-                      p_amount_minor, p_description, 'transfer', p_end_to_end_id) t;
+                      p_amount_minor, p_description, 'transfer', p_end_to_end_id,
+                      p_caller_subject) t;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -563,10 +586,10 @@ DROP FUNCTION IF EXISTS assert_caller_owns(UUID, UUID);
 DROP FUNCTION IF EXISTS withdraw(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS reverse_transfer(UUID, TEXT, TEXT);
-DROP FUNCTION IF EXISTS transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, VARCHAR);
+DROP FUNCTION IF EXISTS transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, VARCHAR, UUID);
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS post_transfer(UUID);
-DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR);
+DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR, UUID);
 -- +goose StatementEnd
 DROP TRIGGER IF EXISTS trg_ledger_immutable     ON ledger_entries;
 DROP TRIGGER IF EXISTS trg_ledger_apply_balance ON ledger_entries;

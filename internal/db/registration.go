@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,7 @@ type RegisterParams struct {
 	TokenHash      string
 	CodeHash       string
 	VerifyToken    string
+	InvitationCode string
 }
 
 // RegisterResult mirrors register_user's RETURNS TABLE. Response is the stored
@@ -40,10 +42,30 @@ func (p *Postgres) RegisterUser(ctx context.Context, a RegisterParams) (Register
 	var r RegisterResult
 	err := p.Pool.QueryRow(ctx,
 		`SELECT user_id, was_replay, response
-		   FROM register_user($1, $2::citext, $3, $4, $5::citext, $6, $7::verification_channel, $8, $9, $10, $11)`,
+		   FROM register_user($1, $2::citext, $3, $4, $5::citext, $6, $7::verification_channel, $8, $9, $10, $11, $12)`,
 		a.IdempotencyKey, a.Username, a.Password, a.FullName, a.Email, a.PhoneNumber,
-		a.Channel, a.Destination, a.TokenHash, a.CodeHash, a.VerifyToken).
+		a.Channel, a.Destination, a.TokenHash, a.CodeHash, a.VerifyToken, a.InvitationCode).
 		Scan(&r.UserID, &r.WasReplay, &r.Response)
+	return r, err
+}
+
+// InvitationResult mirrors create_invitation's RETURNS TABLE.
+type InvitationResult struct {
+	Code             string
+	ExpiresAt        time.Time
+	InvitesRemaining int
+}
+
+// CreateInvitation mints one single-use invitation for the inviter, decrementing
+// their lifetime quota atomically. create_invitation is RETURNS TABLE -> hand-
+// written pgx (per the Transfer/RotateRefreshToken convention). Raises P0001
+// (->404) for an unknown inviter, 42501 (->403) if not verified, 23514 "invitation
+// limit" (->409) when the budget is exhausted.
+func (p *Postgres) CreateInvitation(ctx context.Context, inviter uuid.UUID) (InvitationResult, error) {
+	var r InvitationResult
+	err := p.Pool.QueryRow(ctx,
+		`SELECT code, expires_at, invites_remaining FROM create_invitation($1::uuid)`, inviter).
+		Scan(&r.Code, &r.ExpiresAt, &r.InvitesRemaining)
 	return r, err
 }
 

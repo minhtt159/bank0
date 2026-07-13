@@ -555,7 +555,7 @@ BEGIN
         END IF;
         IF v_payout > 0 THEN
             SELECT id INTO v_ext FROM accounts WHERE system_code = 'EXTERNAL_CLEARING';
-            IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)'; END IF;
+            IF NOT FOUND THEN RAISE EXCEPTION 'EXTERNAL_CLEARING system account missing (run seed)' USING ERRCODE = 'XX000'; END IF;
             PERFORM transfer('dispute-reimburse-' || p_dispute_id::text,
                              v_ext, v_t.debit_account_id, v_payout,
                              'dispute reimbursement ' || p_dispute_id::text, 'adjustment');

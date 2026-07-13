@@ -29,6 +29,9 @@ CREATE TABLE users (
     onboarding_status onboarding_status NOT NULL DEFAULT 'active',
     email_verified_at TIMESTAMPTZ,
     phone_verified_at TIMESTAMPTZ,
+    -- Invitation quota (invitation-gated registration). LIFETIME budget: minting an
+    -- invitation decrements it and an expired/unused code never refunds it.
+    invites_remaining INT NOT NULL DEFAULT 10 CHECK (invites_remaining >= 0),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (email IS NULL OR email ~* '^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
@@ -112,6 +115,26 @@ CREATE TABLE verification_challenges (
 CREATE UNIQUE INDEX uq_verif_pending ON verification_challenges (user_id, channel)
     WHERE status = 'pending';
 CREATE INDEX idx_verif_expiry ON verification_challenges (expires_at) WHERE status = 'pending';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- invitations  (invitation-gated registration)
+-- A verified customer mints a single-use code (create_invitation), spending one
+-- unit of their lifetime users.invites_remaining budget. register_user consumes
+-- it. Status is DERIVED, never stored: consumed (consumed_at set), else expired
+-- (expires_at < now()), else pending. inviter_id CASCADEs (the invites die with
+-- the account); invitee_id is SET NULL so a consumed row survives its user's
+-- deletion as an audit trace.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE invitations (
+    id          UUID PRIMARY KEY DEFAULT uuidv7(),
+    code        TEXT NOT NULL UNIQUE,
+    inviter_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    invitee_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '14 days',
+    consumed_at TIMESTAMPTZ
+);
+CREATE INDEX idx_invitations_inviter ON invitations (inviter_id);
 
 -- +goose StatementBegin
 
@@ -295,7 +318,8 @@ CREATE OR REPLACE FUNCTION register_user(
     p_destination     TEXT,
     p_token_hash      TEXT,
     p_code_hash       TEXT,
-    p_verify_token    TEXT
+    p_verify_token    TEXT,
+    p_invite_code     TEXT
 ) RETURNS TABLE (user_id UUID, was_replay BOOLEAN, response JSONB) AS $$
 DECLARE
     -- scalar vars, not idempotency_keys%ROWTYPE: %ROWTYPE resolves at CREATE
@@ -307,22 +331,32 @@ DECLARE
     v_ex_resp   JSONB;
     v_id        UUID;
     v_resp      JSONB;
+    v_inv       RECORD;
 BEGIN
     IF p_idempotency_key IS NULL OR p_idempotency_key = '' THEN
         RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = 'check_violation';
     END IF;
+    -- The invite code is part of the fingerprint: a replay of the same key with a
+    -- DIFFERENT code is a parameter mismatch (-> 23514), not a silent success.
     v_hash := encode(digest(
         COALESCE(p_username::text,'') || '|' || COALESCE(p_email::text,'') || '|' ||
-        COALESCE(p_phone_number,'')   || '|' || COALESCE(p_full_name,''), 'sha256'), 'hex');
+        COALESCE(p_phone_number,'')   || '|' || COALESCE(p_full_name,'')   || '|' ||
+        COALESCE(p_invite_code,''), 'sha256'), 'hex');
 
-    INSERT INTO idempotency_keys (key, scope, request_hash, status)
-    VALUES (p_idempotency_key, 'register', v_hash, 'in_progress')
-    ON CONFLICT (key) DO NOTHING;
+    -- Pre-auth: there is no authenticated principal yet. Registration claims live in
+    -- a DEDICATED sentinel namespace, 0…01 — distinct from the all-zero UUID, which
+    -- is the money/system namespace. Namespacing them apart keeps a client-chosen
+    -- register key from squatting a deterministic system transfer key (e.g. the
+    -- 'dispute-reimburse-<id>' keys minted under the all-zero owner).
+    INSERT INTO idempotency_keys (owner_id, key, scope, request_hash, status)
+    VALUES ('00000000-0000-0000-0000-000000000001', p_idempotency_key, 'register', v_hash, 'in_progress')
+    ON CONFLICT (owner_id, key) DO NOTHING;
 
     IF NOT FOUND THEN
         SELECT ik.scope, ik.request_hash, ik.status, ik.response
           INTO v_ex_scope, v_ex_hash, v_ex_status, v_ex_resp
-          FROM idempotency_keys ik WHERE ik.key = p_idempotency_key;
+          FROM idempotency_keys ik
+         WHERE ik.owner_id = '00000000-0000-0000-0000-000000000001' AND ik.key = p_idempotency_key;
         IF v_ex_scope <> 'register' OR v_ex_hash <> v_hash THEN
             RAISE EXCEPTION 'idempotency key reused with different parameters'
                 USING ERRCODE = 'check_violation';
@@ -345,12 +379,33 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
+    -- Invitation gate (fresh path only): the code must exist, be unconsumed and
+    -- unexpired. Locked FOR UPDATE so two concurrent fresh registrations can't
+    -- consume the same single-use code.
+    IF p_invite_code IS NULL OR p_invite_code = '' THEN
+        RAISE EXCEPTION 'invitation code required' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT i.id, i.inviter_id, i.consumed_at, i.expires_at INTO v_inv
+      FROM invitations i WHERE i.code = p_invite_code FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invitation code not found';   -- P0001 -> 404
+    END IF;
+    IF v_inv.consumed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'invitation code already used' USING ERRCODE = 'check_violation'; -- -> 409
+    END IF;
+    IF v_inv.expires_at < now() THEN
+        RAISE EXCEPTION 'invitation code expired' USING ERRCODE = 'check_violation';      -- -> 409
+    END IF;
+
     INSERT INTO users (username, password_hash, full_name, email, phone_number,
                        role, status, onboarding_status)
     VALUES (p_username, crypt(p_password, gen_salt('bf', 10)), p_full_name,
             NULLIF(p_email, ''), NULLIF(p_phone_number, ''),
             'customer', 'locked', 'pending_verification')
     RETURNING id INTO v_id;
+
+    -- Burn the invitation onto the new user (single-use; the row locked above).
+    UPDATE invitations SET consumed_at = now(), invitee_id = v_id WHERE id = v_inv.id;
 
     PERFORM create_verification_challenge(v_id, p_channel, p_destination,
                                           p_token_hash, p_code_hash);
@@ -361,9 +416,57 @@ BEGIN
         'verify_channel', p_channel,
         'verify_token', p_verify_token);
     UPDATE idempotency_keys SET status = 'completed', response = v_resp
-     WHERE key = p_idempotency_key;
+     WHERE owner_id = '00000000-0000-0000-0000-000000000001' AND key = p_idempotency_key;
 
     RETURN QUERY SELECT v_id, FALSE, v_resp;
+END;
+$$ LANGUAGE plpgsql;
+
+-- create_invitation: mint one single-use invitation for a verified customer,
+-- spending one unit of their lifetime quota atomically (the inviter row is locked
+-- FOR UPDATE so concurrent calls can't overspend). Returns the code, its expiry,
+-- and the caller's remaining balance.
+--   * unknown inviter          -> P0001           (-> 404)
+--   * not verified / not active -> 42501           (-> 403)
+--   * quota exhausted          -> check_violation  (-> 409, "invitation limit")
+-- Quota is LIFETIME: a code that later EXPIRES unused does NOT refund the
+-- decrement (bounds total invites per user; see users.invites_remaining).
+CREATE OR REPLACE FUNCTION create_invitation(p_inviter UUID)
+RETURNS TABLE(code TEXT, expires_at TIMESTAMPTZ, invites_remaining INT) AS $$
+DECLARE
+    v_status     user_status;
+    v_onboarding onboarding_status;
+    v_remaining  INT;
+    v_code       TEXT;
+    v_expires    TIMESTAMPTZ;
+BEGIN
+    SELECT u.status, u.onboarding_status, u.invites_remaining
+      INTO v_status, v_onboarding, v_remaining
+      FROM users u WHERE u.id = p_inviter FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'user not found';   -- P0001 -> 404
+    END IF;
+
+    IF NOT (v_status = 'active' AND v_onboarding IN ('verified', 'active')) THEN
+        RAISE EXCEPTION 'account must be verified to create invitations'
+            USING ERRCODE = '42501';        -- -> 403
+    END IF;
+
+    IF v_remaining <= 0 THEN
+        RAISE EXCEPTION 'invitation limit reached' USING ERRCODE = 'check_violation'; -- -> 409
+    END IF;
+
+    -- base64url-ish code from 12 random bytes: translate +/ to -_ and strip = pad.
+    v_code := translate(encode(gen_random_bytes(12), 'base64'), '+/=', '-_');
+
+    INSERT INTO invitations (code, inviter_id)
+    VALUES (v_code, p_inviter)
+    RETURNING invitations.expires_at INTO v_expires;
+
+    -- qualify the RHS: the RETURNS TABLE OUT param 'invites_remaining' shadows the column.
+    UPDATE users SET invites_remaining = users.invites_remaining - 1 WHERE id = p_inviter;
+
+    RETURN QUERY SELECT v_code, v_expires, v_remaining - 1;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -902,7 +1005,8 @@ DROP FUNCTION IF EXISTS mfa_enabled(UUID);
 DROP FUNCTION IF EXISTS expire_verification_challenges();
 DROP FUNCTION IF EXISTS record_failed_verification(TEXT);
 DROP FUNCTION IF EXISTS verify_contact(TEXT, TEXT);
-DROP FUNCTION IF EXISTS register_user(TEXT, CITEXT, TEXT, TEXT, CITEXT, VARCHAR, verification_channel, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS create_invitation(UUID);
+DROP FUNCTION IF EXISTS register_user(TEXT, CITEXT, TEXT, TEXT, CITEXT, VARCHAR, verification_channel, TEXT, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS create_verification_challenge(UUID, verification_channel, TEXT, TEXT, TEXT, INTERVAL, INTERVAL);
 DROP FUNCTION IF EXISTS cleanup_refresh_tokens();
 DROP FUNCTION IF EXISTS revoke_refresh_family_scoped(UUID, UUID);
@@ -923,8 +1027,10 @@ DROP FUNCTION IF EXISTS create_user(CITEXT, TEXT, TEXT, CITEXT, VARCHAR, user_ro
 DROP TABLE IF EXISTS mfa_attempts;
 DROP TABLE IF EXISTS mfa_recovery_codes;
 DROP TABLE IF EXISTS mfa_credentials;
+DROP TABLE IF EXISTS invitations;                     -- FK to users; drop before users
 DROP TABLE IF EXISTS verification_challenges;
 DROP TABLE IF EXISTS refresh_tokens;
 DROP TABLE IF EXISTS sessions;
+ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS invites_remaining;
 DROP TABLE IF EXISTS users;
 -- +goose StatementEnd

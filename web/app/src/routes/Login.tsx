@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
 import { setAuth, isAuthed } from "../store/auth";
+import { takeNotice } from "../lib/onboarding";
 import { ErrorBanner } from "../lib/feedback";
 
 export function Login() {
@@ -14,6 +15,8 @@ export function Login() {
   const [password, setP] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // One-shot success notice handed over from the verify flow (consumed on read).
+  const [notice] = useState(() => takeNotice());
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -34,6 +37,9 @@ export function Login() {
     <div class="login-wrap">
       <div class="logo">bank0</div>
       <form onSubmit={submit}>
+        {notice && (
+          <p class="muted center" role="status" aria-live="polite" style="padding:0 0 4px">{notice}</p>
+        )}
         {err && <ErrorBanner>{err}</ErrorBanner>}
         <label for="u">Username</label>
         <input id="u" autocomplete="username" value={username}
@@ -45,6 +51,9 @@ export function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
+      <p class="center" style="padding:20px 0 0">
+        <a class="muted" href="/register">Create account</a>
+      </p>
     </div>
   );
 }

@@ -397,6 +397,56 @@ func TestWithdrawAndMakerCheckerWithdrawal(t *testing.T) {
 	reconcileClean(t, pg)
 }
 
+// TestMakerCheckerRejectReleasesHold is the reject leg of 4-eyes (next to the
+// approve path in TestMakerCheckerFourEyes): a staged above-threshold withdrawal
+// holds funds; a SECOND operator rejects it; the hold is released (available back
+// to the full ledger balance), the transfer lands in a terminal non-posted state,
+// and no money moved.
+func TestMakerCheckerRejectReleasesHold(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	acct := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, acct, 10_000)
+
+	maker := mkCustomer(t, pg)
+	checker := mkCustomer(t, pg)
+
+	// Stage a withdrawal via the maker-checker entrypoint: a PENDING transfer + a
+	// hold that reserves the funds (available drops), plus the approval-queue row —
+	// all in one txn. The ledger balance is unchanged while it sits pending.
+	mc, err := pg.RequestMoneyWithApproval(ctx, maker, uuid.NewString(), acct, 5_000,
+		sqlc.TransferKindWithdrawal, "big wd", nil)
+	if err != nil {
+		t.Fatalf("request_money_with_approval: %v", err)
+	}
+	if led, avail := balance(t, pg, acct); led != 10_000 || avail != 5_000 {
+		t.Fatalf("staged withdrawal: ledger=%d available=%d, want 10000/5000", led, avail)
+	}
+
+	// A second operator REJECTS: cancel_transfer releases the hold, mark handled.
+	if _, err := pg.Queries.RejectRequest(ctx, sqlc.RejectRequestParams{
+		RequestID: mc.RequestID, Approver: checker, Reason: "declined",
+	}); err != nil {
+		t.Fatalf("reject_request: %v", err)
+	}
+
+	// Hold released: available is back to the full ledger balance; ledger unchanged.
+	if led, avail := balance(t, pg, acct); led != 10_000 || avail != 10_000 {
+		t.Errorf("after reject ledger=%d available=%d, want 10000/10000", led, avail)
+	}
+	// The transfer is in a terminal, non-posted state.
+	if got, _ := pg.Queries.GetTransfer(ctx, mc.TransferID); got.Status != sqlc.TransferStatusCanceled {
+		t.Errorf("rejected transfer status = %s, want canceled", got.Status)
+	}
+	// Re-resolving an already-handled request is refused (23514 'already handled').
+	if _, err := pg.Queries.RejectRequest(ctx, sqlc.RejectRequestParams{
+		RequestID: mc.RequestID, Approver: checker, Reason: "again",
+	}); sqlState(err) != "23514" {
+		t.Errorf("double-reject sqlstate = %q, want 23514", sqlState(err))
+	}
+	reconcileClean(t, pg)
+}
+
 // testTransfer / testRequestTransfer are TEST-ONLY shims over the raw money
 // PL/pgSQL. Production has exactly one Go transfer writer (ClientTransfer,
 // ownership-enforcing); these exist so concurrency/lifecycle tests can drive

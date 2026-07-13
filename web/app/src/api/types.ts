@@ -17,6 +17,60 @@ export interface User {
   phone_number?: string;
   role: string;
   status: string;
+  onboarding_status?: string;
+  // Lifetime invitation budget still available to this user (drives /invite).
+  invites_remaining?: number;
+}
+
+// Invitation-gated self-registration. The verification code itself is delivered
+// out-of-band (email/SMS) and never appears in a response — only the opaque
+// verify_token, which the client stashes to drive /auth/verify-contact.
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  full_name: string;
+  email?: string;
+  phone_number?: string;
+  invitation_code: string;
+}
+
+export interface RegisterResponse {
+  user_id: string;
+  onboarding_status: string;
+  verify_channel: "email" | "phone";
+  verify_token: string;
+}
+
+export interface VerifyContactRequest {
+  verify_token: string;
+  code: string;
+}
+
+export interface VerifyContactResponse {
+  user_id: string;
+  onboarding_status: string;
+  channel: "email" | "phone";
+  login_ready: boolean;
+}
+
+export interface ResendCodeRequest {
+  verify_token: string;
+}
+
+export interface CreateInvitationResponse {
+  code: string;
+  expires_at: string;
+  invites_remaining: number;
+}
+
+export type InvitationStatus = "pending" | "consumed" | "expired";
+
+export interface Invitation {
+  code: string;
+  status: InvitationStatus;
+  created_at: string;
+  expires_at: string;
+  consumed_at?: string | null;
 }
 
 export interface Account {

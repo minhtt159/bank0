@@ -377,7 +377,174 @@ func TestChangePasswordPolicy(t *testing.T) {
 	}
 }
 
+// --- revoke_refresh_token single-session logout -------------------------------
+
+// TestRevokeRefreshTokenSingleSession pins single-session logout: revoking ONE
+// token (family) kills exactly that session — a later rotate of the revoked token
+// is refused as reuse (28000) — while a sibling family issued to the same user keeps
+// rotating normally. This is what makes "log out this device" not "log out
+// everywhere".
+func TestRevokeRefreshTokenSingleSession(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	user := mkCustomer(t, pg)
+
+	hashA, hashB := uniqHex(32), uniqHex(32)
+	famA, err := pg.IssueRefreshToken(ctx, user, hashA, 3600, "ua", "1.2.3.4", "laptop")
+	if err != nil {
+		t.Fatalf("issue family A: %v", err)
+	}
+	famB, err := pg.IssueRefreshToken(ctx, user, hashB, 3600, "ua", "1.2.3.4", "phone")
+	if err != nil {
+		t.Fatalf("issue family B: %v", err)
+	}
+	if famA == famB {
+		t.Fatal("two logins must open two distinct families")
+	}
+
+	// Single-session logout of family A.
+	if err := pg.RevokeRefreshToken(ctx, hashA); err != nil {
+		t.Fatalf("revoke_refresh_token: %v", err)
+	}
+
+	// A: rotating the revoked token is refused as reuse (28000).
+	var u, f uuid.UUID
+	err = pg.Pool.QueryRow(ctx,
+		`SELECT user_id, family_id FROM rotate_refresh_token($1,$2,$3,$4,$5,$6)`,
+		hashA, uniqHex(32), 3600, 86400*30, "ua", "1.2.3.4").Scan(&u, &f)
+	if got := sqlstate(err); got != "28000" {
+		t.Errorf("rotate of revoked token SQLSTATE = %q, want 28000; err=%v", got, err)
+	}
+
+	// B: the sibling family still rotates cleanly.
+	if err := pg.Pool.QueryRow(ctx,
+		`SELECT user_id, family_id FROM rotate_refresh_token($1,$2,$3,$4,$5,$6)`,
+		hashB, uniqHex(32), 3600, 86400*30, "ua", "1.2.3.4").Scan(&u, &f); err != nil {
+		t.Fatalf("rotate sibling family B: %v", err)
+	}
+	if u != user || f != famB {
+		t.Errorf("sibling rotate returned user=%s fam=%s, want %s/%s", u, f, user, famB)
+	}
+}
+
+// --- validate_session lifecycle ----------------------------------------------
+
+// TestValidateSession: a live session validates (returning its user); an expired
+// one and a revoked (deleted) one both fail closed with no rows.
+func TestValidateSession(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	username, id := mkStaff(t, pg, "operator", "operatorpassword")
+
+	// Valid: a fresh session validates and returns its user.
+	live := uniqHex(32)
+	if _, err := pg.CreateStaffSession(ctx, username, "operatorpassword", live, 900, "ua", "1.2.3.4"); err != nil {
+		t.Fatalf("create live session: %v", err)
+	}
+	if su, ok, err := pg.ValidateSession(ctx, live, 900); err != nil || !ok || su.UserID != id {
+		t.Fatalf("validate live session: ok=%v user=%s err=%v, want ok=true user=%s", ok, su.UserID, err, id)
+	}
+
+	// Expired: backdate expires_at into the past -> validate returns no rows.
+	expired := uniqHex(32)
+	if _, err := pg.CreateStaffSession(ctx, username, "operatorpassword", expired, 900, "ua", "1.2.3.4"); err != nil {
+		t.Fatalf("create session to expire: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx,
+		`UPDATE sessions SET expires_at = now() - interval '1 hour' WHERE id = $1`, expired); err != nil {
+		t.Fatalf("backdate session: %v", err)
+	}
+	if _, ok, err := pg.ValidateSession(ctx, expired, 900); err != nil || ok {
+		t.Errorf("expired session ok=%v err=%v, want ok=false", ok, err)
+	}
+
+	// Revoked: revoke_session deletes the row -> validate fails closed.
+	revoked := uniqHex(32)
+	if _, err := pg.CreateStaffSession(ctx, username, "operatorpassword", revoked, 900, "ua", "1.2.3.4"); err != nil {
+		t.Fatalf("create session to revoke: %v", err)
+	}
+	if err := pg.RevokeSession(ctx, revoked); err != nil {
+		t.Fatalf("revoke_session: %v", err)
+	}
+	if _, ok, err := pg.ValidateSession(ctx, revoked, 900); err != nil || ok {
+		t.Errorf("revoked session ok=%v err=%v, want ok=false", ok, err)
+	}
+}
+
+// --- maintenance sweeps -------------------------------------------------------
+
+// TestCleanupSessionsAndRefreshTokens: the maintenance sweeps reap stale rows while
+// leaving live ones intact. cleanup_sessions drops expired sessions; cleanup_refresh_tokens
+// drops tokens long past their idle expiry (grace: 1 day). A fresh row of each kind
+// survives both sweeps.
+func TestCleanupSessionsAndRefreshTokens(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	user := mkCustomer(t, pg)
+
+	// --- sessions: fresh survives, expired reaped ---
+	freshSess := uniqHex(32)
+	if _, err := pg.Pool.Exec(ctx,
+		`INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')`,
+		freshSess, user); err != nil {
+		t.Fatalf("insert fresh session: %v", err)
+	}
+	staleSess := uniqHex(32)
+	if _, err := pg.Pool.Exec(ctx,
+		`INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, now() - interval '1 hour')`,
+		staleSess, user); err != nil {
+		t.Fatalf("insert stale session: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `SELECT cleanup_sessions()`); err != nil {
+		t.Fatalf("cleanup_sessions: %v", err)
+	}
+	if !rowExists(t, pg, `SELECT 1 FROM sessions WHERE id = $1`, freshSess) {
+		t.Error("cleanup_sessions reaped a live session")
+	}
+	if rowExists(t, pg, `SELECT 1 FROM sessions WHERE id = $1`, staleSess) {
+		t.Error("cleanup_sessions left an expired session behind")
+	}
+
+	// --- refresh tokens: fresh survives, long-expired reaped ---
+	freshTok := uniqHex(32)
+	if _, err := pg.IssueRefreshToken(ctx, user, freshTok, 3600, "ua", "1.2.3.4", "live"); err != nil {
+		t.Fatalf("issue fresh token: %v", err)
+	}
+	staleTok := uniqHex(32)
+	if _, err := pg.IssueRefreshToken(ctx, user, staleTok, 3600, "ua", "1.2.3.4", "stale"); err != nil {
+		t.Fatalf("issue stale token: %v", err)
+	}
+	// Push it past the 1-day idle-expiry grace cleanup_refresh_tokens enforces.
+	if _, err := pg.Pool.Exec(ctx,
+		`UPDATE refresh_tokens SET expires_at = now() - interval '2 days' WHERE id = $1`, staleTok); err != nil {
+		t.Fatalf("backdate token: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `SELECT cleanup_refresh_tokens()`); err != nil {
+		t.Fatalf("cleanup_refresh_tokens: %v", err)
+	}
+	if !rowExists(t, pg, `SELECT 1 FROM refresh_tokens WHERE id = $1`, freshTok) {
+		t.Error("cleanup_refresh_tokens reaped a live token")
+	}
+	if rowExists(t, pg, `SELECT 1 FROM refresh_tokens WHERE id = $1`, staleTok) {
+		t.Error("cleanup_refresh_tokens left a stale token behind")
+	}
+}
+
 // --- small local helpers ------------------------------------------------------
+
+// rowExists reports whether the 1-column existence probe returns a row.
+func rowExists(t *testing.T, pg *Postgres, query string, args ...any) bool {
+	t.Helper()
+	var one int
+	err := pg.Pool.QueryRow(context.Background(), query, args...).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("rowExists probe: %v", err)
+	}
+	return true
+}
 
 func usernameOf(t *testing.T, pg *Postgres, id uuid.UUID) string {
 	t.Helper()

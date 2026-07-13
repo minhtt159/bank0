@@ -100,7 +100,7 @@ paths:
     post:
       operationId: register
       tags: [client]
-      summary: Public self-registration. Creates a locked, pending-verification customer. Idempotent.
+      summary: Invitation-gated self-registration. Requires a valid invitation code; creates a locked, pending-verification customer. Idempotent.
       security: []
       parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
       requestBody:
@@ -114,8 +114,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RegisterResponse" }
-        "409": { $ref: "#/components/responses/Error" }   # username/email/phone taken
-        "422": { $ref: "#/components/responses/Error" }   # weak password / bad input
+        "404": { $ref: "#/components/responses/Error" }   # invitation code not found
+        "409": { $ref: "#/components/responses/Error" }   # username/email/phone taken; invitation code used/expired
+        "422": { $ref: "#/components/responses/Error" }   # weak password / bad input / missing invitation code
         "429": { $ref: "#/components/responses/Error" }   # rate-limited
 
   /auth/verify-contact:
@@ -257,6 +258,34 @@ paths:
         "204": { description: password changed; other sessions revoked }
         "401": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+
+  /me/invitations:
+    post:
+      operationId: createInvitation
+      tags: [client]
+      summary: Mint a single-use invitation code (spends one unit of the caller's lifetime budget)
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateInvitationResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # account not verified
+        "409": { $ref: "#/components/responses/Error" }   # invitation budget exhausted
+    get:
+      operationId: listInvitations
+      tags: [client]
+      summary: List the caller's invitations (newest first; status is derived)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Invitation" }
+        "401": { $ref: "#/components/responses/Error" }
 
   /me/sessions:
     get:
@@ -1202,18 +1231,35 @@ components:
         role: { type: string }
         status: { type: string }
         onboarding_status: { type: string, description: "Onboarding lifecycle (pending_verification/verified/active/rejected); admin-created users are 'active'." }
+        invites_remaining: { type: integer, description: "Lifetime invitation budget still available to the user." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RegisterRequest:
       type: object
-      required: [username, password, full_name]
+      required: [username, password, full_name, invitation_code]
       properties:
-        username:     { type: string }
-        password:     { type: string, minLength: 12, maxLength: 256 }
-        full_name:    { type: string }
-        email:        { type: string }
-        phone_number: { type: string }
+        username:        { type: string }
+        password:        { type: string, minLength: 12, maxLength: 256 }
+        full_name:       { type: string }
+        email:           { type: string }
+        phone_number:    { type: string }
+        invitation_code: { type: string, minLength: 1, description: "Single-use invitation code from an existing member." }
       description: At least one of email/phone_number is required (enforced server-side).
+    CreateInvitationResponse:
+      type: object
+      properties:
+        code:              { type: string, description: "Single-use invitation code to share with an invitee." }
+        expires_at:        { type: string, format: date-time }
+        invites_remaining: { type: integer, description: "Inviter's remaining lifetime budget after this mint." }
+    Invitation:
+      type: object
+      required: [code, status, created_at, expires_at]
+      properties:
+        code:        { type: string }
+        status:      { type: string, enum: [pending, consumed, expired], description: "Derived (never stored): consumed > expired > pending." }
+        created_at:  { type: string, format: date-time }
+        expires_at:  { type: string, format: date-time }
+        consumed_at: { type: string, format: date-time, nullable: true }
     RegisterResponse:
       type: object
       properties:

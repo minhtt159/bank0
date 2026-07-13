@@ -91,6 +91,81 @@ func TestClientPostCancelOwnership(t *testing.T) {
 	reconcileClean(t, pg)
 }
 
+// TestSetDefaultAccountOneDefaultInvariant: a user with two accounts can move the
+// default from A to B, and there is always EXACTLY ONE default. set_default_account
+// must clear the old flag in the same statement-pair as it sets the new one — the
+// uq_accounts_one_default partial unique index makes a stale second default impossible
+// (a failure to clear would raise 23505 inside the function).
+func TestSetDefaultAccountOneDefaultInvariant(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	owner := mkCustomer(t, pg)
+	a := mkAccount(t, pg, owner) // first account is the default
+	b := mkAccount(t, pg, owner)
+
+	// Explicitly set A (already the default), then flip to B.
+	if err := pg.Queries.SetDefaultAccount(ctx, sqlc.SetDefaultAccountParams{UserID: owner, AccountID: a}); err != nil {
+		t.Fatalf("set default A: %v", err)
+	}
+	if err := pg.Queries.SetDefaultAccount(ctx, sqlc.SetDefaultAccountParams{UserID: owner, AccountID: b}); err != nil {
+		t.Fatalf("set default B: %v", err)
+	}
+
+	var nDefault int
+	if err := pg.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM accounts WHERE user_id = $1 AND is_default`, owner).Scan(&nDefault); err != nil {
+		t.Fatalf("count defaults: %v", err)
+	}
+	if nDefault != 1 {
+		t.Fatalf("default account count = %d, want exactly 1", nDefault)
+	}
+	var defID uuid.UUID
+	if err := pg.Pool.QueryRow(ctx,
+		`SELECT id FROM accounts WHERE user_id = $1 AND is_default`, owner).Scan(&defID); err != nil {
+		t.Fatalf("read default: %v", err)
+	}
+	if defID != b {
+		t.Errorf("default account = %s, want B (%s)", defID, b)
+	}
+}
+
+// TestDeleteBeneficiaryOwnership: only the owner can delete their saved payee. A
+// non-owner delete is refused (P0001 'not found', hiding existence) and leaves the
+// row intact; the owner's delete removes it.
+func TestDeleteBeneficiaryOwnership(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	owner := mkCustomer(t, pg)
+	stranger := mkCustomer(t, pg)
+	// A payee account owned by a THIRD user (you can't save your own account).
+	payee := mkAccount(t, pg, mkCustomer(t, pg))
+	var payeeIban string
+	if err := pg.Pool.QueryRow(ctx, `SELECT iban FROM accounts WHERE id = $1`, payee).Scan(&payeeIban); err != nil {
+		t.Fatalf("read payee iban: %v", err)
+	}
+
+	var bid uuid.UUID
+	if err := pg.Pool.QueryRow(ctx, `SELECT add_beneficiary($1,'pal',$2)`, owner, payeeIban).Scan(&bid); err != nil {
+		t.Fatalf("add_beneficiary: %v", err)
+	}
+
+	// A non-owner cannot delete it: raises 'not found' (P0001) and the row survives.
+	if _, err := pg.Pool.Exec(ctx, `SELECT delete_beneficiary($1,$2)`, stranger, bid); sqlState(err) != "P0001" {
+		t.Errorf("foreign delete sqlstate = %q, want P0001; err=%v", sqlState(err), err)
+	}
+	if !rowExists(t, pg, `SELECT 1 FROM beneficiaries WHERE id = $1`, bid) {
+		t.Fatal("non-owner delete removed the beneficiary")
+	}
+
+	// The owner deletes it successfully; the row is gone.
+	if _, err := pg.Pool.Exec(ctx, `SELECT delete_beneficiary($1,$2)`, owner, bid); err != nil {
+		t.Fatalf("owner delete: %v", err)
+	}
+	if rowExists(t, pg, `SELECT 1 FROM beneficiaries WHERE id = $1`, bid) {
+		t.Error("owner delete left the beneficiary behind")
+	}
+}
+
 func errMsg(err error) string {
 	if err == nil {
 		return ""

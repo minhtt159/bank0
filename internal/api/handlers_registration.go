@@ -24,11 +24,12 @@ func newVerificationCode() string {
 }
 
 type registerReq struct {
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	FullName    string `json:"full_name"`
-	Email       string `json:"email"`
-	PhoneNumber string `json:"phone_number"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	FullName       string `json:"full_name"`
+	Email          string `json:"email"`
+	PhoneNumber    string `json:"phone_number"`
+	InvitationCode string `json:"invitation_code"`
 }
 
 // Register implements genclient.ServerInterface (POST /auth/register).
@@ -41,8 +42,14 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request, params genclie
 	req.FullName = strings.TrimSpace(req.FullName)
 	req.Email = strings.TrimSpace(req.Email)
 	req.PhoneNumber = strings.ReplaceAll(strings.TrimSpace(req.PhoneNumber), " ", "")
+	req.InvitationCode = strings.TrimSpace(req.InvitationCode)
 	if req.Username == "" || req.FullName == "" {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_input", "username and full_name are required")
+		return
+	}
+	// Fast-fail; the gate itself (existence/consumed/expired) lives in register_user.
+	if req.InvitationCode == "" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_input", "invitation code required")
 		return
 	}
 	// Fast-fail; the policy itself lives in register_user (>= 12, like change_password).
@@ -75,6 +82,7 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request, params genclie
 		TokenHash:      hashToken(verifyToken),
 		CodeHash:       hashToken(code),
 		VerifyToken:    verifyToken,
+		InvitationCode: req.InvitationCode,
 	})
 	if err != nil {
 		s.mapDBError(w, r, err)

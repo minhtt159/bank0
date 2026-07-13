@@ -7,8 +7,9 @@ import (
 
 // UserDetail is the right-rail hub: edit user details, list/edit accounts, add
 // credit, and open new accounts. canManageUsers => admin (edit user); canMoney =>
-// operator/admin (account + money actions). Auditors get a read-only view.
-templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, canManageUsers bool, canMoney bool, flash string) {
+// operator/admin (account + money actions); canCreate => operator/admin (edit the
+// invitation quota). Auditors get a read-only view.
+templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, canManageUsers bool, canMoney bool, canCreate bool, flash string) {
 	<div class="detail">
 		<div class="detail-head">
 			<h2>{ u.FullName }</h2>
@@ -34,6 +35,16 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 					<p class="muted">Read-only (admin role required to edit users).</p>
 				}
 			</form>
+		</section>
+		<section class="block">
+			<h3>Invitations</h3>
+			<p class="muted">Invitations remaining: <strong>{ i64(int64(u.InvitesRemaining)) }</strong></p>
+			if canCreate {
+				<form class="inline" hx-post={ "/console/users/" + u.ID.String() + "/invites" } hx-target="#rail">
+					<label>Set to <input name="invites_remaining" type="number" min="0" step="1" value={ i64(int64(u.InvitesRemaining)) } required/></label>
+					<button class="primary sm" type="submit" hx-disabled-elt="this">Save invitations</button>
+				</form>
+			}
 		</section>
 		if canManageUsers {
 			<section class="block">

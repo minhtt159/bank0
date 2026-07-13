@@ -10,9 +10,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/minhtt159/bank0/internal/config"
 )
 
 // A list endpoint must emit `[]` not `null` even when the DB returns a nil slice;
@@ -76,6 +80,7 @@ func TestMapDBError(t *testing.T) {
 		{"raise_state", pgErr("P0001", "cannot post transfer in state posted"), 409, "invalid_state"},
 		{"raise_notactive", pgErr("P0001", "debit account not active"), 409, "invalid_state"},
 		{"raise_other", pgErr("P0001", "this was rejected for reasons"), 422, "rejected"},
+		{"invalid_input", pgErr("22P02", "invalid input syntax for type uuid: \"x\""), 400, "bad_request"},
 		{"no_rows", pgx.ErrNoRows, 404, "not_found"},
 		{"unknown", errors.New("boom"), 500, "internal"},
 	}
@@ -135,12 +140,103 @@ func TestMapDBErrorLogsUnmapped500(t *testing.T) {
 	}
 }
 
+// An internal-invariant RAISE (ERRCODE XX000, internal_error) must hit the curated
+// 500 catch-all: the client body stays leak-free while the full raise text reaches
+// the log. Mirrors TestMapDBErrorLogsUnmapped500 for the SQLSTATE-carrying path.
+func TestMapDBErrorInternalErrcode500(t *testing.T) {
+	var logBuf bytes.Buffer
+	s := &Server{log: slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelError}))}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	s.mapDBError(rec, req, pgErr("XX000", "EXTERNAL_CLEARING system account missing (run seed)"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "EXTERNAL_CLEARING") {
+		t.Errorf("client body leaked the raise text: %q", rec.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error != "internal" {
+		t.Errorf("body error = %q (err %v), want %q", body.Error, err, "internal")
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "unmapped db error -> 500") || !strings.Contains(logged, "EXTERNAL_CLEARING") {
+		t.Errorf("XX000 must be logged with the underlying error; log = %q", logged)
+	}
+	if !strings.Contains(logged, "XX000") {
+		t.Errorf("500 log should carry the SQLSTATE; log = %q", logged)
+	}
+}
+
+// A malformed path param is rejected by the generated binding layer BEFORE the
+// handler runs. With the curated ErrorHandlerFunc wired in Router(), that rejection
+// must be the standard JSON error shape (application/json, {"error":"bad_request"}),
+// not oapi-codegen's default text/plain http.Error. No DB is touched: requireJWT
+// only validates the token and the binding fails ahead of any handler, so this runs
+// without a DSN.
+func TestBindingErrorReturnsJSON(t *testing.T) {
+	cfg := config.Config{
+		App:    config.AppConfig{Name: "bank0", Version: "test", Env: "development"},
+		Server: config.ServerConfig{Mode: "api", DefaultPageLimit: 25},
+		Auth: config.AuthConfig{
+			JWTSecret: "test-secret", JWTTTL: time.Hour, JWTIssuer: "bank0", JWTAudience: "bank0-client",
+		},
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewServer(cfg, log, nil)
+	ts := httptest.NewServer(s.Router())
+	defer ts.Close()
+
+	tok, _, err := s.issueJWT(uuid.New(), "customer", "alice", []string{"pwd"}, "")
+	if err != nil {
+		t.Fatalf("issueJWT: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/transfers/not-a-uuid", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode json body: %v", err)
+	}
+	if body.Error != "bad_request" {
+		t.Errorf("error code = %q, want bad_request", body.Error)
+	}
+}
+
 func TestDBErrorMessage(t *testing.T) {
 	if got := dbErrorMessage(pgx.ErrNoRows); got != "not found" {
 		t.Errorf("ErrNoRows message = %q", got)
 	}
+	// A crafted business SQLSTATE (P0001, 23514, ...) surfaces its developer-authored
+	// message verbatim to the console flash.
 	if got := dbErrorMessage(pgErr("23514", "insufficient funds")); got != "insufficient funds" {
-		t.Errorf("PgError should surface its Message; got %q", got)
+		t.Errorf("crafted PgError should surface its Message; got %q", got)
+	}
+	if got := dbErrorMessage(pgErr("P0001", "account not found")); got != "account not found" {
+		t.Errorf("P0001 should be echoed; got %q", got)
+	}
+	// A native, non-whitelisted PgError (here 23503 foreign_key_violation, whose raw
+	// message names the constraint) is curated to a generic string — no schema leak.
+	if got := dbErrorMessage(pgErr("23503", `insert or update on table "x" violates foreign key constraint "x_y_fkey"`)); got != "database error" {
+		t.Errorf("non-whitelisted PgError should be generic; got %q", got)
 	}
 	if got := dbErrorMessage(errors.New("boom")); got != "internal error" {
 		t.Errorf("generic error message = %q", got)
