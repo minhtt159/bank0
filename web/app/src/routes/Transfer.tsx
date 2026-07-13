@@ -4,13 +4,12 @@ import { api, ApiError } from "../api/client";
 import { userId } from "../store/auth";
 import { formatMinor, parseMajor } from "../lib/money";
 import { fuzzyFilter } from "../lib/fuzzy";
-import { isValidIBAN } from "../lib/iban";
 import { formatCountdown } from "../lib/duration";
-import { coolingRemaining, sendState } from "../lib/fraudGate";
+import { useFraudGate } from "../hooks/useFraudGate";
+import { AddPayeePanel } from "../components/AddPayeePanel";
 import type {
   Account,
   Beneficiary,
-  ResolvedAccount,
   TransferDecision,
   TransferIntent,
   TransferSuggestion,
@@ -54,23 +53,13 @@ export function Transfer() {
   const [dstQ, setDstQ] = useState("");
   const [amount, setAmount] = useState("");
 
-  // inline "add payee"
-  const [adding, setAdding] = useState(false);
-  const [newLabel, setNewLabel] = useState("");
-  const [newIban, setNewIban] = useState("");
-  const [preview, setPreview] = useState<ResolvedAccount | null>(null);
-  const [addErr, setAddErr] = useState("");
-
   const [step, setStep] = useState<"form" | "confirm">("form");
   const [idemKey, setIdemKey] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Fraud preflight (POST /transfers/intent) result for the confirm screen, plus
-  // the acknowledgement + cooling-off state its warning card drives.
+  // Fraud preflight (POST /transfers/intent) result for the confirm screen; the
+  // acknowledgement + cooling-off state its warning card drives lives in useFraudGate.
   const [intent, setIntent] = useState<TransferIntent | null>(null);
-  const [ackedAt, setAckedAt] = useState<number | null>(null); // ms when the ack posted
-  const [ackBusy, setAckBusy] = useState(false);
-  const [coolLeft, setCoolLeft] = useState(0);
 
   // Guided-transfer demo suggestion (read-only; never moves money). Dismissed once
   // applied or rejected so it doesn't nag.
@@ -113,18 +102,6 @@ export function Transfer() {
     }).catch(() => setSuggestion(null));
   }, [srcId, amount, accounts]);
 
-  function applySuggestion() {
-    if (!suggestion) return;
-    // Route the suggestion through the existing "add payee" flow: pre-fill the IBAN
-    // and label, then resolve it (confirmation of payee). The customer reviews the
-    // masked owner before saving, exactly like a manual payee.
-    setAdding(true);
-    setNewIban(suggestion.iban);
-    setNewLabel(suggestion.owner_name_masked || "Suggested payee");
-    setPreview(null);
-    setSuggestDismissed(true);
-  }
-
   const src = accounts.find((a) => a.id === srcId);
   const dst = bens.find((b) => b.id === dstId);
   const minor = parseMajor(amount);
@@ -139,83 +116,18 @@ export function Transfer() {
     [bens, dstQ],
   );
 
-  async function lookup() {
-    setAddErr("");
-    setPreview(null);
-    try {
-      setPreview(await api.resolve(newIban.trim()));
-    } catch (e) {
-      setAddErr(e instanceof ApiError ? e.message : "Lookup failed");
-    }
-  }
-
-  async function savePayee() {
-    setAddErr("");
-    try {
-      const b = await api.addBeneficiary(newLabel.trim(), newIban.trim());
-      setBens((cur) => [...cur, b]);
-      setDstId(b.id);
-      setAdding(false);
-      setNewLabel("");
-      setNewIban("");
-      setPreview(null);
-    } catch (e) {
-      setAddErr(e instanceof ApiError ? e.message : "Could not save payee");
-    }
-  }
-
-  // Run the cooling-off countdown off the ack timestamp so it survives re-renders
-  // and stays accurate regardless of tick jitter.
-  useEffect(() => {
-    const cool = intent?.warning?.cooling_off_seconds ?? 0;
-    if (ackedAt == null || cool <= 0) {
-      setCoolLeft(0);
-      return;
-    }
-    const tick = () => setCoolLeft(coolingRemaining(cool, ackedAt, Date.now()));
-    tick();
-    const iv = setInterval(tick, 250);
-    return () => clearInterval(iv);
-  }, [ackedAt, intent]);
+  const { gate, acked, ackBusy, coolLeft, toggleAck, reset: resetGate } = useFraudGate(intent, {
+    debitAccountId: src?.id,
+    counterpartyIban: dst?.iban,
+    amountMinor: minor,
+    onError: setErr,
+  });
 
   const warning = intent?.warning ?? null;
-  // Pure gate decision (see lib/fraudGate). step_up/review/warn/allow are all
-  // sendable — the server makes the final call (e.g. 403 step_up_required flows to
-  // the banner). `busy` is layered on top of the pure state below.
-  const gate = sendState(intent, ackedAt != null, coolLeft);
   const blocked = gate.mode === "hidden";
   const needsAck = gate.needsAck;
   const coolingActive = gate.counting;
   const canSend = !busy && gate.mode === "enabled";
-
-  async function toggleAck(checked: boolean) {
-    if (!checked) {
-      setAckedAt(null);
-      setCoolLeft(0);
-      return;
-    }
-    if (!warning || !src || !dst || minor == null) return;
-    setAckBusy(true);
-    setErr("");
-    try {
-      // Record the liability evidence, THEN start the cooling-off clock. Server-side
-      // the ack must age >= cooling_off_seconds before the submit is accepted.
-      await api.recordWarningAck({
-        category: warning.category,
-        reason_code: intent?.reason_codes?.[0],
-        acknowledged: true,
-        debit_account_id: src.id,
-        counterparty_iban: dst.iban,
-        amount_minor: minor,
-        device: "pwa",
-      });
-      setAckedAt(Date.now());
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Could not record your acknowledgement — try again.");
-    } finally {
-      setAckBusy(false);
-    }
-  }
 
   async function review() {
     setErr("");
@@ -229,8 +141,7 @@ export function Transfer() {
     }
     setIdemKey(crypto.randomUUID()); // one key per attempt; reused on retry below
     setIntent(null);
-    setAckedAt(null);
-    setCoolLeft(0);
+    resetGate();
     setStep("confirm");
     // Read-only fraud preflight. Non-blocking: if it errors we proceed exactly as
     // before — the submit path still enforces the gates server-side.
@@ -279,8 +190,7 @@ export function Transfer() {
           }
           setIntent(fresh?.warning?.required_ack ? fresh : synthIntent("warn", e.message, true));
         }
-        setAckedAt(null); // force a fresh ack + cooling-off
-        setCoolLeft(0);
+        resetGate(); // force a fresh ack + cooling-off
       } else {
         setErr(e instanceof ApiError ? e.message : "Transfer failed");
       }
@@ -323,7 +233,7 @@ export function Transfer() {
               <label class="ack-row">
                 <input
                   type="checkbox"
-                  checked={ackedAt != null}
+                  checked={acked}
                   disabled={ackBusy || coolingActive}
                   onChange={(e) => toggleAck((e.target as HTMLInputElement).checked)}
                 />
@@ -381,61 +291,46 @@ export function Transfer() {
       </div>
 
       <h2 style="margin-top:18px">To</h2>
-      {suggestion && !suggestDismissed && !adding && (
-        <div class="card" style="border-color:var(--accent)">
-          <div class="row">
-            <span>{suggestion.reason || "Suggested payee"}</span>
-            <button class="link" style="color:var(--accent)"
-              onClick={() => setSuggestDismissed(true)}>Dismiss</button>
-          </div>
-          <div style="margin:6px 0"><strong>{suggestion.owner_name_masked}</strong></div>
-          <div class="iban muted" style="font-size:13px">{suggestion.iban}</div>
-          <button class="ghost block" style="margin-top:10px" onClick={applySuggestion}>
-            Use this payee
-          </button>
-        </div>
-      )}
-      {!adding && (
-        <>
-          <input placeholder="Search saved payees" aria-label="Search saved payees" value={dstQ}
-            onInput={(e) => setDstQ((e.target as HTMLInputElement).value)} />
-          <div style="margin-top:8px" role="radiogroup" aria-label="Payee">
-            {dstMatches.map((b) => (
-              <label key={b.id} class={`pick ${b.id === dstId ? "sel" : ""}`}>
-                <input type="radio" name="payee" class="visually-hidden"
-                  checked={b.id === dstId} onChange={() => setDstId(b.id)} />
-                <div class="row"><span>{b.label}</span><span class="muted">{b.owner_name_masked}</span></div>
-                <div class="iban muted" style="font-size:13px">{b.iban}</div>
-              </label>
-            ))}
-            {bens.length === 0 && <div class="muted">No saved payees yet.</div>}
-          </div>
-          <button class="ghost block" style="margin-top:8px" onClick={() => setAdding(true)}>+ Add payee</button>
-        </>
-      )}
-
-      {adding && (
-        <div class="card">
-          {addErr && <ErrorBanner>{addErr}</ErrorBanner>}
-          <label>Payee name (your label)</label>
-          <input value={newLabel} onInput={(e) => setNewLabel((e.target as HTMLInputElement).value)} />
-          <label>IBAN</label>
-          <input class="iban" value={newIban}
-            onInput={(e) => { setNewIban((e.target as HTMLInputElement).value); setPreview(null); }} />
-          {newIban.trim() && !isValidIBAN(newIban) && (
-            <ErrorBanner small>Invalid IBAN — check the digits, length, and country code.</ErrorBanner>
-          )}
-          {preview && (
-            <p class="muted">Confirmation of payee: <strong>{preview.owner_name_masked}</strong></p>
-          )}
-          <div class="row" style="margin-top:10px;gap:8px">
-            {!preview
-              ? <button class="ghost" onClick={lookup} disabled={!isValidIBAN(newIban)}>Look up</button>
-              : <button onClick={savePayee} disabled={!newLabel.trim()}>Save payee</button>}
-            <button class="ghost" onClick={() => { setAdding(false); setPreview(null); setAddErr(""); }}>Cancel</button>
-          </div>
-        </div>
-      )}
+      <AddPayeePanel onSaved={(b) => { setBens((cur) => [...cur, b]); setDstId(b.id); }}>
+        {(openWith) => (
+          <>
+            {suggestion && !suggestDismissed && (
+              <div class="card" style="border-color:var(--accent)">
+                <div class="row">
+                  <span>{suggestion.reason || "Suggested payee"}</span>
+                  <button class="link" style="color:var(--accent)"
+                    onClick={() => setSuggestDismissed(true)}>Dismiss</button>
+                </div>
+                <div style="margin:6px 0"><strong>{suggestion.owner_name_masked}</strong></div>
+                <div class="iban muted" style="font-size:13px">{suggestion.iban}</div>
+                {/* Route the suggestion through the existing "add payee" flow: pre-fill
+                    the IBAN and label, then resolve it (confirmation of payee). The
+                    customer reviews the masked owner before saving, exactly like a
+                    manual payee. */}
+                <button class="ghost block" style="margin-top:10px" onClick={() => {
+                  openWith({ iban: suggestion.iban, label: suggestion.owner_name_masked || "Suggested payee" });
+                  setSuggestDismissed(true);
+                }}>
+                  Use this payee
+                </button>
+              </div>
+            )}
+            <input placeholder="Search saved payees" aria-label="Search saved payees" value={dstQ}
+              onInput={(e) => setDstQ((e.target as HTMLInputElement).value)} />
+            <div style="margin-top:8px" role="radiogroup" aria-label="Payee">
+              {dstMatches.map((b) => (
+                <label key={b.id} class={`pick ${b.id === dstId ? "sel" : ""}`}>
+                  <input type="radio" name="payee" class="visually-hidden"
+                    checked={b.id === dstId} onChange={() => setDstId(b.id)} />
+                  <div class="row"><span>{b.label}</span><span class="muted">{b.owner_name_masked}</span></div>
+                  <div class="iban muted" style="font-size:13px">{b.iban}</div>
+                </label>
+              ))}
+              {bens.length === 0 && <div class="muted">No saved payees yet.</div>}
+            </div>
+          </>
+        )}
+      </AddPayeePanel>
 
       <h2 style="margin-top:18px">Amount</h2>
       <input inputMode="decimal" placeholder="0.00" aria-label="Amount" value={amount}
