@@ -121,6 +121,43 @@ func (p *Postgres) AssessTransferRisk(ctx context.Context, caller, debit, credit
 	return ra, err
 }
 
+// TransferEvaluation mirrors evaluate_transfer()'s RETURNS TABLE (Rec 22 preflight):
+// the single collapsed decision (allow|step_up|warn|review|block), the server-
+// authoritative risk band + reason codes, and — when a warning_rule matched — the
+// customer-facing warning copy and its ack/cooling-off policy. The numeric risk
+// score is NEVER returned. RuleID/StepUpMethod are empty when not applicable.
+type TransferEvaluation struct {
+	Decision          string     `json:"decision"`
+	RiskBand          string     `json:"risk_band"`
+	ReasonCodes       []string   `json:"reason_codes"`
+	RuleID            *uuid.UUID `json:"rule_id,omitempty"`
+	Category          string     `json:"category"`
+	Headline          string     `json:"headline"`
+	Body              string     `json:"body"`
+	Severity          string     `json:"severity"`
+	RequiredAck       bool       `json:"required_ack"`
+	CoolingOffSeconds int32      `json:"cooling_off_seconds"`
+	StepUpMethod      string     `json:"step_up_method"`
+}
+
+// EvaluateTransfer runs the server-side preflight for a would-be transfer: it wraps
+// evaluate_transfer (RETURNS TABLE -> sqlc can't expand it). The DB asserts the
+// caller owns the debit account (42501 -> 403), so a foreign debit is rejected here,
+// not in Go. stepUpLimitMinor is the configured per-payment step-up threshold (0
+// disables the limit axis). exclude_transfer is not exposed: intent creates no row.
+func (p *Postgres) EvaluateTransfer(
+	ctx context.Context, subject, debit, credit uuid.UUID, amountMinor, stepUpLimitMinor int64,
+) (TransferEvaluation, error) {
+	const q = `SELECT decision, risk_band, reason_codes, rule_id, category, headline, body,
+	                  severity, required_ack, cooling_off_seconds, step_up_method
+	           FROM evaluate_transfer($1::uuid, $2::uuid, $3::uuid, $4::bigint, $5::bigint)`
+	var e TransferEvaluation
+	err := p.Pool.QueryRow(ctx, q, subject, debit, credit, amountMinor, stepUpLimitMinor).
+		Scan(&e.Decision, &e.RiskBand, &e.ReasonCodes, &e.RuleID, &e.Category, &e.Headline,
+			&e.Body, &e.Severity, &e.RequiredAck, &e.CoolingOffSeconds, &e.StepUpMethod)
+	return e, err
+}
+
 // TransferSuggestion mirrors one row of suggest_transfer_destinations()'s RETURNS
 // TABLE — a guided-transfer menu candidate (a third-party "mule"). Read-only; never
 // exposes a full name or balance (mask_name, same masking as confirmation-of-payee).

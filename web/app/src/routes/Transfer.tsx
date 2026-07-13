@@ -5,8 +5,41 @@ import { userId } from "../store/auth";
 import { formatMinor, parseMajor } from "../lib/money";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { isValidIBAN } from "../lib/iban";
-import type { Account, Beneficiary, ResolvedAccount, TransferSuggestion } from "../api/types";
+import { formatCountdown } from "../lib/duration";
+import type {
+  Account,
+  Beneficiary,
+  ResolvedAccount,
+  TransferDecision,
+  TransferIntent,
+  TransferSuggestion,
+  WarningSeverity,
+} from "../api/types";
 import { ErrorBanner } from "../lib/feedback";
+
+function severityLabel(s: WarningSeverity): string {
+  return s === "critical" ? "Important" : s === "warning" ? "Warning" : "Please note";
+}
+
+// Build a warning card from a submit-time 409/422 when we have no preflight result
+// to reuse — so a blocked/ack-required error renders the same UI as the preflight.
+function synthIntent(decision: TransferDecision, message: string, requiredAck: boolean): TransferIntent {
+  return {
+    decision,
+    risk_band: "high",
+    reason_codes: [],
+    warning: {
+      warning_id: "",
+      category: "risk_warning",
+      severity: decision === "block" ? "critical" : "warning",
+      headline: decision === "block" ? "This payment can't be sent" : "Please confirm before sending",
+      body: message,
+      required_ack: requiredAck,
+      cooling_off_seconds: 0,
+    },
+    step_up_method: null,
+  };
+}
 
 export function Transfer() {
   const { route } = useLocation();
@@ -30,6 +63,13 @@ export function Transfer() {
   const [step, setStep] = useState<"form" | "confirm">("form");
   const [idemKey, setIdemKey] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Fraud preflight (POST /transfers/intent) result for the confirm screen, plus
+  // the acknowledgement + cooling-off state its warning card drives.
+  const [intent, setIntent] = useState<TransferIntent | null>(null);
+  const [ackedAt, setAckedAt] = useState<number | null>(null); // ms when the ack posted
+  const [ackBusy, setAckBusy] = useState(false);
+  const [coolLeft, setCoolLeft] = useState(0);
 
   // Guided-transfer demo suggestion (read-only; never moves money). Dismissed once
   // applied or rejected so it doesn't nag.
@@ -123,7 +163,59 @@ export function Transfer() {
     }
   }
 
-  function review() {
+  // Run the cooling-off countdown off the ack timestamp so it survives re-renders
+  // and stays accurate regardless of tick jitter.
+  useEffect(() => {
+    const cool = intent?.warning?.cooling_off_seconds ?? 0;
+    if (ackedAt == null || cool <= 0) {
+      setCoolLeft(0);
+      return;
+    }
+    const tick = () => setCoolLeft(Math.max(0, Math.ceil(cool - (Date.now() - ackedAt) / 1000)));
+    tick();
+    const iv = setInterval(tick, 250);
+    return () => clearInterval(iv);
+  }, [ackedAt, intent]);
+
+  const warning = intent?.warning ?? null;
+  const blocked = intent?.decision === "block";
+  const needsAck = !!warning?.required_ack && !blocked;
+  const coolingActive = needsAck && ackedAt != null && coolLeft > 0;
+  // Send is gated by: not blocked, not busy, and (no ack needed OR ack posted and
+  // its cooling-off has elapsed). step_up/review/warn/allow are all sendable — the
+  // server makes the final call (e.g. 403 step_up_required flows to the banner).
+  const canSend = !busy && !blocked && (!needsAck || (ackedAt != null && coolLeft <= 0));
+
+  async function toggleAck(checked: boolean) {
+    if (!checked) {
+      setAckedAt(null);
+      setCoolLeft(0);
+      return;
+    }
+    if (!warning || !src || !dst || minor == null) return;
+    setAckBusy(true);
+    setErr("");
+    try {
+      // Record the liability evidence, THEN start the cooling-off clock. Server-side
+      // the ack must age >= cooling_off_seconds before the submit is accepted.
+      await api.recordWarningAck({
+        category: warning.category,
+        reason_code: intent?.reason_codes?.[0],
+        acknowledged: true,
+        debit_account_id: src.id,
+        counterparty_iban: dst.iban,
+        amount_minor: minor,
+        device: "pwa",
+      });
+      setAckedAt(Date.now());
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Could not record your acknowledgement — try again.");
+    } finally {
+      setAckBusy(false);
+    }
+  }
+
+  async function review() {
     setErr("");
     if (!src || !dst || minor == null) {
       setErr("Choose a source, a payee, and a valid amount.");
@@ -134,7 +226,22 @@ export function Transfer() {
       return;
     }
     setIdemKey(crypto.randomUUID()); // one key per attempt; reused on retry below
+    setIntent(null);
+    setAckedAt(null);
+    setCoolLeft(0);
     setStep("confirm");
+    // Read-only fraud preflight. Non-blocking: if it errors we proceed exactly as
+    // before — the submit path still enforces the gates server-side.
+    try {
+      const res = await api.transferIntent({
+        debit_account: src.id,
+        credit_account: dst.credit_account_id,
+        amount_minor: minor,
+      });
+      setIntent(res);
+    } catch {
+      /* silent — preflight is advisory */
+    }
   }
 
   async function send() {
@@ -146,9 +253,35 @@ export function Transfer() {
         { debit_account: src.id, credit_account: dst.credit_account_id, amount_minor: minor },
         idemKey,
       );
+      // held / under_review route to the receipt just like posted/pending.
       route(`/transfer/${res.transfer_id}`, true);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Transfer failed");
+      // Map the two fraud-gate rejections to the same warning UI rather than a raw
+      // banner; keep every other error (incl. 403 step_up_required) as-is.
+      if (e instanceof ApiError && e.code === "payment_blocked") {
+        setIntent(synthIntent("block", e.message, false));
+      } else if (e instanceof ApiError && e.code === "ack_required") {
+        // No reusable preflight warning (call failed or rules changed since):
+        // re-fetch it so the card carries the real copy + cooling-off, falling
+        // back to a synthesized card. Server enforces either way.
+        if (!intent?.warning?.required_ack) {
+          let fresh: TransferIntent | null = null;
+          try {
+            fresh = await api.transferIntent({
+              debit_account: src.id,
+              credit_account: dst.credit_account_id,
+              amount_minor: minor,
+            });
+          } catch {
+            /* fall through to synth */
+          }
+          setIntent(fresh?.warning?.required_ack ? fresh : synthIntent("warn", e.message, true));
+        }
+        setAckedAt(null); // force a fresh ack + cooling-off
+        setCoolLeft(0);
+      } else {
+        setErr(e instanceof ApiError ? e.message : "Transfer failed");
+      }
       setBusy(false); // keep idemKey so a retry of this attempt dedupes
     }
   }
@@ -167,10 +300,58 @@ export function Transfer() {
           <div class="row"><span class="muted">Payee name</span><span>{dst.owner_name_masked}</span></div>
           <div class="row"><span class="muted">Payee IBAN</span><span class="iban">{dst.iban}</span></div>
         </div>
+
+        {warning && (
+          <div class={`warn-card ${warning.severity}`}>
+            <div
+              role={warning.severity === "critical" ? "alert" : undefined}
+              aria-live={warning.severity === "critical" ? undefined : "polite"}
+            >
+              <div class="warn-tag">{severityLabel(warning.severity)}</div>
+              <strong>{warning.headline}</strong>
+              <p style="margin:6px 0 0">{warning.body}</p>
+              {intent?.decision === "review" && !blocked && (
+                <p class="muted" style="margin:8px 0 0">
+                  If you send this, we'll hold it for a short review before the money moves.
+                </p>
+              )}
+            </div>
+
+            {needsAck && (
+              <label class="ack-row">
+                <input
+                  type="checkbox"
+                  checked={ackedAt != null}
+                  disabled={ackBusy || coolingActive}
+                  onChange={(e) => toggleAck((e.target as HTMLInputElement).checked)}
+                />
+                <span>I understand the risk and want to proceed.</span>
+              </label>
+            )}
+
+            {coolingActive && (
+              <p class="muted" aria-live="polite" style="margin:8px 0 0">
+                Please wait <strong>{formatCountdown(coolLeft)}</strong> before you can send.
+              </p>
+            )}
+          </div>
+        )}
+
         {err && <ErrorBanner>{err}</ErrorBanner>}
-        <button class="block" onClick={send} disabled={busy}>
-          {busy ? "Sending…" : `Send ${formatMinor(minor, src.currency)}`}
-        </button>
+
+        {blocked ? (
+          <p class="muted">
+            Go back to change the payee or amount, or contact us if you think this is a mistake.
+          </p>
+        ) : (
+          <button class="block" onClick={send} disabled={!canSend}>
+            {busy
+              ? "Sending…"
+              : coolingActive
+                ? `Wait ${formatCountdown(coolLeft)}`
+                : `Send ${formatMinor(minor, src.currency)}`}
+          </button>
+        )}
       </>
     );
   }

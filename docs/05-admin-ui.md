@@ -7,7 +7,8 @@
 > its API is [`06-client-api.md`](06-client-api.md), its PWA is
 > [`07-client-web-app.md`](07-client-web-app.md).
 
-The console covers users, accounts, credit/withdraw, maker-checker approvals,
+The console covers users, accounts, credit/withdraw, maker-checker approvals, the
+AML screening queue, fraud-policy management (warning rules + watchlist),
 transfers with drill-down, statements, audit log, reconciliation, fuzzy search,
 keyset pagination, auto-refreshing views, disputes triage, and an admin-only
 **"Revoke app sessions"** action. Mutations fire `HX-Trigger: bank0:refresh` so
@@ -40,9 +41,9 @@ gated action — there is no route→role middleware; the portal subrouter carri
 
 | Role | Can | Cannot |
 |------|-----|--------|
-| `auditor` | read everything: accounts, ledgers, transfers, reconcile, audit log | change anything |
-| `operator` | + create accounts, freeze/unfreeze, cancel *pending* transfers, post credits/withdrawals up to the maker-checker threshold, **create users + set a user's invite quota** (`canCreateUsers`) | reverse posted transfers, post above-threshold moves directly (they route to Approvals), other user management (roles, status) |
-| `admin` | + reverse posted transfers, approve maker-checker items (a different admin than the maker), manage all users | (nothing app-level; still audited) |
+| `auditor` | read everything: accounts, ledgers, transfers, reconcile, audit log, **and the fraud-policy panels (warning rules + watchlist), read-only** | change anything |
+| `operator` | + create accounts, freeze/unfreeze, cancel *pending* transfers, post credits/withdrawals up to the maker-checker threshold, **create users + set a user's invite quota** (`canCreateUsers`) | reverse posted transfers, post above-threshold moves directly (they route to Approvals), release/refuse screening holds, mutate fraud policy, other user management (roles, status) |
+| `admin` | + reverse posted transfers, approve maker-checker items (a different admin than the maker), **release/refuse AML screening holds** (`canApprove`, §4.4a), **manage fraud policy — warning rules + watchlist** (`canManageSettings`, §4.8/§4.9), manage all users | (nothing app-level; still audited) |
 | `customer` | no console access | — |
 
 > Every state-changing screen calls a DB function that already enforces its own
@@ -62,6 +63,8 @@ gated action — there is no route→role middleware; the portal subrouter carri
 │ • Reconciliation    │   right rail: detail / actions               │
 │ • Approvals (N)     │                                              │
 │ • Disputes          │                                              │
+│ • Warning rules     │                                              │
+│ • Watchlist         │                                              │
 │ • Audit log         │                                              │
 │ • Settings          │                                              │
 └─────────────────────┴──────────────────────────────────────────────┘
@@ -86,6 +89,9 @@ The "is the bank healthy?" glance:
 - **Operational counters** — pending transfers, active holds (count + reserved
   total), failed/expired today, reversals today.
 - **Pending-approvals** count (maker-checker queue) with a jump link.
+- **Awaiting screening** — count of payments parked `under_review` after an AML
+  watchlist hit (`CountPendingScreenings`, best-effort tile), the operator's cue to
+  work the screening queue (§4.4a).
 
 ```mermaid
 graph TD
@@ -121,6 +127,10 @@ graph TD
 - **Transfer detail**: both ledger legs, the hold, the idempotency key, and — for
   reversals — a link to/from the original (`reverses_id`). A posted transfer shows
   a `Reverse` action (admin only, reason required, idempotency key auto-generated).
+  A **parked** transfer (`held`/`under_review`) shows a hold badge with its
+  `hold_reason` and a **"Hold expires"** timestamp (the business-day window
+  deadline) — so an operator sees at a glance why a payment hasn't posted and when
+  its window lapses.
 
 ### 4.4 Approvals (maker-checker)
 
@@ -128,6 +138,29 @@ For high-risk actions (see §5), the maker submits and the action lands here as
 *requested*; a different admin approves or rejects. The acting and approving user
 are both recorded in `admin_actions` (`actor_user_id`, `approved_by`). An admin
 cannot approve their own request.
+
+### 4.4a Screening queue (AML, Rec 25)
+
+The Approvals page carries a **second queue** below the four-eyes one. A client
+payment whose debtor or creditor name matches an active watchlist entry is parked
+`under_review` by the submit gate (`screen_payment` → `place_transfer_hold`,
+[`03-...md`](03-ledger-lifecycle-idempotency.md) §2.8) and filed as a
+`screening_hold` `admin_actions` row — surfaced here (`ListPendingScreenings`,
+cursor-paginated, auto-refresh 15s). Each row shows the held-at time, payer, from/to
+IBANs, amount, the hold reason + matched name (from the row's JSON detail), and the
+**deadline** (`hold_expires_at`, a **4-business-day** window via `add_business_days`).
+
+- **Release & post** / **Refuse & cancel** (admin only, `canApprove`) reuse the
+  maker-checker endpoints: `approve_request` widens to `screening_hold` and posts the
+  `under_review` transfer via `post_transfer(id, {under_review})`; `reject_request`
+  cancels it. Both are confirm-gated buttons that fire `HX-Trigger: bank0:refresh`,
+  so acting on either queue re-fetches both fragments.
+- The screening actor is the *initiating customer*, so the four-eyes "can't approve
+  your own request" guard is always satisfied — any admin may decide.
+- A screening hold is **never auto-released**: only an operator decision posts it. If
+  the 4-business-day window lapses first, the maintenance sweep **auto-cancels** it
+  (`'review window expired'`), the fail-safe direction — the payment is refused, not
+  quietly sent.
 
 ### 4.4b Limit requests (customer maker-checker)
 
@@ -185,6 +218,46 @@ auto-freeze).
 > `canCreateUsers` gate (operator|admin); other user management (role, status)
 > stays admin-only (`canManageUsers`); reads stay open to any staff. See
 > [`10-security-review.md`](10-security-review.md).
+
+### 4.8 Warning rules (fraud policy, Rec 22)
+
+A **Warning rules** nav screen manages the `warning_rules` policy table that drives
+the customer-facing fraud warnings and the `held`/`block` decisions
+([`03-...md`](03-ledger-lifecycle-idempotency.md) §2.8). Each rule *matches* a
+transfer on its non-null keys — a fired `match_reason_code` (e.g.
+`destination_flagged`) and/or a minimum assessed band (`match_min_band`) — and
+carries the copy shown to the customer (`category`, `severity`, `headline`, `body`)
+plus the behaviour: `decision` (`warn` | `review` | `block`), `required_ack`,
+`cooling_off_seconds`, and a `priority` (higher wins among equal-severity matches).
+The table ships **empty** (demo rules seed via `db/seed.sql`), so the gate degrades
+to plain allow/step-up until a rule exists.
+
+- **View**: all staff (`GET /console/warning-rules` → `/results`). Rules list with
+  their match keys, decision, severity and active flag.
+- **Mutate**: admins only (`canManageSettings`). Create
+  (`POST /console/warning-rules`), edit (`POST /console/warning-rules/{id}`), and
+  activate/deactivate (`POST /console/warning-rules/{id}/toggle`). Form input is
+  validated against the DB `CHECK` sets (category/severity/decision/band,
+  cooling-off 0–86400) for a friendly flash before it hits the database.
+- **Audited**: every change writes an `admin_actions` row —
+  `create_warning_rule` / `update_warning_rule` / `toggle_warning_rule` — via
+  `s.audit`, exactly like `update_settings`.
+
+### 4.9 Watchlist (AML screening, Rec 25)
+
+A **Watchlist** nav screen manages `watchlist_entries` — the sanctions/AML name
+list `screen_payment` checks between authorize and capture. Each entry is an
+**ILIKE pattern** (with `%` wildcards) matched against a party's registered
+`full_name`, plus a free-text `reason`. Also ships **empty** (demo entries in
+`db/seed.sql`), so screening is a no-op until an entry exists; a match parks the
+payment `under_review` and files it into the screening queue (§4.4a).
+
+- **View**: all staff (`GET /console/watchlist` → `/results`).
+- **Mutate**: admins only (`canManageSettings`). Add
+  (`POST /console/watchlist`) and activate/deactivate
+  (`POST /console/watchlist/{id}/toggle`).
+- **Audited**: `create_watchlist_entry` / `toggle_watchlist_entry` in
+  `admin_actions`.
 
 ---
 

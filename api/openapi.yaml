@@ -749,7 +749,7 @@ paths:
         - name: status
           in: query
           required: false
-          schema: { type: string, enum: [pending, posted, failed, canceled, reversed] }
+          schema: { type: string, enum: [pending, held, under_review, posted, failed, canceled, reversed] }
         - name: kind
           in: query
           required: false
@@ -777,6 +777,22 @@ paths:
       operationId: createTransfer
       tags: [client]
       summary: Create a transfer (auto-posts by default). Idempotent.
+      description: >-
+        Moves money from a debit account the caller owns. The returned status is
+        usually `posted`, but the server-side fraud/AML gates may park the payment
+        with funds reserved (not yet posted): `held` (a customer cooling-off — release
+        with POST /transfers/{id}/confirm or cancel it) or `under_review` (operator
+        screening — the customer can neither confirm nor cancel it). Preview the
+        decision without moving money via POST /transfers/intent.
+
+
+        Idempotent on the `Idempotency-Key` header, namespaced to the caller: a replay
+        with the SAME key + SAME parameters returns the original result with
+        `Idempotency-Replayed: true` (a replay short-circuits BEFORE the gates and
+        returns the live status verbatim). Reusing the key with DIFFERENT parameters
+        is `422 idempotency_key_conflict`; a duplicate that races an in-flight request
+        is `409 in_progress`. Keys are retained ~7 days, after which the same key is a
+        fresh request.
       parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
       requestBody:
         required: true
@@ -785,12 +801,51 @@ paths:
             schema: { $ref: "#/components/schemas/CreateTransferRequest" }
       responses:
         "200":
-          description: result (posted, or replayed)
+          description: >-
+            result — status may be posted (or replayed), or held / under_review when a
+            gate parks the payment with funds reserved.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TransferResult" }
-        "403": { $ref: "#/components/responses/Error" }   # step_up_required — re-verify at /auth/mfa/verify, retry with the SAME Idempotency-Key
-        "422": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }   # step_up_required — re-verify at /auth/mfa/verify, retry with the SAME Idempotency-Key; or forbidden (debit not owned)
+        "409": { $ref: "#/components/responses/Error" }   # ack_required — a required fraud-warning acknowledgement is missing / too fresh / expired (re-acknowledge, then retry); or in_progress (duplicate key in flight)
+        "422": { $ref: "#/components/responses/Error" }   # payment_blocked (a rule refused the payment), insufficient_funds, or idempotency_key_conflict
+
+  /transfers/intent:
+    post:
+      operationId: transferIntent
+      tags: [client]
+      summary: Preview the fraud/AML decision for a would-be transfer (moves no money).
+      description: >-
+        Read-only preflight for a transfer the caller is about to make: it runs the
+        same server-side risk evaluation POST /transfers applies, but reserves nothing,
+        posts nothing, and writes no row — call it as many times as you like. Returns
+        the collapsed `decision`, the server-authoritative `risk_band` + `reason_codes`,
+        and — when a warning rule matched — a `warning` object with the customer-facing
+        copy and its acknowledgement / cooling-off policy. There is NO numeric risk
+        score in the response, by design; the score never leaves the database.
+
+
+        `decision` values: `allow` (proceed), `warn` (show the warning, may proceed),
+        `step_up` (re-verification linked to this exact payment is required — see the
+        step-up flow on POST /transfers), `review` (submitting will park the payment as
+        `held` for customer confirmation), `block` (submitting will be refused
+        `422 payment_blocked`). When `warning.required_ack` is true, record the
+        acknowledgement via POST /me/warning-acks before submitting, respecting
+        `cooling_off_seconds`. Requires the caller to own the debit account (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransferIntentRequest" }
+      responses:
+        "200":
+          description: the read-only decision preview (no money moved)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferIntent" }
+        "400": { $ref: "#/components/responses/Error" }   # malformed body / invalid account id
+        "403": { $ref: "#/components/responses/Error" }   # the caller does not own the debit account
 
   /transfers/pending:
     get:
@@ -856,6 +911,9 @@ paths:
       operationId: postTransfer
       tags: [client]
       summary: Post a pending transfer (deferred settlement). Idempotent.
+      description: >-
+        Posts a transfer previously staged as `pending`. Idempotent: reposting an
+        already-posted transfer returns its current status rather than erroring.
       parameters: [ { $ref: "#/components/parameters/Id" } ]
       responses:
         "200":
@@ -864,11 +922,39 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/StatusResponse" }
 
+  /transfers/{id}/confirm:
+    post:
+      operationId: confirmTransfer
+      tags: [client]
+      summary: Confirm (release) a held transfer, posting it. Idempotent.
+      description: >-
+        Releases a transfer the caller parked in the `held` cooling-off state (Rec 22),
+        posting it and moving the money. Only the transfer's owner may confirm it; a
+        transfer the caller does not own is `404`, hiding its existence. Idempotent:
+        confirming an already-`posted` transfer returns `posted`. A transfer that is
+        not held — notably `under_review` (operator screening, which the customer can
+        neither confirm nor cancel) — or whose confirmation window has expired is
+        `409 invalid_state`.
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: released (posted), or already posted (idempotent)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+        "404": { $ref: "#/components/responses/Error" }   # not the owner / unknown transfer
+        "409": { $ref: "#/components/responses/Error" }   # not held / under_review / confirmation window expired
+
   /transfers/{id}/cancel:
     post:
       operationId: cancelTransfer
       tags: [client]
-      summary: Cancel a pending transfer (releases the hold). Idempotent.
+      summary: Cancel a pending or held transfer (releases the hold). Idempotent.
+      description: >-
+        Cancels a `pending` or `held` transfer the caller owns and releases its
+        authorization hold. A transfer `under_review` (operator screening) cannot be
+        cancelled by the customer -> `409 invalid_state`. Idempotent: cancelling an
+        already-cancelled transfer returns its status.
       parameters: [ { $ref: "#/components/parameters/Id" } ]
       requestBody:
         required: false
@@ -881,12 +967,22 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/StatusResponse" }
+        "409": { $ref: "#/components/responses/Error" }   # under_review — operator screening, not customer-cancellable
 
   /transfers/{id}/reverse:
     post:
       operationId: reverseTransfer
       tags: [admin]
       summary: Reverse a posted transfer (appends inverse entries). Idempotent.
+      description: >-
+        Clawback remedy: appends a new `reversal` transfer with inverse ledger entries;
+        the original is never edited. Idempotent on the `Idempotency-Key` header — a
+        replay with the SAME key + SAME transfer returns the original result with
+        `Idempotency-Replayed: true`; the same key with a different transfer is
+        `422 idempotency_key_conflict`. Reversal is ALSO idempotent on the transfer
+        itself: a second reverse of an already-reversed transfer — even under a
+        DIFFERENT key — returns the EXISTING reversal id (200), never a second reversal.
+        Keys are retained ~7 days.
       parameters:
         - { $ref: "#/components/parameters/Id" }
         - { $ref: "#/components/parameters/IdempotencyKey" }
@@ -897,10 +993,11 @@ paths:
             schema: { $ref: "#/components/schemas/ReasonRequest" }
       responses:
         "200":
-          description: reversed
+          description: reversed (or the existing reversal, replayed / already reversed)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ReverseResponse" }
+        "422": { $ref: "#/components/responses/Error" }   # idempotency_key_conflict, or the transfer is not in a reversible state
 
   /transfers/{id}/dispute:
     post:
@@ -909,6 +1006,11 @@ paths:
       summary: >-
         Raise a dispute on a transfer the caller is a party to ("I don't
         recognise this"). One open dispute per (transfer, caller).
+      description: >-
+        Opens a dispute the caller is a party to. Naturally idempotent on
+        (transfer, caller) rather than on a header: at most one OPEN dispute may exist
+        per pair, so a second attempt while one is open is `409` (rather than creating a
+        duplicate). No `Idempotency-Key` is used here.
       parameters: [ { $ref: "#/components/parameters/Id" } ]
       requestBody:
         required: false
@@ -1384,7 +1486,7 @@ components:
       type: object
       required: [category]
       properties:
-        category:          { type: string, enum: [cop_no_match, cop_close_match, cop_unable, guided_steer, high_value, other] }
+        category:          { type: string, enum: [cop_no_match, cop_close_match, cop_unable, guided_steer, high_value, risk_warning, other] }
         reason_code:       { type: string, description: "Machine token echoed from the warning (e.g. NO_MATCH)." }
         acknowledged:      { type: boolean, default: true, description: "true = customer proceeded past the warning; false = shown but backed out." }
         debit_account_id:  { type: string, format: uuid }
@@ -1514,12 +1616,14 @@ components:
         credit_account_id: { type: string, format: uuid }
         amount_minor: { type: integer, format: int64 }
         currency: { type: string }
-        status: { type: string }
+        status: { type: string, description: "pending | held | under_review | posted | failed | canceled | reversed." }
         kind: { type: string }
         description: { type: string }
         direction: { type: string, enum: [out, in], description: "Relative to the caller." }
         counterparty_iban: { type: string }
         counterparty_owner: { type: string, description: "Masked owner name of the other party." }
+        hold_reason: { type: string, nullable: true, description: "Why a held/under_review transfer is parked; null otherwise." }
+        hold_expires_at: { type: string, format: date-time, nullable: true, description: "When the hold/review window lapses (auto-cancel); null when not parked." }
         requested_at: { type: string, format: date-time }
         posted_at: { type: string, format: date-time }
     Session:
@@ -1604,15 +1708,66 @@ components:
         credit_account_id: { type: string, format: uuid }
         amount_minor: { type: integer, format: int64 }
         currency: { type: string }
-        status: { type: string }
+        status: { type: string, description: "pending | held | under_review | posted | failed | canceled | reversed." }
         kind: { type: string }
         reverses_id: { type: string, format: uuid }
         description: { type: string }
         uetr: { type: string, format: uuid, description: "Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays." }
         end_to_end_id: { type: string, description: "Originator-supplied ISO 20022 EndToEndId, when given." }
         failure_reason: { type: string }
+        hold_reason: { type: string, nullable: true, description: "Why a held/under_review transfer is parked (e.g. 'screening', a warning category); null otherwise." }
+        hold_expires_at: { type: string, format: date-time, nullable: true, description: "When the hold/review window lapses and the transfer auto-cancels; null when not parked." }
         requested_at: { type: string, format: date-time }
         posted_at: { type: string, format: date-time }
+    TransferIntentRequest:
+      type: object
+      required: [debit_account, credit_account, amount_minor]
+      properties:
+        debit_account: { type: string, format: uuid, description: "Account to debit; must be owned by the caller." }
+        credit_account: { type: string, format: uuid, description: "Destination account." }
+        amount_minor: { type: integer, format: int64, description: "Amount in minor units (never a float)." }
+    TransferIntent:
+      type: object
+      description: >-
+        The read-only decision preview for a would-be transfer. No money moves and no
+        row is written. Deliberately carries NO numeric risk score.
+      required: [decision, risk_band, reason_codes]
+      properties:
+        decision:
+          type: string
+          enum: [allow, step_up, warn, review, block]
+          description: >-
+            Collapsed outcome. allow = proceed; warn = show the warning, may proceed;
+            step_up = re-verification linked to this exact payment is required;
+            review = submitting parks the payment as `held` for customer confirmation;
+            block = submitting is refused (422 payment_blocked).
+        risk_band:
+          type: string
+          enum: [low, medium, high]
+          description: Server-authoritative risk band.
+        reason_codes:
+          type: array
+          items: { type: string }
+          description: Machine tokens explaining the band (e.g. first_payment_to_payee). Always an array, never null.
+        warning:
+          nullable: true
+          description: The customer-facing warning to show; present only when a warning rule matched, else null.
+          allOf: [ { $ref: "#/components/schemas/TransferWarning" } ]
+        step_up_method:
+          type: string
+          nullable: true
+          description: Second-factor method to use when decision is step_up (e.g. 'otp'); null otherwise.
+    TransferWarning:
+      type: object
+      description: The copy + acknowledgement policy for a matched warning rule.
+      properties:
+        warning_id: { type: string, format: uuid, description: "The matched warning rule's id." }
+        category: { type: string, description: "Warning category (mirrors warning_acks.category); the value to record on POST /me/warning-acks." }
+        severity: { type: string, enum: [info, warning, critical] }
+        headline: { type: string }
+        body: { type: string }
+        required_ack: { type: boolean, description: "When true, an acknowledgement must be recorded before the payment can be submitted." }
+        cooling_off_seconds: { type: integer, description: "Minimum seconds between acknowledging and submitting (0 = none)." }
     PendingTransfer:
       type: object
       properties:

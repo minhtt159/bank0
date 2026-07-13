@@ -21,6 +21,8 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/approvals", s.consoleApprovals).Methods(http.MethodGet)
 	r.HandleFunc("/console/limit-requests", s.consoleLimitRequests).Methods(http.MethodGet)
 	r.HandleFunc("/console/disputes", s.consoleDisputes).Methods(http.MethodGet)
+	r.HandleFunc("/console/warning-rules", s.consoleWarningRules).Methods(http.MethodGet)
+	r.HandleFunc("/console/watchlist", s.consoleWatchlist).Methods(http.MethodGet)
 	r.HandleFunc("/console/settings", s.consoleSettings).Methods(http.MethodGet)
 	r.HandleFunc("/console/settings", s.consoleUpdateSettings).Methods(http.MethodPost)
 
@@ -30,12 +32,25 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/transfers/results", s.consoleTransfersResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/audit/results", s.consoleAuditResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/approvals/results", s.consoleApprovalsResults).Methods(http.MethodGet)
+	r.HandleFunc("/console/screenings/results", s.consoleScreeningsResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/limit-requests/results", s.consoleLimitRequestsResults).Methods(http.MethodGet)
 	r.HandleFunc("/console/disputes/results", s.consoleDisputesResults).Methods(http.MethodGet)
+	r.HandleFunc("/console/warning-rules/results", s.consoleWarningRulesResults).Methods(http.MethodGet)
+	r.HandleFunc("/console/watchlist/results", s.consoleWatchlistResults).Methods(http.MethodGet)
 
-	// Maker-checker approve/reject (admin only; approver must differ from maker)
+	// Maker-checker approve/reject (admin only; approver must differ from maker).
+	// The AML screening queue reuses these: approve_request/reject_request widen to
+	// screening_hold rows (approve posts the under_review transfer, reject cancels it).
 	r.HandleFunc("/console/approvals/{id}/approve", s.consoleApprove).Methods(http.MethodPost)
 	r.HandleFunc("/console/approvals/{id}/reject", s.consoleReject).Methods(http.MethodPost)
+
+	// Fraud policy (admins mutate via canManageSettings; all staff view). /toggle and
+	// /results are registered before /{id} so the literal paths win over the var.
+	r.HandleFunc("/console/warning-rules", s.consoleCreateWarningRule).Methods(http.MethodPost)
+	r.HandleFunc("/console/warning-rules/{id}/toggle", s.consoleToggleWarningRule).Methods(http.MethodPost)
+	r.HandleFunc("/console/warning-rules/{id}", s.consoleUpdateWarningRule).Methods(http.MethodPost)
+	r.HandleFunc("/console/watchlist", s.consoleCreateWatchlistEntry).Methods(http.MethodPost)
+	r.HandleFunc("/console/watchlist/{id}/toggle", s.consoleToggleWatchlistEntry).Methods(http.MethodPost)
 
 	// Customer limit-change requests (admin applies/rejects; never the requester)
 	r.HandleFunc("/console/limit-requests/{id}/approve", s.consoleLimitApprove).Methods(http.MethodPost)

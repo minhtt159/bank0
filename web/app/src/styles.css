@@ -92,6 +92,29 @@ input:focus, select:focus { outline: 2px solid var(--accent); border-color: tran
 main:focus { outline: none; }
 
 .error { background: #fdecea; color: var(--danger); padding: 10px 12px; border-radius: 10px; margin: 10px 0; font-size: 14px; }
+
+/* Fraud-warning / hold card. Severity is conveyed by a text tag AND colour (never
+   colour alone): info = neutral, warning = amber, critical = danger. */
+.warn-card {
+  background: var(--card); border: 1px solid var(--line); border-left-width: 4px;
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; font-size: 15px;
+}
+.warn-card .warn-tag {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+.warn-card.info { border-left-color: var(--muted); }
+.warn-card.info .warn-tag { color: var(--muted); }
+.warn-card.warning { border-left-color: #b7791f; background: #fdf7ec; }
+.warn-card.warning .warn-tag { color: #8a5a00; }
+.warn-card.critical { border-left-color: var(--danger); background: #fdecea; }
+.warn-card.critical .warn-tag { color: var(--danger); }
+/* Acknowledgement checkbox row: overrides the block-label + full-width-input defaults. */
+.ack-row {
+  display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0;
+  color: var(--ink); font-size: 14px; cursor: pointer;
+}
+.ack-row input { width: auto; margin: 2px 0 0; flex: 0 0 auto; }
 .center { text-align: center; padding: 40px 0; color: var(--muted); }
 
 .login-wrap { max-width: 360px; margin: 0 auto; padding: 48px 20px; }

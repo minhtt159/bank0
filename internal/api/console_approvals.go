@@ -49,6 +49,42 @@ func (s *Server) consoleApprovalsResults(w http.ResponseWriter, r *http.Request)
 	s.renderApprovals(w, r, "")
 }
 
+// ---- screening queue (AML, Rec 25) --------------------------------------
+//
+// Watchlist-matched client payments are parked under_review and surface here as a
+// second queue on the Approvals page. Approve/reject reuse the maker-checker
+// endpoints (approve_request/reject_request widen to screening_hold rows: approve
+// posts the under_review transfer, reject cancels it), so those handlers set
+// HX-Trigger: bank0:refresh and this fragment re-fetches to drop the acted-on row.
+
+func (s *Server) renderScreenings(w http.ResponseWriter, r *http.Request, flash string) {
+	ctx := r.Context()
+	ts, cid := pageCursor(r)
+	limit := s.consolePageLimit(r)
+	rows, err := s.pg.Queries.ListPendingScreenings(ctx, sqlc.ListPendingScreeningsParams{
+		Cursor: ts, CursorID: cid, PageLimit: limit + 1,
+	})
+	if err != nil {
+		s.log.Error("list screenings", "err", err)
+		http.Error(w, "screening error", http.StatusInternalServerError)
+		return
+	}
+	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.ListPendingScreeningsRow) (time.Time, uuid.UUID) {
+		return a.CreatedAt, a.ID
+	})
+	prev, next := pagerLinks(r, "/console/screenings/results", nil, lastTs, lastID, hasMore)
+	canAct := false
+	if su, ok := userFromContext(ctx); ok {
+		canAct = canApprove(su.Role)
+	}
+	s.html(w)
+	_ = template.ScreeningRows(rows, canAct, prev, next, flash).Render(ctx, w)
+}
+
+func (s *Server) consoleScreeningsResults(w http.ResponseWriter, r *http.Request) {
+	s.renderScreenings(w, r, "")
+}
+
 func (s *Server) consoleApprove(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.requireRole(w, r, canApprove)
 	if !ok {

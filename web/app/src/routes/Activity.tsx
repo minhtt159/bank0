@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
 import { formatMinor } from "../lib/money";
+import { transferStatusLabel } from "../lib/labels";
 import type { TransferListItem } from "../api/types";
 import { ErrorBanner } from "../lib/feedback";
 
@@ -85,7 +86,7 @@ export function Activity() {
                 </span>
                 <span class="muted" style="font-size:13px">
                   {t.requested_at ? new Date(t.requested_at).toLocaleDateString() : ""}
-                  {t.status !== "posted" ? ` · ${t.status}` : ""}
+                  {t.status !== "posted" ? ` · ${transferStatusLabel(t.status)}` : ""}
                 </span>
               </div>
             </a>

@@ -47,9 +47,11 @@ JWT subject.
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
 | Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
-| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true` |
-| Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned) |
-| Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle |
+| Transfers | POST | `/transfers/intent` | bearer | **read-only fraud/AML preflight** (§8): returns the collapsed `decision` + `risk_band` + `reason_codes[]` + optional `warning{}` + `step_up_method`; reserves nothing, posts nothing, writes no row; **never** a numeric score; 403 if the debit isn't owned |
+| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true`. The fraud/AML gate may park the payment: status `held` (customer cooling-off) or `under_review` (operator screening) instead of `posted` (§8); `422 payment_blocked` / `409 ack_required` are the gate's refusals |
+| Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned); `held`/`under_review` carry `hold_reason` + `hold_expires_at` |
+| Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle; `cancel` also releases a `held` transfer, but refuses `under_review` (409, operator-only) |
+| Transfers | POST | `/transfers/{id}/confirm` | bearer | **release a `held` transfer** → `posted` (Rec 22 cooling-off); owner only (foreign/unknown → 404); idempotent (already-`posted` → `posted`); not-held / `under_review` / expired window → 409 |
 | Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
 | Notifications | GET | `/me/events/unread` | bearer | unread count (badge) |
 | Notifications | POST | `/me/events/read` | bearer | mark read up to a cursor (or all); idempotent |
@@ -168,8 +170,22 @@ behalf). One customer can never read or debit another's account.
 
 - `POST /transfers` **requires** an `Idempotency-Key` header; replays return the
   original result and never double-post ([`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md)).
+- **Documented header semantics (Rec 4).** The OpenAPI spec now spells the
+  `Idempotency-Key` contract out on every mutating money POST that carries one —
+  `postTransfer`, `confirmTransfer`, `cancelTransfer`, `raiseDispute`,
+  `reverseTransfer`: a replay with the same key + same parameters returns the
+  original result with **`Idempotency-Replayed: true`**; the same key with different
+  parameters is **`422 idempotency_key_conflict`**; a duplicate racing an in-flight
+  request is **`409 in_progress`**; keys are retained **~7 days**, after which the
+  same key is a fresh request. (`raiseDispute` is naturally idempotent on
+  `(transfer, caller)` — at most one open dispute per pair — rather than on a header.)
+- **Reverse is idempotent on the transfer, not just the key (Rec 4).** A second
+  reverse of an already-reversed transfer — even under a **different** key — returns
+  the **existing** reversal id (`200`), never a second inverse pair
+  ([`03-...md`](03-ledger-lifecycle-idempotency.md) §2.4).
 - `mapDBError` is the only place HTTP status is derived from DB SQLSTATEs — every
-  business rule still lives in the database.
+  business rule still lives in the database. New codes: `422 payment_blocked` and
+  `409 ack_required` from the fraud gate (§8).
 - Money is **int64 minor units** end to end; `currency` is single (EUR) for now.
 
 ---
@@ -268,3 +284,114 @@ are unchanged, so the ledger and ownership logic don't move.
 - **Open backlog** (full KYC/document capture, notifications, statement
   export, multi-currency) lives in [`specs/`](specs/) — see
   [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).
+
+---
+
+## 8. Fraud preflight, warnings & held payments (SHIPPED)
+
+The adaptive-fraud surfaces (Recs 22/23/25) let the customer surface see — and act
+on — the **same** server-side risk decision the ledger enforces at submit. As
+always the logic lives in the DB (`evaluate_transfer`, `screen_payment`,
+`assert_warning_ack`, `place_transfer_hold`, `client_confirm_transfer`); the client
+renders and the engine decides. The mechanics are in
+[`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) §2.8/§1;
+this is the client contract.
+
+### 8.1 The preflight — `POST /transfers/intent`
+
+A **read-only** preview of what would happen if the caller submitted a given
+transfer. It runs the exact evaluation `POST /transfers` applies but reserves
+nothing, posts nothing, and writes no row — call it as often as you like (e.g. on
+amount/payee change). It requires the caller to own the debit account (**403**
+otherwise). The response:
+
+```jsonc
+{
+  "decision": "warn",                       // allow | warn | step_up | review | block
+  "risk_band": "medium",                    // low | medium | high (server-authoritative)
+  "reason_codes": ["first_payment_to_payee"],// machine tokens; ALWAYS an array, never null
+  "warning": {                               // present only when a warning rule matched, else null
+    "warning_id": "…", "category": "risk_warning",
+    "severity": "warning",                   // info | warning | critical
+    "headline": "…", "body": "…",
+    "required_ack": true, "cooling_off_seconds": 15
+  },
+  "step_up_method": null                     // "otp" when decision = step_up, else null
+}
+```
+
+**There is no numeric risk score in the response, by design** — the score never
+leaves the database. `decision` is the single collapsed outcome (precedence
+`block > review > step_up > warn > allow`):
+
+| `decision` | Meaning for the client |
+|---|---|
+| `allow` | Proceed; submit will post. |
+| `warn` | Show `warning`; the customer may proceed (record the ack if `required_ack`). |
+| `step_up` | Re-verification **dynamically linked to this exact payment** is required before submit — run the step-up flow in §6.2 (`step_up_method` says how, e.g. `otp`). |
+| `review` | Submitting will **park** the payment as `held` for the customer to confirm (§8.3). |
+| `block` | Submitting will be refused `422 payment_blocked`. |
+
+Because both the preflight and the submit gate call `evaluate_transfer`, and the
+submit path excludes its own just-created pending row from the velocity math, the
+two agree at a boundary. One deliberate divergence: the preflight **downgrades
+`step_up → allow`** (dropping `step_up_method`) when the caller could never be gated
+— they have no MFA enrolled, or their token already carries a fresh OTP linked to
+exactly this `(debit, credit, amount)` — so the client isn't told to step up for a
+payment it can already make. `warn`/`review`/`block` are never downgraded.
+
+### 8.2 The acknowledgement rule (liability evidence)
+
+When `warning.required_ack` is true, the customer must record a
+"warned-and-proceeded" acknowledgement via `POST /me/warning-acks` (§1 Fraud
+evidence; category `risk_warning` joins the existing CoP/VOP categories) **before**
+submitting. At submit time the DB (`assert_warning_ack`) requires a matching
+`warning_acks` row on all of:
+
+- `user` = the caller, `category` = the warning's category, `acknowledged = true`;
+- `debit account` = the debit, `counterparty IBAN` = the credit party's IBAN,
+  `amount_minor` = the **exact** amount;
+- **aged** at least `cooling_off_seconds` old, yet still **fresh** — within
+  `cooling_off_seconds + 30 minutes`.
+
+The dual bound is deliberate: the age floor stops a customer pre-clicking "I
+understand" far in advance, and the 30-minute ceiling stops a stale ack from a prior
+session authorising a later payment. Change the amount or the payee and the old ack
+no longer matches. A missing / too-fresh / too-old / mismatched ack is
+**`409 ack_required`**; the client re-acknowledges (respecting the cooling-off) and
+retries with the **same** `Idempotency-Key` — a blocked/ack-required attempt leaves
+no claimed key (it rolls back), so the retry posts exactly once
+([`03-...md`](03-ledger-lifecycle-idempotency.md) §3).
+
+### 8.3 Held & under-review payments (the customer's view)
+
+The submit gate can return a **parked** transfer instead of `posted` — funds
+reserved, no ledger entry yet, `hold_reason` + `hold_expires_at` populated on the
+`Transfer`, and a `transfer.held` event pushed to the payer's feed:
+
+- **`held`** — the customer's own cooling-off (a `review` decision, 1 business day).
+  The owner releases it with **`POST /transfers/{id}/confirm`** (→ `posted`) or
+  withdraws it with `POST /transfers/{id}/cancel`. Confirming an already-posted
+  transfer is an idempotent no-op; a lapsed confirmation window is `409`.
+- **`under_review`** — operator AML screening (a `screen_payment` watchlist hit, 4
+  business days). The customer can **neither confirm nor cancel** it (both → `409`);
+  an operator releases or refuses it from the console screening queue
+  ([`05-admin-ui.md`](05-admin-ui.md) §4.4a). It is **never auto-released**.
+
+Either way, if the window lapses the maintenance sweep **auto-cancels** the transfer
+(`'confirmation window expired'` / `'review window expired'`) — the fail-safe
+direction. `GET /transfers` and `GET /transfers/{id}` accept and return `held` /
+`under_review` alongside the other statuses.
+
+### 8.4 PWA behaviour
+
+The Transfer flow (`web/app/src/routes/Transfer.tsx`) calls `/transfers/intent` on
+the confirm screen and renders the `warning` as a severity-styled card with the
+correct ARIA role (`alert` for `critical`, `aria-live="polite"` otherwise). When
+`required_ack`, it shows an acknowledgement checkbox that posts the ack, then runs a
+live **cooling-off countdown** (`lib/duration.ts`) off the ack timestamp and keeps
+the **Send** button disabled until the countdown elapses. Submit-time
+`422 payment_blocked` / `409 ack_required` responses are mapped back into the same
+warning card (rather than a raw banner), so the DB stays the source of truth even if
+the advisory preflight was skipped or raced. `held`/`under_review` results route to
+the receipt like any other status.

@@ -9,7 +9,7 @@
 -- accounts ties to 'out'). Composite (requested_at, id) keyset cursor (bare array, no
 -- envelope); all filters narg -> omitted = no filter. counterparty_owner is masked.
 SELECT t.id, t.debit_account_id, t.credit_account_id, t.amount_minor, t.currency,
-       t.status, t.kind, t.description, t.requested_at, t.posted_at,
+       t.status, t.kind, t.description, t.hold_reason, t.hold_expires_at, t.requested_at, t.posted_at,
        CASE WHEN da.user_id = sqlc.arg(subject)::uuid THEN 'out' ELSE 'in' END AS direction,
        CASE WHEN da.user_id = sqlc.arg(subject)::uuid
             THEN COALESCE(ca.iban, ca.system_code, '')
@@ -53,6 +53,10 @@ SELECT client_post_transfer(sqlc.arg(caller_subject)::uuid, sqlc.arg(id)::uuid) 
 -- Caller-scoped cancel: enforces debit-account ownership in the DB (TRANSFER-1).
 SELECT client_cancel_transfer(sqlc.arg(caller_subject)::uuid, sqlc.arg(id)::uuid, sqlc.arg(reason)::text) AS status;
 
+-- name: ClientConfirmTransfer :one
+-- Caller-scoped confirm: releases the caller's own held transfer (Rec 22 cooling-off).
+SELECT client_confirm_transfer(sqlc.arg(caller_subject)::uuid, sqlc.arg(id)::uuid) AS status;
+
 -- name: ReverseTransfer :one
 SELECT reverse_transfer(
     sqlc.arg(id)::uuid,
@@ -62,7 +66,8 @@ SELECT reverse_transfer(
 
 -- name: GetTransfer :one
 SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status, kind,
-       reverses_id, description, uetr, end_to_end_id, failure_reason, requested_at, posted_at, created_at, updated_at
+       reverses_id, description, uetr, end_to_end_id, failure_reason, hold_reason, hold_expires_at,
+       requested_at, posted_at, created_at, updated_at
 FROM transfers WHERE id = sqlc.arg(id)::uuid;
 
 -- name: ListPendingTransfers :many
@@ -100,7 +105,8 @@ LIMIT sqlc.arg(page_limit)::int;
 
 -- name: GetTransferDetail :one
 SELECT t.id, t.amount_minor, t.currency, t.status, t.kind, t.reverses_id,
-       t.description, t.failure_reason, t.requested_at, t.posted_at, t.idempotency_key,
+       t.description, t.failure_reason, t.hold_reason, t.hold_expires_at,
+       t.requested_at, t.posted_at, t.idempotency_key,
        COALESCE(da.iban, da.system_code, '') AS debit_label,
        COALESCE(ca.iban, ca.system_code, '') AS credit_label
 FROM transfers t

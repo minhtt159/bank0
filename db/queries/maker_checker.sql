@@ -26,3 +26,31 @@ WHERE aa.action = 'approval_request' AND aa.approved_by IS NULL AND t.status = '
        OR (aa.created_at, aa.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
 ORDER BY aa.created_at DESC, aa.id DESC
 LIMIT sqlc.arg(page_limit)::int;
+
+-- name: CountPendingScreenings :one
+-- Rec 25: the AML screening queue count (payments parked under_review).
+SELECT count(*)::int FROM admin_actions aa
+JOIN transfers t ON t.id = aa.target_id
+WHERE aa.action = 'screening_hold' AND aa.approved_by IS NULL AND t.status = 'under_review';
+
+-- name: ListPendingScreenings :many
+-- Rec 25: the AML screening queue (mirrors ListPendingApprovals; keyset paging).
+SELECT aa.id,
+       aa.created_at,
+       aa.detail,
+       COALESCE(u.username::text, '')::text  AS maker,
+       t.amount_minor,
+       t.hold_reason,
+       t.hold_expires_at,
+       COALESCE(ca.iban, ca.system_code, '') AS credit_iban,
+       COALESCE(da.iban, da.system_code, '') AS debit_iban
+FROM admin_actions aa
+JOIN transfers t  ON t.id  = aa.target_id
+LEFT JOIN users u ON u.id  = aa.actor_user_id
+JOIN accounts da  ON da.id = t.debit_account_id
+JOIN accounts ca  ON ca.id = t.credit_account_id
+WHERE aa.action = 'screening_hold' AND aa.approved_by IS NULL AND t.status = 'under_review'
+  AND (sqlc.narg(cursor)::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+ORDER BY aa.created_at DESC, aa.id DESC
+LIMIT sqlc.arg(page_limit)::int;

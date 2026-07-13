@@ -215,8 +215,9 @@ func (s *Server) consoleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reconcile error", http.StatusInternalServerError)
 		return
 	}
+	screening, _ := s.pg.Queries.CountPendingScreenings(ctx) // best-effort tile
 	s.html(w)
-	_ = template.DashboardCards(stats, len(issues) == 0, issues, s.cfg.App.Version).Render(ctx, w)
+	_ = template.DashboardCards(stats, len(issues) == 0, issues, int(screening), s.cfg.App.Version).Render(ctx, w)
 }
 
 // searchQ returns the optional ?q= as a *string (nil when empty) for the

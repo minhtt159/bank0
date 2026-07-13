@@ -26,6 +26,15 @@ BEGIN
     ), failed AS (
         UPDATE transfers SET status = 'failed', failure_reason = 'hold expired'
         WHERE id IN (SELECT transfer_id FROM expired) AND status = 'pending'
+    ), lapsed AS (
+        -- Parked transfers whose window ran out: AUTO-CANCEL (never auto-release —
+        -- the safe direction). held = the customer never confirmed; under_review =
+        -- the operator never cleared it. Distinct failure_reasons keep the two apart.
+        UPDATE transfers
+           SET status = 'canceled',
+               failure_reason = CASE status WHEN 'held' THEN 'confirmation window expired'
+                                            ELSE 'review window expired' END
+        WHERE id IN (SELECT transfer_id FROM expired) AND status IN ('held', 'under_review')
     )
     SELECT count(*) INTO v_n FROM expired;
     RETURN v_n;
@@ -81,7 +90,17 @@ CREATE OR REPLACE FUNCTION reconcile() RETURNS TABLE (check_name TEXT, detail TE
     FROM accounts a
     LEFT JOIN (SELECT account_id, SUM(amount_minor) AS s
                  FROM holds WHERE status = 'active' GROUP BY account_id) h ON h.account_id = a.id
-    WHERE a.held_minor <> COALESCE(h.s, 0);
+    WHERE a.held_minor <> COALESCE(h.s, 0)
+
+    UNION ALL
+    -- I5: a parked transfer (held/under_review) MUST retain an active hold reserving
+    -- its funds. A parked row with no active hold means the funds were silently freed
+    -- while the transfer still claims to move them — a leak the sweep would miss.
+    SELECT 'missing_hold',
+           format('transfer %s in state %s has no active hold', t.id, t.status)
+    FROM transfers t
+    WHERE t.status IN ('held', 'under_review')
+      AND NOT EXISTS (SELECT 1 FROM holds h WHERE h.transfer_id = t.id AND h.status = 'active');
 $$ LANGUAGE sql STABLE;
 
 -- +goose StatementEnd

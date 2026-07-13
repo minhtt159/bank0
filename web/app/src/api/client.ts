@@ -14,10 +14,12 @@ import type {
   ResolvedAccount,
   Session,
   Transfer,
+  TransferIntent,
   TransferListItem,
   TransferResult,
   TransferSuggestion,
   User,
+  WarningAckRequest,
   VerifyContactRequest,
   VerifyContactResponse,
 } from "./types";
@@ -175,6 +177,24 @@ export const api = {
     idempotencyKey: string,
   ) => req<TransferResult>("POST", "/transfers", { body, idempotencyKey }),
   getTransfer: (id: string) => req<Transfer>("GET", `/transfers/${id}`),
+
+  // Read-only fraud preflight run at the confirm step. No Idempotency-Key — it
+  // never moves money; it only decides whether to warn/step-up/block the send.
+  transferIntent: (body: { debit_account: string; credit_account: string; amount_minor: number }) =>
+    req<TransferIntent>("POST", "/transfers/intent", { body }),
+  // Release a held (customer-confirmable) transfer — posts it. 409 if the window
+  // lapsed or it moved to review. Path-param only; not a fresh money move.
+  confirmTransfer: (id: string) =>
+    req<{ transfer_id: string; status: string }>("POST", `/transfers/${id}/confirm`, {}),
+  // Cancel a pending or held transfer (releases the hold). Idempotent.
+  cancelTransfer: (id: string, reason?: string) =>
+    req<{ id?: string; status: string }>("POST", `/transfers/${id}/cancel`, {
+      body: reason ? { reason } : undefined,
+    }),
+  // CoP/VOP liability evidence, posted BEFORE the transfer submit. Not a money
+  // move (no Idempotency-Key); the cooling-off clock starts from the row's age.
+  recordWarningAck: (body: WarningAckRequest) =>
+    req<{ id: string }>("POST", "/me/warning-acks", { body }),
 
   // Cross-account transfer history, newest first. Keyset paging: pass the last row's
   // requested_at as `cursor` AND its id as `cursor_id` (composite tie-break).

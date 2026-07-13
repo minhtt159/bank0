@@ -32,6 +32,31 @@ var testDSN = os.Getenv("TEST_DATABASE_DSN")
 
 func TestMain(m *testing.M) {
 	if testDSN != "" {
+		// `go test ./...` runs internal/db and internal/api in parallel, and both
+		// packages mutate the global gate tables (warning_rules, watchlist_entries).
+		// Isolate this package on its own database, recreated fresh each run so
+		// in-place migration edits (incubation mode) always apply.
+		u, err := url.Parse(testDSN)
+		if err != nil {
+			panic("parse TEST_DATABASE_DSN: " + err.Error())
+		}
+		apiDB := strings.TrimPrefix(u.Path, "/") + "_api"
+		base, err := db.NewPostgres(config.DatabaseConfig{
+			DSN: testDSN, MaxOpenConns: 2, MaxIdleConns: 1, ConnTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			panic("connect base test db: " + err.Error())
+		}
+		ctx := context.Background()
+		if _, err := base.Pool.Exec(ctx, `DROP DATABASE IF EXISTS `+apiDB+` WITH (FORCE)`); err != nil {
+			panic("drop api test db: " + err.Error())
+		}
+		if _, err := base.Pool.Exec(ctx, `CREATE DATABASE `+apiDB); err != nil {
+			panic("create api test db: " + err.Error())
+		}
+		base.Close()
+		u.Path = "/" + apiDB
+		testDSN = u.String()
 		if err := migrate.Up(testDSN); err != nil {
 			panic("migrate test db: " + err.Error())
 		}

@@ -119,13 +119,16 @@ $$ LANGUAGE sql;
 -- DIFFERENT admin approves (posts) or rejects (cancels). approved_by records the approver.
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- approve_request: a DIFFERENT admin posts the transfer. Enforces 4-eyes.
+-- approve_request: a DIFFERENT admin posts the transfer. Enforces 4-eyes. Handles
+-- both queues: 'approval_request' (high-value staging, posts FROM pending) and
+-- 'screening_hold' (Rec 25 AML review, posts FROM under_review). The screening
+-- actor is the initiating customer, so the self-approval guard is always satisfied.
 CREATE OR REPLACE FUNCTION approve_request(p_request_id UUID, p_approver UUID)
 RETURNS UUID AS $$
 DECLARE v_req admin_actions%ROWTYPE;
 BEGIN
     SELECT * INTO v_req FROM admin_actions
-     WHERE id = p_request_id AND action = 'approval_request' FOR UPDATE;
+     WHERE id = p_request_id AND action IN ('approval_request', 'screening_hold') FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'approval request % not found', p_request_id; END IF;
     IF v_req.approved_by IS NOT NULL THEN
         RAISE EXCEPTION 'request already handled' USING ERRCODE = 'check_violation';
@@ -133,7 +136,11 @@ BEGIN
     IF v_req.actor_user_id = p_approver THEN
         RAISE EXCEPTION 'cannot approve your own request' USING ERRCODE = '42501';
     END IF;
-    PERFORM post_transfer(v_req.target_id);
+    IF v_req.action = 'screening_hold' THEN
+        PERFORM post_transfer(v_req.target_id, ARRAY['under_review']::transfer_status[]);
+    ELSE
+        PERFORM post_transfer(v_req.target_id);
+    END IF;
     UPDATE admin_actions SET approved_by = p_approver WHERE id = p_request_id;
     RETURN v_req.target_id;
 END;
@@ -146,7 +153,7 @@ RETURNS UUID AS $$
 DECLARE v_req admin_actions%ROWTYPE;
 BEGIN
     SELECT * INTO v_req FROM admin_actions
-     WHERE id = p_request_id AND action = 'approval_request' FOR UPDATE;
+     WHERE id = p_request_id AND action IN ('approval_request', 'screening_hold') FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'approval request % not found', p_request_id; END IF;
     IF v_req.approved_by IS NOT NULL THEN
         RAISE EXCEPTION 'request already handled' USING ERRCODE = 'check_violation';
@@ -292,6 +299,11 @@ $$ LANGUAGE plpgsql;
 CREATE INDEX idx_admin_actions_pending_limit
     ON admin_actions (created_at DESC)
     WHERE action = 'limit_request' AND approved_by IS NULL;
+
+-- the pending AML-screening queue (Rec 25; mirrors the approvals/limit queues).
+CREATE INDEX idx_admin_actions_pending_screening
+    ON admin_actions (created_at DESC)
+    WHERE action = 'screening_hold' AND approved_by IS NULL;
 
 -- +goose Down
 -- +goose StatementBegin

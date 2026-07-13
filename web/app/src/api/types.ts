@@ -131,6 +131,51 @@ export interface Transfer {
   description?: string;
   requested_at?: string;
   posted_at?: string;
+  // Fraud-hold lifecycle (status "held" / "under_review"). Kept after release for
+  // audit, so they may be present on posted/canceled transfers too.
+  hold_reason?: string | null;
+  hold_expires_at?: string | null;
+}
+
+// Read-only transfer preflight (POST /transfers/intent). Never moves money; it
+// surfaces the fraud decision + optional warning card the client renders before
+// the customer commits to sending.
+export type TransferDecision = "allow" | "step_up" | "review" | "block" | "warn";
+export type RiskBand = "low" | "medium" | "high";
+export type WarningSeverity = "info" | "warning" | "critical";
+
+export interface TransferWarning {
+  warning_id: string;
+  category: string;
+  severity: WarningSeverity;
+  headline: string;
+  body: string;
+  // true = the customer must tick "I understand" (and wait out the cooling-off)
+  // before the server will accept the transfer.
+  required_ack: boolean;
+  // Seconds the ack must age before submit succeeds; 0 = no countdown.
+  cooling_off_seconds: number;
+}
+
+export interface TransferIntent {
+  decision: TransferDecision;
+  risk_band: RiskBand;
+  reason_codes: string[];
+  warning?: TransferWarning | null;
+  step_up_method?: string | null;
+}
+
+// CoP/VOP liability evidence (POST /me/warning-acks). Recorded BEFORE the transfer
+// submit; the debit account must be the caller's. `acknowledged` defaults true
+// (customer proceeded past the warning).
+export interface WarningAckRequest {
+  category: string;
+  reason_code?: string;
+  acknowledged?: boolean;
+  debit_account_id?: string;
+  counterparty_iban?: string;
+  amount_minor?: number;
+  device?: string;
 }
 
 // One transfer in the caller's cross-account history. `direction` is caller-relative:

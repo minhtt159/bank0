@@ -40,6 +40,20 @@ func (q *Queries) CountPendingApprovals(ctx context.Context) (int32, error) {
 	return column_1, err
 }
 
+const countPendingScreenings = `-- name: CountPendingScreenings :one
+SELECT count(*)::int FROM admin_actions aa
+JOIN transfers t ON t.id = aa.target_id
+WHERE aa.action = 'screening_hold' AND aa.approved_by IS NULL AND t.status = 'under_review'
+`
+
+// Rec 25: the AML screening queue count (payments parked under_review).
+func (q *Queries) CountPendingScreenings(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingScreenings)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listPendingApprovals = `-- name: ListPendingApprovals :many
 SELECT aa.id,
        aa.created_at,
@@ -91,6 +105,77 @@ func (q *Queries) ListPendingApprovals(ctx context.Context, arg ListPendingAppro
 			&i.Detail,
 			&i.Maker,
 			&i.AmountMinor,
+			&i.CreditIban,
+			&i.DebitIban,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingScreenings = `-- name: ListPendingScreenings :many
+SELECT aa.id,
+       aa.created_at,
+       aa.detail,
+       COALESCE(u.username::text, '')::text  AS maker,
+       t.amount_minor,
+       t.hold_reason,
+       t.hold_expires_at,
+       COALESCE(ca.iban, ca.system_code, '') AS credit_iban,
+       COALESCE(da.iban, da.system_code, '') AS debit_iban
+FROM admin_actions aa
+JOIN transfers t  ON t.id  = aa.target_id
+LEFT JOIN users u ON u.id  = aa.actor_user_id
+JOIN accounts da  ON da.id = t.debit_account_id
+JOIN accounts ca  ON ca.id = t.credit_account_id
+WHERE aa.action = 'screening_hold' AND aa.approved_by IS NULL AND t.status = 'under_review'
+  AND ($1::timestamptz IS NULL
+       OR (aa.created_at, aa.id) < ($1::timestamptz, $2::uuid))
+ORDER BY aa.created_at DESC, aa.id DESC
+LIMIT $3::int
+`
+
+type ListPendingScreeningsParams struct {
+	Cursor    *time.Time `json:"cursor"`
+	CursorID  *uuid.UUID `json:"cursor_id"`
+	PageLimit int32      `json:"page_limit"`
+}
+
+type ListPendingScreeningsRow struct {
+	ID            uuid.UUID  `json:"id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	Detail        []byte     `json:"detail"`
+	Maker         string     `json:"maker"`
+	AmountMinor   int64      `json:"amount_minor"`
+	HoldReason    *string    `json:"hold_reason"`
+	HoldExpiresAt *time.Time `json:"hold_expires_at"`
+	CreditIban    string     `json:"credit_iban"`
+	DebitIban     string     `json:"debit_iban"`
+}
+
+// Rec 25: the AML screening queue (mirrors ListPendingApprovals; keyset paging).
+func (q *Queries) ListPendingScreenings(ctx context.Context, arg ListPendingScreeningsParams) ([]ListPendingScreeningsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingScreenings, arg.Cursor, arg.CursorID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingScreeningsRow
+	for rows.Next() {
+		var i ListPendingScreeningsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.Detail,
+			&i.Maker,
+			&i.AmountMinor,
+			&i.HoldReason,
+			&i.HoldExpiresAt,
 			&i.CreditIban,
 			&i.DebitIban,
 		); err != nil {
