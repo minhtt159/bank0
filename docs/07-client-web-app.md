@@ -18,8 +18,11 @@ Six customer flows:
 3. Homepage = the user's accounts as a vertical scroll list.
 4. Create a transaction (transfer).
 5. Transfer card: **fuzzy-pick the source account**, **fuzzy-pick the destination**
-   (from **saved beneficiaries**).
-6. On success, show transfer details → back to homepage.
+   (from **saved beneficiaries**); a read-only **fraud preflight** (`/transfers/intent`)
+   may add a warning card + acknowledgement + cooling-off before Send.
+6. On success, show transfer details → back to homepage. A gated payment may land
+   `held` (customer confirms or cancels from the receipt) or `under_review`
+   (operator decides; no customer action).
 
 **Principles inherited** ([`01-overview.md`](01-overview.md)): the API stays thin, the
 ledger/DB stays the source of truth, ownership is scoped to the JWT subject. The web app
@@ -75,8 +78,12 @@ endpoints.
 | 2/3 Accounts | `GET /users/{id}/accounts` → `[Account]` (ownership-scoped to `sub`) |
 | 2/3 Account + balance | `GET /accounts/{id}` → `Account` |
 | 2/3 Statement | `GET /accounts/{id}/ledger?cursor&limit` → `[LedgerEntry]` (cursor-paginated, running balance, counterparty) |
+| 4 Preflight | `POST /transfers/intent` → `TransferIntent` (decision + warning copy; read-only, no idempotency key) |
+| 4 Warning ack | `POST /me/warning-acks` (evidence row the submit-time gate checks) |
 | 4 Create transfer | `POST /transfers` (+`Idempotency-Key` header) → `TransferResult` |
-| 6 Transfer detail | `GET /transfers/{id}` → `Transfer` |
+| 6 Transfer detail | `GET /transfers/{id}` → `Transfer` (incl. `hold_reason`/`hold_expires_at`) |
+| 6 Release held | `POST /transfers/{id}/confirm` → posts a `held` transfer (owner only) |
+| 6 Cancel held | `POST /transfers/{id}/cancel` → cancels `pending`/`held` (refuses `under_review`) |
 
 ### 3.2 Backend endpoints behind these flows
 
@@ -164,6 +171,7 @@ retry** of that same attempt so a flaky network can't double-post.
 /profile      →  My details                        → GET /me                          [Flow 2]
 /transfer     →  Transfer card                     → fuzzy source (accounts) + fuzzy dest (beneficiaries) [Flow 4/5]
                  + "add payee" → GET /beneficiaries/resolve?iban= → POST /beneficiaries
+                 confirm step → POST /transfers/intent (preflight; warning card / ack / cooling-off)
                  submit → POST /transfers (Idempotency-Key)
 /transfer/:id →  Result / receipt                  → GET /transfers/:id → "Back to home" [Flow 6]
 ```
@@ -187,11 +195,25 @@ Details per flow:
      `POST /beneficiaries` → it appears in the list, selected.
    - Amount input in major units → convert to `amount_minor`. Client-side guard against
      `amount_minor > available_minor`. Confirm step.
+   - **Fraud preflight (Rec 22).** Entering the confirm step fires `POST /transfers/intent`
+     (advisory — a failed call never blocks). A returned warning renders as a severity-styled
+     card (colored border **plus** a text tag, never color-only; `role="alert"` for critical).
+     `decision:"block"` hides Send with plain-language guidance. `required_ack` adds an
+     "I understand the risk" checkbox: ticking it POSTs `/me/warning-acks` (category from the
+     warning, payee IBAN, exact amount) and starts a `cooling_off_seconds` countdown
+     (mm:ss on the Send button, `aria-live` polite) — Send enables at zero. `decision:"review"`
+     shows info copy that the payment will be held after sending.
    - Submit `POST /transfers` with a UUID `Idempotency-Key` (held for the duration of the
-     attempt so retries dedupe).
+     attempt so retries dedupe). Submit-time `409 ack_required` / `422 payment_blocked`
+     re-render the same warning UI (re-fetching the preflight for real copy), not a raw error.
 6. **Receipt.** On success use `transfer_id` → `GET /transfers/:id`; show status, amount,
    parties, `posted_at`. If `status=pending` (deferred settlement / maker-checker), say so.
-   "Back to home" → `/` (refetch accounts so the new balance shows).
+   `status=held` (risk cooling-off): explain the hold, show `hold_expires_at`
+   ("confirm before … or it will be canceled"), with **Confirm and send**
+   (`POST /transfers/:id/confirm`) and **Cancel payment** buttons. `status=under_review`
+   (screening): "being reviewed by the bank, no action needed, decision by
+   `hold_expires_at`" — no customer actions. "Back to home" → `/` (refetch accounts
+   so the new balance shows).
 
 ---
 
@@ -257,8 +279,10 @@ Worker logic (`worker/index.ts`):
   when the user taps "Confirm"; keep it pinned to that attempt and resend it on retry. A new
   attempt (user edits and resubmits) gets a new key.
 - **Error mapping:** the API returns `{error, message}`. Map `401`→re-login,
-  `403`→permission/ownership (or future `step_up_required`), `404`→not found,
-  `422`→business rule (insufficient funds, limit, frozen) shown inline, `429`→back off.
+  `403`→permission/ownership (or `step_up_required` → OTP step-up), `404`→not found,
+  `409 ack_required`→warning card + ack + cooling-off (not a raw banner),
+  `422 payment_blocked`→blocking warning card, other `422`→business rule
+  (insufficient funds, limit, frozen) shown inline, `429`→back off.
 - **Money:** all amounts are **int64 minor units**; never use floats. Display with
   `Intl.NumberFormat(locale, {style:'currency', currency})` on `minor/100`.
 

@@ -47,3 +47,6 @@
 export TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable'
 go test ./internal/api/ -run 'TestSecurity|TestCSRFGuard|TestRateLimit' -count=1 -v
 ```
+
+The `internal/api` suite derives its own database from the DSN (drops/recreates
+`bank0_test_api` in `TestMain`), so the DSN's role needs `CREATE DATABASE`.

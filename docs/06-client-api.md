@@ -52,7 +52,7 @@ JWT subject.
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned); `held`/`under_review` carry `hold_reason` + `hold_expires_at` |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle; `cancel` also releases a `held` transfer, but refuses `under_review` (409, operator-only) |
 | Transfers | POST | `/transfers/{id}/confirm` | bearer | **release a `held` transfer** → `posted` (Rec 22 cooling-off); owner only (foreign/unknown → 404); idempotent (already-`posted` → `posted`); not-held / `under_review` / expired window → 409 |
-| Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
+| Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`transfer.held`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
 | Notifications | GET | `/me/events/unread` | bearer | unread count (badge) |
 | Notifications | POST | `/me/events/read` | bearer | mark read up to a cursor (or all); idempotent |
 | Fraud evidence | POST | `/me/warning-acks` | bearer | "warned and proceeded / backed out" liability evidence (CoP/VOP pivot); append-only, debit account must be the caller's |
