@@ -1588,7 +1588,7 @@ type ServerInterface interface {
 	// Create a transfer (auto-posts by default). Idempotent.
 	// (POST /transfers)
 	CreateTransfer(w http.ResponseWriter, r *http.Request, params CreateTransferParams)
-	// Preview the fraud/AML decision for a would-be transfer (moves no money).
+	// Preview the fraud decision for a would-be transfer (moves no money).
 	// (POST /transfers/intent)
 	TransferIntent(w http.ResponseWriter, r *http.Request)
 	// Guided-transfer demo: up to 3 candidate destination accounts (other users', randomly sampled + shuffled, optionally including a short-listed mule). The client picks one at random; an empty array means "no candidate — fall back to the caller's own account". Read-only; never moves money.

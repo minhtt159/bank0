@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -175,6 +176,106 @@ func TestHTTPTransferIntentWarning(t *testing.T) {
 		if !strings.Contains(b, want) {
 			t.Errorf("intent warning body missing %s: %s", want, b)
 		}
+	}
+}
+
+// TestHTTPIntentSubmitStepUpParity pins the invariant that POST /transfers/intent's
+// step-up PREVIEW never diverges from POST /transfers' actual step-up GATE on the
+// "new payee" axis. The gate keys "known payee" on a SAVED beneficiary
+// (IsKnownPayee); evaluate_transfer must compute its payee axis with the exact same
+// predicate — NOT assess_transfer_risk's first_payment_to_payee (prior posted
+// transfer). If the two ever drift, a customer is told "no step-up needed" and then
+// rejected with 403 (or told to step up for a payment they can already make).
+//
+// One MFA-enrolled caller, amount below the step-up limit, low risk band — so the
+// only axis in play is the payee, isolated across two payees:
+//   - carol: SAVED beneficiary the caller has NEVER paid  -> preview allow / gate allows
+//   - bob:   PAID before but NEVER saved as a beneficiary -> preview step_up / gate 403
+func TestHTTPIntentSubmitStepUpParity(t *testing.T) {
+	// StepUpLimitMinor is 5_000 here; all amounts below stay off the value axis.
+	ts, pg := newMfaTestServer(t, 5*time.Minute)
+	clearGates(t, pg) // no warning/AML rule may perturb the decision — isolate the payee axis
+
+	uid, uname := mkUser(t, pg, sqlc.UserRoleCustomer)
+	aliceAcct := mkAcct(t, pg, uid, 1_000_000)
+	bobID, _ := mkUser(t, pg, sqlc.UserRoleCustomer) // will be PAID but never saved
+	bobAcct := mkAcct(t, pg, bobID, 0)
+	carolID, _ := mkUser(t, pg, sqlc.UserRoleCustomer) // will be SAVED but never paid
+	carolAcct := mkAcct(t, pg, carolID, 0)
+
+	const amt = int64(500) // below the 5_000 step-up limit
+
+	tok := bearerFor(t, ts.URL, uname, "pw")
+
+	// Create the "previously paid" relationship to bob BEFORE enrolling MFA: an
+	// un-enrolled caller is never gated, so this posts and makes bob a paid payee
+	// (first_payment_to_payee will be FALSE for bob afterwards) while he stays OUT
+	// of the beneficiaries table.
+	if r := createXfer(t, ts.URL, tok, aliceAcct, bobAcct, amt); r.StatusCode != http.StatusOK {
+		t.Fatalf("seed prior payment to bob = %d, want 200: %s", r.StatusCode, body(t, r))
+	}
+
+	// Save carol as a beneficiary but NEVER pay her (first_payment_to_payee stays
+	// TRUE for carol, yet she is a known payee by the saved-beneficiary predicate).
+	carolIban := creditIban(t, pg, carolAcct)
+	if _, err := pg.Pool.Exec(context.Background(), `SELECT add_beneficiary($1,'pal',$2)`, uid, carolIban); err != nil {
+		t.Fatalf("add beneficiary carol: %v", err)
+	}
+
+	// Enroll MFA on the SAME password token: it stays a valid bearer but carries no
+	// fresh OTP, so the step-up gate is now reachable for this caller.
+	enrollAndConfirm(t, ts.URL, tok)
+	auth := map[string]string{"Authorization": "Bearer " + tok}
+
+	intentDecision := func(credit uuid.UUID) (string, string) {
+		t.Helper()
+		r := postJSON(t, ts.URL+"/transfers/intent", auth, map[string]any{
+			"debit_account": aliceAcct.String(), "credit_account": credit.String(), "amount_minor": amt,
+		})
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("intent = %d: %s", r.StatusCode, body(t, r))
+		}
+		var out struct {
+			Decision     string  `json:"decision"`
+			StepUpMethod *string `json:"step_up_method"`
+		}
+		decodeBody(t, r, &out)
+		method := ""
+		if out.StepUpMethod != nil {
+			method = *out.StepUpMethod
+		}
+		return out.Decision, method
+	}
+
+	// --- Scenario 1: SAVED beneficiary, never paid -> preview & gate BOTH allow. ---
+	if dec, method := intentDecision(carolAcct); dec != "allow" || method != "" {
+		t.Errorf("saved-payee intent = (%q, method %q), want (allow, no method): "+
+			"preview over-promises step-up vs the IsKnownPayee gate", dec, method)
+	}
+	// The gate must agree: a pwd-only token (no fresh OTP) is NOT rejected.
+	r := createXfer(t, ts.URL, tok, aliceAcct, carolAcct, amt)
+	if r.StatusCode == http.StatusForbidden {
+		t.Fatalf("saved-payee POST /transfers = 403 while intent said allow: "+
+			"gate/preview DIVERGENCE on saved beneficiary: %s", body(t, r))
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("saved-payee POST /transfers = %d, want 200: %s", r.StatusCode, body(t, r))
+	}
+
+	// --- Scenario 2: PAID before but never saved -> preview & gate BOTH step_up. ---
+	if dec, method := intentDecision(bobAcct); dec != "step_up" || method != "otp" {
+		t.Errorf("paid-not-saved intent = (%q, method %q), want (step_up, otp): "+
+			"preview under-promises step-up vs the IsKnownPayee gate (a prior posted "+
+			"transfer must NOT make a payee 'known')", dec, method)
+	}
+	// The gate must agree: without a fresh OTP the payment is rejected 403 step_up_required.
+	r = createXfer(t, ts.URL, tok, aliceAcct, bobAcct, amt)
+	if r.StatusCode != http.StatusForbidden {
+		t.Fatalf("paid-not-saved POST /transfers = %d, want 403 while intent said step_up: "+
+			"gate/preview DIVERGENCE on paid-but-unsaved payee: %s", r.StatusCode, body(t, r))
+	}
+	if b := body(t, r); !strings.Contains(b, "step_up_required") {
+		t.Errorf("paid-not-saved gate body = %s, want step_up_required", b)
 	}
 }
 

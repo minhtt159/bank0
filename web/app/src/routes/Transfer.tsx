@@ -6,6 +6,7 @@ import { formatMinor, parseMajor } from "../lib/money";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { isValidIBAN } from "../lib/iban";
 import { formatCountdown } from "../lib/duration";
+import { coolingRemaining, sendState } from "../lib/fraudGate";
 import type {
   Account,
   Beneficiary,
@@ -171,20 +172,21 @@ export function Transfer() {
       setCoolLeft(0);
       return;
     }
-    const tick = () => setCoolLeft(Math.max(0, Math.ceil(cool - (Date.now() - ackedAt) / 1000)));
+    const tick = () => setCoolLeft(coolingRemaining(cool, ackedAt, Date.now()));
     tick();
     const iv = setInterval(tick, 250);
     return () => clearInterval(iv);
   }, [ackedAt, intent]);
 
   const warning = intent?.warning ?? null;
-  const blocked = intent?.decision === "block";
-  const needsAck = !!warning?.required_ack && !blocked;
-  const coolingActive = needsAck && ackedAt != null && coolLeft > 0;
-  // Send is gated by: not blocked, not busy, and (no ack needed OR ack posted and
-  // its cooling-off has elapsed). step_up/review/warn/allow are all sendable — the
-  // server makes the final call (e.g. 403 step_up_required flows to the banner).
-  const canSend = !busy && !blocked && (!needsAck || (ackedAt != null && coolLeft <= 0));
+  // Pure gate decision (see lib/fraudGate). step_up/review/warn/allow are all
+  // sendable — the server makes the final call (e.g. 403 step_up_required flows to
+  // the banner). `busy` is layered on top of the pure state below.
+  const gate = sendState(intent, ackedAt != null, coolLeft);
+  const blocked = gate.mode === "hidden";
+  const needsAck = gate.needsAck;
+  const coolingActive = gate.counting;
+  const canSend = !busy && gate.mode === "enabled";
 
   async function toggleAck(checked: boolean) {
     if (!checked) {

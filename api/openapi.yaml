@@ -815,7 +815,7 @@ paths:
     post:
       operationId: transferIntent
       tags: [client]
-      summary: Preview the fraud/AML decision for a would-be transfer (moves no money).
+      summary: Preview the fraud decision for a would-be transfer (moves no money).
       description: >-
         Read-only preflight for a transfer the caller is about to make: it runs the
         same server-side risk evaluation POST /transfers applies, but reserves nothing,
@@ -824,6 +824,9 @@ paths:
         and — when a warning rule matched — a `warning` object with the customer-facing
         copy and its acknowledgement / cooling-off policy. There is NO numeric risk
         score in the response, by design; the score never leaves the database.
+        DELIBERATE LIMITATION: sanctions/AML watchlist screening does NOT run at
+        preflight (no tipping-off) — a screened payment previews as its risk decision
+        and only comes back `under_review` at submit.
 
 
         `decision` values: `allow` (proceed), `warn` (show the warning, may proceed),

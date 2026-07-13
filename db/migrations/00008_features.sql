@@ -941,7 +941,9 @@ $$ LANGUAGE plpgsql STABLE;
 -- (server-authoritative band + reason codes), picks the ONE best-matching active
 -- warning_rule (block > review > warn by decision severity, then priority DESC, then
 -- oldest), computes the step-up axis (a configured per-payment limit, OR a high band,
--- OR a first payment to this payee -> 'otp'), and collapses everything to a single
+-- OR an unsaved payee -> 'otp'; the payee check is the SAME saved-beneficiary
+-- predicate as the Go gate's IsKnownPayee so the preview never diverges from what
+-- POST /transfers enforces), and collapses everything to a single
 -- decision by precedence block > review > step_up > warn > allow. STABLE and
 -- read-only; the numeric risk score is NEVER surfaced. Asserts the caller owns the
 -- debit account (42501 -> 403) so it is safe to expose on the client intent endpoint.
@@ -993,7 +995,13 @@ BEGIN
     LIMIT 1;
     v_matched := FOUND;
 
-    v_first  := 'first_payment_to_payee' = ANY(v_reasons);
+    -- "New payee" must mirror the submit-time gate (IsKnownPayee: saved
+    -- beneficiary), NOT assess_transfer_risk's first_payment_to_payee (prior
+    -- posted transfer) — else the preview under/over-promises the real step-up.
+    v_first := NOT EXISTS (
+        SELECT 1 FROM beneficiaries b
+         WHERE b.owner_user_id = p_caller
+           AND b.credit_account_id = p_credit);
     v_stepup := (p_step_up_limit_minor > 0 AND p_amount_minor >= p_step_up_limit_minor)
                 OR v_band = 'high' OR v_first;
     IF v_stepup THEN v_method := 'otp'; END IF;

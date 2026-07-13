@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { api, ApiError } from "../api/client";
 import { formatMinor } from "../lib/money";
 import { DISPUTE_CATEGORIES, disputeStatusLabel, transferStatusLabel } from "../lib/labels";
+import { statusActions } from "../lib/fraudGate";
 import type { Dispute, DisputeCategory, Transfer } from "../api/types";
 import { ErrorBanner, Loading } from "../lib/feedback";
 
@@ -69,13 +70,10 @@ export function Receipt({ id }: { id: string }) {
   if (err) return <ErrorBanner>{err}</ErrorBanner>;
   if (!t) return <Loading />;
 
-  const posted = t.status === "posted";
-  const held = t.status === "held";
-  const underReview = t.status === "under_review";
   // A dispute only makes sense once money has actually moved; the server is the
   // authority (422 if not disputable), but hiding the action on non-posted
-  // transfers keeps the happy path clean.
-  const disputable = posted;
+  // transfers keeps the happy path clean. (see lib/fraudGate.statusActions)
+  const { posted, held, underReview, disputable } = statusActions(t.status);
 
   return (
     <>
