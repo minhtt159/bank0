@@ -178,4 +178,4 @@ Prometheus RED + pool gauges.
 
 The open backlog + product roadmap live in [`specs/`](specs/) (start at
 [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md)). The as-built behaviour of every
-shipped feature is documented in the reference docs above (`02`–`11`).
+shipped feature is documented in the reference docs above (`02`–`12`).

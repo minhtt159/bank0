@@ -242,9 +242,9 @@ table as a shared `iban_country_length()` helper, the unregistered-country rejec
 and the BBAN-length guard in `iban_generate` all live in
 [`00002_iban.sql`](../db/migrations/00002_iban.sql). The matching CHECK constraints
 sit alongside their tables: `accounts.iban` in
-[`00004_accounts.sql`](../db/migrations/00004_accounts.sql) and
+[`00007_accounts.sql`](../db/migrations/00007_accounts.sql) and
 `beneficiaries.iban` in
-[`00008_features.sql`](../db/migrations/00008_features.sql). All three layers —
+[`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql). All three layers —
 `internal/iban`, the DB migrations, and `web/app/src/lib/iban.ts` — carry the
 **same 89-country table** and agree byte-for-byte. Column CHECKs are used rather
 than a shared `DOMAIN`. DB-layer coverage lives in `internal/db/iban_test.go`; the
