@@ -127,6 +127,9 @@ export interface Transfer {
   amount_minor: number;
   currency: string;
   status: string;
+  // ISO-20022-aligned parallel status (PDNG/ACSC/RJCT/CANC), computed server-side
+  // from `status`, never stored. Additive; the UI keeps branching on `status`.
+  status_iso?: string;
   kind: string;
   description?: string;
   requested_at?: string;
@@ -187,6 +190,7 @@ export interface TransferListItem {
   amount_minor: number;
   currency: string;
   status: string;
+  status_iso?: string;
   kind: string;
   description?: string;
   direction: "out" | "in";
@@ -206,6 +210,8 @@ export interface Dispute {
   category: DisputeCategory;
   reason?: string;
   resolution_note?: string;
+  // ISO-4217 currency of the disputed transfer (additive; server-provided).
+  currency?: string;
   created_at?: string;
   updated_at?: string;
 }

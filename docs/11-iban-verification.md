@@ -213,7 +213,7 @@ Validate at every layer with a clear **authority split**: the client is convenie
 |---|---|---|---|
 | Client (Preact/TS) | `web/app/src/lib/iban.ts`, `web/app/src/routes/Transfer.tsx` | UX only — *never* authority | Instant inline "invalid IBAN" hint; gate the Look-up / Save buttons |
 | Go server | `internal/iban`, `internal/api/handlers_beneficiaries.go`, `handlers_accounts.go` | **Authority #1** — fail fast, clean `422` | Reject bad checksum before touching the DB, with a precise message via `writeError` |
-| PostgreSQL | `00002_iban.sql` (functions), `00004_accounts.sql` / `00008_features.sql` (CHECKs) | **Authority #2** — non-bypassable backstop | `IMMUTABLE` plpgsql MOD-97 in a `CHECK`; protects admin console, seeds, migrations, any future writer |
+| PostgreSQL | `00002_iban.sql` (functions), `00007_accounts.sql` / `00011_beneficiaries.sql` (CHECKs) | **Authority #2** — non-bypassable backstop | `IMMUTABLE` plpgsql MOD-97 in a `CHECK`; protects admin console, seeds, migrations, any future writer |
 
 Both authorities enforce the checksum: `internal/iban` (Go, fail-fast
 `422 invalid_iban`) and the `iban_is_valid()` MOD-97 validator behind `CHECK`s on
@@ -242,9 +242,9 @@ table as a shared `iban_country_length()` helper, the unregistered-country rejec
 and the BBAN-length guard in `iban_generate` all live in
 [`00002_iban.sql`](../db/migrations/00002_iban.sql). The matching CHECK constraints
 sit alongside their tables: `accounts.iban` in
-[`00004_accounts.sql`](../db/migrations/00004_accounts.sql) and
+[`00007_accounts.sql`](../db/migrations/00007_accounts.sql) and
 `beneficiaries.iban` in
-[`00008_features.sql`](../db/migrations/00008_features.sql). All three layers —
+[`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql). All three layers —
 `internal/iban`, the DB migrations, and `web/app/src/lib/iban.ts` — carry the
 **same 89-country table** and agree byte-for-byte. Column CHECKs are used rather
 than a shared `DOMAIN`. DB-layer coverage lives in `internal/db/iban_test.go`; the

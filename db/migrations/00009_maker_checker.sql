@@ -8,9 +8,9 @@
 -- 4-eyes workflow: request_money_with_approval stages a PENDING transfer + the
 -- approval-queue row atomically; approve_request / reject_request resolve it.
 --
--- Depends on the money paths (00005): request_money_with_approval calls
+-- Depends on the money paths (00008): request_money_with_approval calls
 -- request_transfer; approve/reject call post_transfer/cancel_transfer.
--- default_transfer_limit() here is what create_account (00004) calls at runtime.
+-- default_transfer_limit() here is what create_account (00007) calls at runtime.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────

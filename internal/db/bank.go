@@ -12,10 +12,14 @@ import (
 // whose columns sqlc cannot expand, so they are hand-written with pgx.
 
 // TransferResult mirrors the transfer() / request_transfer() RETURNS TABLE.
+// StatusIso is the computed ISO-20022 projection of Status (Rec 20; never stored);
+// only ClientTransfer populates it — the raw transfer()/request_transfer() shims
+// used by tests scan the three base columns and leave it empty.
 type TransferResult struct {
-	TransferID uuid.UUID          `json:"transfer_id"`
+	TransferID uuid.UUID           `json:"transfer_id"`
 	Status     sqlc.TransferStatus `json:"status"`
-	WasReplay  bool               `json:"was_replay"`
+	StatusIso  string              `json:"status_iso,omitempty"`
+	WasReplay  bool                `json:"was_replay"`
 }
 
 // ClientTransfer is the client-surface auto-post transfer: client_transfer enforces
@@ -32,11 +36,11 @@ func (p *Postgres) ClientTransfer(
 	description string,
 	endToEndID *string,
 ) (TransferResult, error) {
-	const q = `SELECT transfer_id, status, was_replay
-	           FROM client_transfer($1::uuid, $2::text, $3::uuid, $4::uuid, $5::bigint, $6::text, $7::varchar)`
+	const q = `SELECT r.transfer_id, r.status, iso_status(r.status), r.was_replay
+	           FROM client_transfer($1::uuid, $2::text, $3::uuid, $4::uuid, $5::bigint, $6::text, $7::varchar) r`
 	var r TransferResult
 	err := p.Pool.QueryRow(ctx, q, subject, idempotencyKey, debit, credit, amountMinor, description, endToEndID).
-		Scan(&r.TransferID, &r.Status, &r.WasReplay)
+		Scan(&r.TransferID, &r.Status, &r.StatusIso, &r.WasReplay)
 	return r, err
 }
 
@@ -156,6 +160,23 @@ func (p *Postgres) EvaluateTransfer(
 		Scan(&e.Decision, &e.RiskBand, &e.ReasonCodes, &e.RuleID, &e.Category, &e.Headline,
 			&e.Body, &e.Severity, &e.RequiredAck, &e.CoolingOffSeconds, &e.StepUpMethod)
 	return e, err
+}
+
+// DecideDispute wraps decide_dispute() (RETURNS TABLE — sqlc can't expand it).
+// One round trip: the payout AND the disputed transfer's currency come back from
+// the same transaction that may have moved reimbursement money, so the handler
+// never needs a post-commit read-back that could misreport a durable payout as
+// an error. reimburseMinor/vulnerable are nullable (NULL = decline / keep flag).
+func (p *Postgres) DecideDispute(
+	ctx context.Context, disputeID, resolver uuid.UUID, decision string,
+	reimburseMinor *int64, vulnerable *bool, note string,
+) (payoutMinor int64, currency string, err error) {
+	const q = `SELECT r.payout_minor, r.currency
+	           FROM decide_dispute($1::uuid, $2::uuid, $3::dispute_decision,
+	                               $4::bigint, $5::boolean, $6::text) r`
+	err = p.Pool.QueryRow(ctx, q, disputeID, resolver, decision, reimburseMinor, vulnerable, note).
+		Scan(&payoutMinor, &currency)
+	return payoutMinor, currency, err
 }
 
 // TransferSuggestion mirrors one row of suggest_transfer_destinations()'s RETURNS

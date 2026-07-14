@@ -46,10 +46,10 @@ JWT subject.
 | Beneficiaries | POST | `/beneficiaries` | bearer | resolve an IBAN + save |
 | Beneficiaries | DELETE | `/beneficiaries/{id}` | bearer | scoped removal |
 | Transfers | GET | `/transfers/suggestion?from_account&amount_minor` | bearer | guided-transfer "mule menu": `{"options":[…]}` with up to 3 third-party candidates drawn at random from the active `guided_scenarios` short-list (`source=scenario`); `{"options":[]}` when none → the client picks one at random, or falls back to the caller's own account. Read-only ([spec](specs/spec-banking-grade-hardening.md) §5) |
-| Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array |
+| Transfers | GET | `/transfers?cursor&cursor_id&limit&from&to&status&kind&direction&q` | bearer | caller's cross-account history, newest first; composite-keyset cursor; caller-relative `direction` (out/in); masked counterparty; filterable. Bare array. Each item carries `status_iso` (ISO-20022 parallel status, Rec 20) |
 | Transfers | POST | `/transfers/intent` | bearer | **read-only fraud preflight** (§8): returns the collapsed `decision` + `risk_band` + `reason_codes[]` + optional `warning{}` + `step_up_method`; reserves nothing, posts nothing, writes no row; **never** a numeric score; 403 if the debit isn't owned. AML watchlist screening deliberately does **not** run here (no tipping-off) — a hit surfaces only at submit as `under_review` |
-| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true`. The fraud/AML gate may park the payment: status `held` (customer cooling-off) or `under_review` (operator screening) instead of `posted` (§8); `422 payment_blocked` / `409 ack_required` are the gate's refusals |
-| Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned); `held`/`under_review` carry `hold_reason` + `hold_expires_at` |
+| Transfers | POST | `/transfers` | bearer | create (auto-post); `Idempotency-Key` required; optional `end_to_end_id` (ISO 20022, fingerprinted); replay → `Idempotency-Replayed: true`. The fraud/AML gate may park the payment: status `held` (customer cooling-off) or `under_review` (operator screening) instead of `posted` (§8); `422 payment_blocked` / `409 ack_required` are the gate's refusals. The result carries `status` + the parallel `status_iso` (Rec 20) |
+| Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned); every transfer carries `status_iso` (ISO-20022 parallel status); `held`/`under_review` carry `hold_reason` + `hold_expires_at` |
 | Transfers | POST | `/transfers/{id}/post` · `/cancel` | bearer | deferred-settlement lifecycle; `cancel` also releases a `held` transfer, but refuses `under_review` (409, operator-only) |
 | Transfers | POST | `/transfers/{id}/confirm` | bearer | **release a `held` transfer** → `posted` (Rec 22 cooling-off); owner only (foreign/unknown → 404); idempotent (already-`posted` → `posted`); not-held / `under_review` / expired window → 409 |
 | Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`transfer.held`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
@@ -57,7 +57,7 @@ JWT subject.
 | Notifications | POST | `/me/events/read` | bearer | mark read up to a cursor (or all); idempotent |
 | Fraud evidence | POST | `/me/warning-acks` | bearer | "warned and proceeded / backed out" liability evidence (CoP/VOP pivot); append-only, debit account must be the caller's |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" — party-only, one open per (transfer, caller); optional `scam_type` starts the PSR claim (15-BBD `sla_due_at`) |
-| Disputes | GET | `/disputes` · `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id → 404) |
+| Disputes | GET | `/disputes` · `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id → 404); each carries the disputed transfer's `currency` (Rec 19) |
 | Health | GET | `/health` | public | DB-blind liveness/version |
 | Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
 | Metrics | GET | `/metrics` | public | RED counters |
@@ -93,7 +93,7 @@ two are never interchangeable.
 Short access tokens need a way to stay logged in without a long-lived bearer.
 The refresh token is an **opaque random string**; the DB stores only
 `sha256(token)` (the `refresh_tokens` table in
-[`00003_users.sql`](../db/migrations/00003_users.sql)), so a DB leak never yields
+[`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), so a DB leak never yields
 a live token. All state and transitions live in PL/pgSQL — the Go layer calls one
 function and maps typed errors to HTTP, the project's standard discipline
 ([`01-overview.md`](01-overview.md)).
@@ -186,7 +186,16 @@ behalf). One customer can never read or debit another's account.
 - `mapDBError` is the only place HTTP status is derived from DB SQLSTATEs — every
   business rule still lives in the database. New codes: `422 payment_blocked` and
   `409 ack_required` from the fraud gate (§8).
-- Money is **int64 minor units** end to end; `currency` is single (EUR) for now.
+- Money is **int64 minor units** end to end; `currency` is single (EUR) for now,
+  and now ships explicitly on every money-bearing **response** (Rec 19) — including
+  `Dispute`/`DecideDisputeResponse`. Requests **inherit** the debit account's
+  currency by design (no request-side `currency`; see
+  [`12-rail-readiness.md`](12-rail-readiness.md) §5).
+- **Rail-ready additive fields (Rec 20).** Transfer responses (`Transfer`,
+  `TransferListItem`, `TransferResult`) carry `status_iso`, an ISO-20022
+  ExternalPaymentTransactionStatus (`PDNG`/`ACSC`/`RJCT`/`CANC`) **computed** from
+  `status`, never stored, added alongside the flat `status` (never replacing it).
+  See [`12-rail-readiness.md`](12-rail-readiness.md).
 
 ---
 
@@ -194,7 +203,7 @@ behalf). One customer can never read or debit another's account.
 
 The MFA/step-up increment hardens login and money moves. Same DB-first discipline;
 the access-token path (`requireJWT`) barely changes. As-built: tables + the
-mfa_* PL/pgSQL live in `00003_users.sql`; handlers in
+mfa_* PL/pgSQL live in `00006_mfa.sql`; handlers in
 `internal/api/handlers_mfa.go`; the planning spec is retired.
 
 ### 6.1 TOTP MFA
@@ -265,11 +274,11 @@ are unchanged, so the ledger and ownership logic don't move.
 - **Beyond the core ledger API**, this surface adds `GET /me`, saved
   **beneficiaries** (with confirmation-of-payee masking), and the refresh-token
   tables/functions — schema in
-  [`00003_users.sql`](../db/migrations/00003_users.sql) and
-  [`00008_features.sql`](../db/migrations/00008_features.sql).
+  [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql) and
+  [`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql).
 - **Onboarding v1 is shipped**: invitation-gated self-registration + contact
   verification (§1 Onboarding/Invitations rows; schema/functions in
-  [`00003_users.sql`](../db/migrations/00003_users.sql)) and customer
+  [`00005_onboarding.sql`](../db/migrations/00005_onboarding.sql)) and customer
   self-service account opening / limit requests (§1 Accounts rows). Registration
   **requires** a single-use `invitation_code` (14-day expiry, not email-bound);
   every verified customer mints codes from a lifetime `invites_remaining` quota

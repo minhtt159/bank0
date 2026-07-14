@@ -39,7 +39,7 @@ func TestDisputeClaimReimbursesForReal(t *testing.T) {
 	// moved from EXTERNAL_CLEARING into the victim's account.
 	var payout int64
 	if err := pg.Pool.QueryRow(ctx,
-		`SELECT decide_dispute($1,$2,'reimbursed',50000,NULL,'confirmed APP scam')`, did, admin).Scan(&payout); err != nil {
+		`SELECT payout_minor FROM decide_dispute($1,$2,'reimbursed',50000,NULL,'confirmed APP scam')`, did, admin).Scan(&payout); err != nil {
 		t.Fatalf("decide: %v", err)
 	}
 	if payout != 40_000 {
@@ -88,7 +88,7 @@ func TestDisputeVulnerableWaivesExcessAndDeclinePath(t *testing.T) {
 	_ = pg.Pool.QueryRow(ctx, `SELECT raise_dispute($1,$2,'fraud','', 'romance')`, t1, victim).Scan(&d1)
 	var payout int64
 	if err := pg.Pool.QueryRow(ctx,
-		`SELECT decide_dispute($1,$2,'reimbursed',50000,TRUE,'vulnerable customer')`, d1, admin).Scan(&payout); err != nil {
+		`SELECT payout_minor FROM decide_dispute($1,$2,'reimbursed',50000,TRUE,'vulnerable customer')`, d1, admin).Scan(&payout); err != nil {
 		t.Fatalf("decide vulnerable: %v", err)
 	}
 	if payout != 50_000 {
@@ -101,7 +101,7 @@ func TestDisputeVulnerableWaivesExcessAndDeclinePath(t *testing.T) {
 	_ = pg.Pool.QueryRow(ctx, `SELECT raise_dispute($1,$2,'fraud','','purchase')`, t2, victim).Scan(&d2)
 	before, _ := balance(t, pg, a)
 	if err := pg.Pool.QueryRow(ctx,
-		`SELECT decide_dispute($1,$2,'declined',NULL,NULL,'not a scam')`, d2, admin).Scan(&payout); err != nil {
+		`SELECT payout_minor FROM decide_dispute($1,$2,'declined',NULL,NULL,'not a scam')`, d2, admin).Scan(&payout); err != nil {
 		t.Fatalf("decline: %v", err)
 	}
 	after, _ := balance(t, pg, a)

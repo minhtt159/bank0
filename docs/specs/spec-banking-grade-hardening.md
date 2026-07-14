@@ -46,7 +46,7 @@ is sources + confidence.
 bank0's closed single-Postgres core is strikingly correct where it counts:
 
 - `request_transfer` (`00008`) **claims the idempotency key** (`INSERT … ON CONFLICT DO NOTHING`, first-writer-wins) **+ validates** accounts/limits/available-funds **+ writes the double-entry ledger legs + the hold + the completion response — all in ONE transaction.** Because the side effect commits atomically with the key-claim, bank0 needs **none** of the distributed machinery (outbox, saga, inbox, recovery-points) the industry built to paper over non-atomic side effects.
-- The ledger is **append-only** with a mutation-blocking trigger; `balance_minor` is a **cache writable only by the ledger trigger** and guarded against any non-ledger write. `reconcile()` (`00009`) continuously asserts cache==ledger, per-transfer zero-sum, and global zero-sum.
+- The ledger is **append-only** with a mutation-blocking trigger; `balance_minor` is a **cache writable only by the ledger trigger** and guarded against any non-ledger write. `reconcile()` (`00010`) continuously asserts cache==ledger, per-transfer zero-sum, and global zero-sum.
 - Genuine **authorize/capture**: `request_transfer` = authorize (pending + active hold, 15-min TTL); `post_transfer` = capture; `available = balance − Σ active holds`; holds auto-expire.
 - **Append-only idempotent reversal** with a clawback funds-check; money as `BIGINT` minor units; cross-bank money modelled against an `EXTERNAL_CLEARING` GL so the books stay zero-sum.
 - **Immutable operator audit** (`admin_actions`) + **maker-checker 4-eyes** for above-threshold console money moves.
@@ -57,33 +57,23 @@ cosmetic fields. **The gaps are at the edges and in the contract, not the engine
 
 ## 2. The hardest problem — the closed-core-vs-rail dual contract
 
-bank0's entire correctness story is load-bearing **only because the core is
-closed.** The strength of `request_transfer` — claim-key + mutate-ledger +
-record-completion in one atomic transaction — becomes **impossible the moment a
-real external payment rail is interleaved**, because you cannot put a network call
-inside a DB transaction. At that point every guarantee bank0 gets for free (no
-outbox, no saga, no inbox, no visible `in_progress→completed` crash window) must
-be rebuilt with the full distributed stack: a transactional outbox written in the
-ledger txn, an at-least-once relay, an idempotent rail consumer keyed by a
-deterministic UETR/`EndToEndId` derived from `transfer_id`, recovery-point
-checkpoints, and a saga whose compensations are **asymmetric** (a settled credit
-cannot be unilaterally clawed back — it becomes a `pacs.004` recall/return
-governed by scheme SLAs, not an `UPDATE`).
-
-The trap is twofold: **(a)** building any of that now needlessly complicates the
-demo and breaks the "do not re-architect" verdict; but **(b)** shipping
-client-facing features whose semantics *silently assume synchronous atomicity*
-(instant-final `posted`, client-computed CoP verdicts, a single transfer status,
-no UETR) bakes in a contract the rail will later violate — forcing breaking client
-changes exactly when the system is most fragile.
-
-**Resolution:** make the contract **rail-ready additively without building the
-rail** — mint a UETR + `end_to_end_id` now, model status with an ISO-20022-aligned
-parallel field that already distinguishes `posted` from a future `settled`, move
-the fraud verdict + warning evidence server-side (so they survive an async
-future), and write the outbox/saga/recovery-point seam as **documentation**. The
-day a rail is added, the core converges on the Stripe/brandur design behind a
-contract the clients already speak — zero breaking change.
+> ✅ **Resolved.** The dual contract is made **rail-ready additively, with no rail
+> built** — the resolution the problem itself prescribed (correctness stays
+> load-bearing only because the core is closed; a real rail would force the full
+> distributed stack — outbox, relay, idempotent consumer, recovery points, an
+> asymmetric `pacs.004` saga — that a closed core needs none of).
+>
+> Shipped as the cheap additive pre-work: a bank-minted `uetr` + originator
+> `end_to_end_id` (Rec 18); an ISO-20022-aligned parallel **`status_iso`**,
+> computed-never-stored (Rec 20, §3.5); and the fraud verdict + warning evidence
+> already moved server-side (Recs 22/23/25) so they survive an async future. The
+> outbox / at-least-once relay / idempotent rail-submit / recovery-point /
+> asymmetric-`pacs.004`-saga machinery (Recs 30/31) is written as the **seam
+> documentation** — [`../12-rail-readiness.md`](../12-rail-readiness.md) — and the
+> rail itself is **deliberately unbuilt**: every trigger for building it is "a real
+> external creditor exists," and bank0 has none. The day a rail is added, the core
+> converges on the Stripe/brandur design behind a contract the clients already
+> speak — **zero breaking change**.
 
 ## 3. The eight pillars
 
@@ -112,21 +102,29 @@ now returns the **existing** reversal id idempotently (200) instead of raising
 
 ### 3.2 Ledger & money correctness
 
-**Current:** production-shaped (append-only ledger, trigger-guarded balance cache,
-`reconcile()` invariants, real authorize/capture + holds, append-only reversal).
+**Current (as-built):** production-shaped (append-only ledger, trigger-guarded
+balance cache, `reconcile()` invariants, real authorize/capture + holds,
+append-only reversal). The maintenance runners are now **independently
+schedulable** (Rec 6 shipped): a one-shot `bank0 maintenance` subcommand
+(`cmd/app/main.go`; CronJob/Cloud-Scheduler-friendly, [`../08-deployment-cloud-run-supabase.md`](../08-deployment-cloud-run-supabase.md) §3.4)
+runs `expire_holds` + the cleanups + a `reconcile()` pass and logs the counts. Two
+accepted nits: a **reconcile-drift** result and a **lock-held** run (another
+replica holds the advisory lock) both **exit 0** — alerting keys on the emitted
+logs (`reconcile drift detected …`), not the process exit code. `currency` now
+ships explicitly on every money-bearing **response** (Rec 19, §3.5).
 
 **Target:** keep the core exactly as-is; add only the edge surfaces auditors/clients need.
 
-**Gaps:** no settlement/finality state beyond `posted`; no partial capture;
-single-currency (`CHECK currency='EUR'`) with a hard-coded exponent-2 assumption;
-`reconcile()` proves only intra-ledger invariants.
+**Gaps:** no settlement/finality state beyond `posted`; no partial capture (Rec 7,
+deferred-YAGNI); single-currency (`CHECK currency='EUR'`) with a hard-coded
+exponent-2 assumption (Rec 8, deferred-YAGNI); `reconcile()` proves only
+intra-ledger invariants.
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
 | 5 | **Auditor-role `admin_actions` feed** (the read-only `reconcile()` surface already ships — `GET /admin/reconcile` returns the invariant proofs; `api/openapi.yaml` `ReconcileResponse`). Open scope is only the auditor-role view over `admin_actions` so "who authorised what, with which approver" is queryable read-only alongside the existing reconcile proofs. | P1 | S |
-| 6 | **Make the maintenance runners** (`expire_holds()`, `cleanup_idempotency_keys()`) **independently schedulable** — a one-shot subcommand (cron/systemd-timer friendly) and surfaced run results — so sweeps don't depend solely on the in-process advisory-locked ticker. *(pg_cron is deliberately NOT a dependency — the app owns scheduling.)* | P1 | S |
-| 7 | **Partial capture** in `post_transfer` (`amount_to_capture ≤ hold.amount_minor`; post the captured legs, release the residual). Keeps the single-transaction shape. | P2 | M |
-| 8 | **ISO-4217 currency-metadata table** carrying the minor-unit exponent so formatting/rounding are currency-driven (prerequisite for any multi-currency / FX-GL leg model). Surface `currency` on every money-bearing schema. | P2 | M |
+| 7 | **Partial capture** in `post_transfer` (`amount_to_capture ≤ hold.amount_minor`; post the captured legs, release the residual). Keeps the single-transaction shape. **Deferred (YAGNI)** — no flow captures less than it authorized; build trigger + rationale in [`../12-rail-readiness.md`](../12-rail-readiness.md) §5. | P2 | M |
+| 8 | **ISO-4217 currency-metadata table** carrying the minor-unit exponent so formatting/rounding are currency-driven (prerequisite for any multi-currency / FX-GL leg model). **Deferred (YAGNI)** — everything is EUR; the "surface `currency`" half shipped on responses (Rec 19). Build trigger (first non-EUR currency) in [`../12-rail-readiness.md`](../12-rail-readiness.md) §5. | P2 | M |
 
 ### 3.3 Payee verification & APP fraud (CoP / VOP, disputes, reimbursement)
 
@@ -182,17 +180,20 @@ exposing the raw `step_up_limit_minor` constant.)
 
 **Current (as-built):** the idempotency design is strongly standards-aligned. Rail-ready
 identifiers shipped (Rec 18) — a bank-minted **UETR** UUIDv4 + originator `end_to_end_id`
-on `transfers`, surfaced on the contract and folded into the idempotency fingerprint.
-The surrounding contract is still a **private dialect** otherwise: a flat
-`{error, message}` body (not RFC 9457 `application/problem+json`); a private status set
-(`pending|held|under_review|posted|failed|canceled|reversed`), not the ISO 20022 family UK OBIE and Berlin
-Group constrain to; `currency` is a free string omitted from `CreateTransferRequest`.
+on `transfers`, surfaced on the contract and folded into the idempotency fingerprint. The
+status vocabulary is now **dual** (Rec 20 shipped): a computed, never-stored `status_iso`
+maps the private status set onto the ISO-20022 ExternalPaymentTransactionStatus family
+(`PDNG`/`ACSC`/`RJCT`/`CANC`; `iso_status()` in `00008_transfers.sql`), surfaced additively
+on `Transfer`/`TransferListItem`/`TransferResult` alongside the flat `status` (mapping +
+rationale in [`../12-rail-readiness.md`](../12-rail-readiness.md) §4). `currency` is now
+explicit (ISO-4217) on every money-bearing **response** (Rec 19 subset shipped). The one
+remaining private-dialect item is the error body: a flat `{error, message}`, not RFC 9457
+`application/problem+json` (Rec 17, deferred).
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
 | 17 | **Migrate the error model to RFC 9457 `application/problem+json`** `{type (stable URI per class), title, status, detail, instance}` so clients branch on `type`, not prose. **Deferred** pending a coordinated bump across all three fraudbank clients (it changes the error content-type). *(draft-07 itself cites RFC 7807; use its successor **9457** — do not attribute 9457 to the draft.)* | P0 | M |
-| 19 | **Make `currency` explicit (ISO-4217) on every money-bearing schema + enforce additive-only contract CI** (fail on removed/renamed fields or narrowed enums) and **extend conformance to the hand-written iOS/Android DTOs** (only web is checked today). | P1 | S |
-| 20 | **Map status onto an ISO-20022-aligned parallel `status_iso`** (`pending→PDNG/RCVD`, `posted→ACSC`, `failed→RJCT`, `canceled→CANC`, reverse via `pacs.004`) while keeping the flat `status` for back-compat. *(Berlin Group status-code list is medium-confidence.)* | P2 | M |
+| 19 | **Additive-only contract CI + cross-client DTO conformance** (the remainder of Rec 19). `currency` is now explicit on all money-bearing **responses**; **request-side `currency` is deliberately omitted** — the server derives it from the debit account ([`../12-rail-readiness.md`](../12-rail-readiness.md) §5). Open scope: enforce additive-only contract CI (fail on removed/renamed fields or narrowed enums) and **extend conformance to the hand-written iOS/Android DTOs** (only web is checked today). | P1 | S |
 
 ### 3.6 Fraud-UX backend enablers (decision/warning + events feed)
 
@@ -248,13 +249,15 @@ read views (Recs 26/27).
 **Current (as-built):** strongest-possible for a closed core *because* the side effect
 commits atomically with the key-claim (the degenerate ideal — no recovery point to
 manage). The operational durability hole is **closed** (Rec 2/29): the stale-`in_progress`
-sweep now reaps wedged keys. The only residual nicety is making the sweeps
-schedulable independently of the in-process ticker — tracked as the open Rec 6 (§3.2).
+sweep now reaps wedged keys. Sweeps are also independently schedulable (Rec 6 shipped,
+§3.2). The rail-readiness seam is now **documented** (Recs 30/31 shipped as docs):
+[`../12-rail-readiness.md`](../12-rail-readiness.md) writes the outbox / at-least-once
+relay / idempotent rail-submit (keyed by the deterministic UETR/`end_to_end_id`) /
+recovery-point / asymmetric-`pacs.004`-saga checklist (§2) and the BIAN Payment
+Order vs Payment Execution seam at the `post_transfer(id, allow_from)` boundary (§3) —
+**building nothing**, since bank0 has no external creditor to trigger it.
 
-| # | Rec | P | Effort |
-|---|-----|---|--------|
-| 30 | **Document the rail-readiness checklist (do NOT build yet):** transactional outbox written in the ledger txn, an at-least-once relay, an idempotent rail-submit keyed by a deterministic UETR/`EndToEndId` derived from `transfer_id`, recovery-point checkpoints, and a saga with compensating reversals for `pacs.004`. The UETR/`end_to_end_id` fields (Rec 18) are the cheap additive pre-work. | P2 | S |
-| 31 | **Adopt BIAN-style boundary seams in docs/schema** — conceptually split Payment Order (instruction + lifecycle/holds) from Payment Execution (ledger settlement) so the one-transaction `request_transfer` can later separate a held/pending instruction from settlement without a breaking client change. | P2 | M |
+**Gaps:** none tracked — the rail itself is deliberately unbuilt (§2 RESOLVED).
 
 ## 4. UX → backend capability map
 
@@ -276,15 +279,15 @@ answered as a feature→capability table:
 | Dispute / scam-claim timeline with the regulatory clock + reimbursement/recall | Dispute enrichment (SLA, decision, recall, scam_type, cap/excess) | P1 |
 | Remaining daily/transaction limit meter + pre-warn step-up | Limits endpoint + `step_up_limit_minor` | P2 |
 | Anti-impersonation "we aren't calling you" banner | `GET /me/call-status` (Starling/Monzo pattern) | P2 |
-| End-to-end trace reference on a payment / for support | Server-minted UETR + `end_to_end_id` on `Transfer` + events | P2 |
+| End-to-end trace reference on a payment / for support | Server-minted UETR + `end_to_end_id` on `Transfer` + events (**shipped**, Rec 18); ISO-20022 `status_iso` also on the contract (**shipped**, Rec 20) | P2 |
 
 ## 5. Guided transfer v2 — SHIPPED (retired)
 
 > ✅ **Shipped and retired.** `GET /transfers/suggestion` returns the up-to-3
 > third-party "mule" options wrapper (resolver `suggest_transfer_destinations` in
-> `db/migrations/00008_features.sql`); the PWA picks one at random and synthesises
+> `db/migrations/00012_guided_scenarios.sql`); the PWA picks one at random and synthesises
 > the own-account fallback when empty. As-built:
-> [`../06-client-api.md`](../06-client-api.md) §1 + `00008_features.sql`.
+> [`../06-client-api.md`](../06-client-api.md) §1 + `00012_guided_scenarios.sql`.
 
 ## 6. Sequencing
 
@@ -298,23 +301,28 @@ warning/decision endpoint `/transfers/intent` + `warning_rules` + `transfer.held
 gate + watchlist + console screening queue). Plus Rec 18 (UETR/`end_to_end_id`), Rec 3
 (per-owner idempotency namespace), **Rec 4 (documented idempotency semantics on all
 mutating money POSTs + idempotent second reverse)**, and guided-transfer v2 (former §5).
+**Plus, now collapsed in:** Rec 6 (schedulable `bank0 maintenance` one-shot), Rec 19
+subset (`currency` on all money-bearing responses), Rec 20 (computed `status_iso` on the
+transfer contract), and **all of former Wave 5** — Recs 30/31 shipped as the
+rail-readiness seam **documentation** ([`../12-rail-readiness.md`](../12-rail-readiness.md)),
+building nothing (§2 RESOLVED).
 
 **Next:**
 
-- **Wave 4 — standards depth, edge surfaces & rail pre-work (P1/P2, additive):** Recs
-  5/27, 6, 7, 8, 16, 19, 20, 24, 26, 28.
-- **Wave 5 — docs-only, defer until a real rail exists:** Recs 30, 31 — document the seam
-  now (the shipped UETR/`end_to_end_id` is the cheap pre-work), build nothing.
+- **Wave 4 — standards depth, edge surfaces (P1/P2, additive):** Recs 5/27, 16, 24, 26, 28,
+  plus the **Rec 19 remainder** (additive-only contract CI + iOS/Android DTO conformance).
 - **Deferred:** Rec 17 (RFC 9457) — waits on a coordinated bump across all three fraudbank
-  clients (it changes the error content-type).
+  clients (it changes the error content-type); Recs 7 (partial capture) and 8 (ISO-4217
+  metadata table) — **deferred-as-YAGNI**, triggers in [`../12-rail-readiness.md`](../12-rail-readiness.md) §5.
 
 ## 7. Effort summary (remaining recs only)
 
 | Priority | Recs | Rough size |
 |---|---|---|
 | **P0 (deferred)** | 17 | M — coordinated three-client bump |
-| **P1** | 5/27, 6, 19, 26 | edge surfaces + auditor read views |
-| **P2** | 7, 8, 16, 20, 24, 28, 30, 31 | additive standards/rail-readiness + docs; never blocks the closed core |
+| **P1** | 5/27, 19 (remainder), 26 | edge surfaces + auditor read views + contract CI |
+| **P2 (active)** | 16, 24, 28 | additive standards; never blocks the closed core |
+| **P2 (deferred-YAGNI)** | 7, 8 | partial capture + ISO-4217 metadata; triggers in docs/12 §5 |
 
 ## 8. Sources & confidence
 

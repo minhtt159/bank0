@@ -67,7 +67,7 @@ state, no contact verification. (`users.status` gates login; nothing models "par
 onboarded".)
 
 **Rationale.** The **v1 is SHIPPED** (as-built in
-[`../06-client-api.md`](../06-client-api.md) §1 + `00003_users.sql`): public
+[`../06-client-api.md`](../06-client-api.md) §1 + `00005_onboarding.sql`): public
 `POST /auth/register`, `onboarding_status` enum on `users`,
 `verification_challenges` table (hash-at-rest codes), email/phone verification,
 DB cooldown + Go IP rate-limit. This section is the **KYC continuation** beyond
@@ -188,7 +188,7 @@ in a txn with its use; split migration), a `create_pot` + a scoped transfer wrap
 
 Customer account opening is **shipped** — **server-side IBAN allocation
 (`allocate_iban`, real ISO SE IBANs) and `open_customer_account`** live in
-`00004_accounts.sql`, and pots reuse them (minus the IBAN). Do pots **before**
+`00007_accounts.sql`, and pots reuse them (minus the IBAN). Do pots **before**
 multi-currency: pots in EUR are trivial; pots across currencies inherit §6's
 hard problems.
 
@@ -458,7 +458,7 @@ conservative** (round so the bank never loses fractions; the spread covers it) a
 rounding residue must land in a GL account so `reconcile` stays exact *per currency*.
 Rate **staleness/quote expiry** (a quote must be honored or rejected, never silently
 re-priced) and rate-source trust are operational risks. And the migration itself is
-delicate: relaxing a CHECK that the whole ledger has assumed since `00005_transfers.sql`.
+delicate: relaxing a CHECK that the whole ledger has assumed since `00008_transfers.sql`.
 
 ### Effort
 
@@ -480,7 +480,7 @@ against `reconcile` before any customer touches it.
 ## 7. P2P-by-handle, request-money, bill-splitting
 
 **Today:** transfers are by `credit_account_id` (a UUID); beneficiaries
-(the `beneficiaries` table in `00008_features.sql`) save payees by IBAN with confirmation-of-payee masking.
+(the `beneficiaries` table in `00011_beneficiaries.sql`) save payees by IBAN with confirmation-of-payee masking.
 There are no handles/aliases and no "request money" direction.
 
 **Rationale.** Consumer P2P (Venmo/Twint/Revolut) is: pay a **handle** (@alice) not an

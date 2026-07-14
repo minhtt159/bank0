@@ -6,7 +6,7 @@
 -- correctness invariants — empty result = books are correct), and enriched_ledger
 -- (the human-readable statement/console read model).
 --
--- Depends on the accounts/holds (00004) and transfers/ledger (00005) tables; the
+-- Depends on the accounts/holds (00007) and transfers/ledger (00008) tables; the
 -- view also joins users (00003).
 -- ─────────────────────────────────────────────────────────────────────────────
 

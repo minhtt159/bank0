@@ -16,24 +16,31 @@ SELECT resolve_dispute(
 ) AS status;
 
 -- name: GetDisputeForRaiser :one
-SELECT id, transfer_id, status, category, reason, resolution_note,
-       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
-FROM disputes
-WHERE id = sqlc.arg(id)::uuid AND raised_by_user_id = sqlc.arg(raiser)::uuid;
+SELECT d.id, d.transfer_id, d.status, d.category, d.reason, d.resolution_note,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor, d.vulnerable_flag,
+       d.recall_status, d.recall_reason, t.currency, d.created_at, d.updated_at
+FROM disputes d
+JOIN transfers t ON t.id = d.transfer_id
+WHERE d.id = sqlc.arg(id)::uuid AND d.raised_by_user_id = sqlc.arg(raiser)::uuid;
 
 -- name: ListDisputesForRaiser :many
-SELECT id, transfer_id, status, category, reason, resolution_note,
-       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
-FROM disputes
-WHERE raised_by_user_id = sqlc.arg(raiser)::uuid
-  AND (sqlc.narg(cursor)::timestamptz IS NULL OR created_at < sqlc.narg(cursor)::timestamptz)
-ORDER BY created_at DESC
+SELECT d.id, d.transfer_id, d.status, d.category, d.reason, d.resolution_note,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor, d.vulnerable_flag,
+       d.recall_status, d.recall_reason, t.currency, d.created_at, d.updated_at
+FROM disputes d
+JOIN transfers t ON t.id = d.transfer_id
+WHERE d.raised_by_user_id = sqlc.arg(raiser)::uuid
+  AND (sqlc.narg(cursor)::timestamptz IS NULL OR d.created_at < sqlc.narg(cursor)::timestamptz)
+ORDER BY d.created_at DESC
 LIMIT sqlc.arg(page_limit)::int;
 
 -- name: GetDisputeAdmin :one
-SELECT id, transfer_id, status, category, reason, resolution_note,
-       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
-FROM disputes WHERE id = sqlc.arg(id)::uuid;
+SELECT d.id, d.transfer_id, d.status, d.category, d.reason, d.resolution_note,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor, d.vulnerable_flag,
+       d.recall_status, d.recall_reason, t.currency, d.created_at, d.updated_at
+FROM disputes d
+JOIN transfers t ON t.id = d.transfer_id
+WHERE d.id = sqlc.arg(id)::uuid;
 
 -- name: ListDisputesAdmin :many
 SELECT d.id, d.transfer_id, d.status, d.category, d.reason,
@@ -55,10 +62,9 @@ WHERE (sqlc.narg(status)::dispute_status IS NULL OR d.status = sqlc.narg(status)
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT sqlc.arg(page_limit)::int;
 
--- name: DecideDispute :one
-SELECT decide_dispute(sqlc.arg(dispute_id)::uuid, sqlc.arg(resolver)::uuid,
-    sqlc.arg(decision)::dispute_decision, sqlc.narg(reimburse_minor)::bigint,
-    sqlc.narg(vulnerable)::boolean, sqlc.arg(note)::text) AS payout_minor;
+-- decide_dispute() RETURNS TABLE (payout_minor, currency) — sqlc can't expand
+-- set-returning functions, so its wrapper is hand-written in internal/db/bank.go
+-- (DecideDispute), same pattern as client_transfer.
 
 -- name: SetDisputeRecall :one
 SELECT set_dispute_recall(sqlc.arg(dispute_id)::uuid, sqlc.arg(actor)::uuid,

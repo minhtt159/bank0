@@ -72,7 +72,7 @@ Templ + HTMX (console) · OpenAPI 3.1 contract-first (oapi-codegen + Scalar) · 
 
 Start at [`docs/01-overview.md`](docs/01-overview.md) — it frames the design and walks
 through how you use bank0 (the customer money-move and the operator journeys). The
-reference docs ([`docs/02`](docs/02-data-model.md)–[`docs/11`](docs/11-iban-verification.md))
+reference docs ([`docs/02`](docs/02-data-model.md)–[`docs/12`](docs/12-rail-readiness.md))
 cover the data model, ledger lifecycle, deployment, the two surfaces, the PWA, fraudbank
-integration, security, and IBAN handling. The product roadmap is in
-[`docs/specs/`](docs/specs/).
+integration, security, IBAN handling, and the closed-core-to-rail readiness seam. The
+product roadmap is in [`docs/specs/`](docs/specs/).

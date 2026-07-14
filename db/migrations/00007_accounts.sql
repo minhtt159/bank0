@@ -4,16 +4,16 @@
 -- The first slice of the former core_banking monolith (split for 1.0). Holds the
 -- accounts table (with a trigger-maintained balance_minor CACHE and a held_minor
 -- mirror), the holds table (authorization reservations — account_available reads
--- SUM(active holds), so the two live together), the shared updated_at trigger fn,
--- the balance tamper-guard + held-cache trigger fns, and the account functions
+-- SUM(active holds), so the two live together), the balance tamper-guard +
+-- held-cache trigger fns, and the account functions
 -- (create / available / set-default / set-status / update-limit).
 --
 -- accounts.iban's checksum CHECK calls iban_is_valid() from the IBAN file (00002);
--- the set_updated_at() trigger fn defined here is also what the users table (00003)
--- and disputes (00008) hang their updated_at triggers on. create_account() sources
--- its default limit from default_transfer_limit() (bank_settings, 00006) — a runtime
--- call inside a plpgsql body, so it loads fine ahead of that file. The transfers
--- table (00005) back-references holds via an FK added there.
+-- the shared set_updated_at() trigger fn lives in the users file (00003), and
+-- trg_accounts_updated_at hangs on it. create_account() sources its default limit
+-- from default_transfer_limit() (bank_settings, 00009) — a runtime call inside a
+-- plpgsql body, so it loads fine ahead of that file. The transfers table (00008)
+-- back-references holds via an FK added there.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -64,12 +64,12 @@ CREATE INDEX idx_accounts_iban_trgm ON accounts USING gin ((iban::text) gin_trgm
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- holds  (authorization reservations: available = balance - SUM(active holds))
--- The transfer_id FK is added in 00005 once the transfers table exists.
+-- The transfer_id FK is added in 00008 once the transfers table exists.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE holds (
     id           UUID PRIMARY KEY DEFAULT uuidv7(),
     account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-    transfer_id  UUID,                                                   -- FK -> transfers added in 00005
+    transfer_id  UUID,                                                   -- FK -> transfers added in 00008
     amount_minor BIGINT NOT NULL,
     status       hold_status NOT NULL DEFAULT 'active',
     expires_at   TIMESTAMPTZ NOT NULL,
@@ -86,18 +86,10 @@ CREATE INDEX idx_holds_expiry         ON holds (expires_at) WHERE status = 'acti
 -- +goose StatementBegin
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Shared trigger functions
+-- Account trigger functions  (the shared set_updated_at() lives in 00003)
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- updated_at maintenance on mutable tables (users/accounts/transfers/disputes).
-CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at := now();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Tamper guard: balance_minor may change ONLY via the ledger trigger (00005). Any
+-- Tamper guard: balance_minor may change ONLY via the ledger trigger (00008). Any
 -- other UPDATE (admin mistake, stray psql, buggy function) is rejected, so the
 -- cache can never silently diverge from the ledger.
 CREATE OR REPLACE FUNCTION account_guard_balance() RETURNS TRIGGER AS $$
@@ -138,10 +130,9 @@ $$ LANGUAGE plpgsql;
 
 -- +goose StatementEnd
 
--- Attach the account/user/holds triggers. trg_users_updated_at sits on the users
--- table (00003) but uses set_updated_at() defined here. The balance guard protects
+-- Attach the account/holds triggers. trg_accounts_updated_at uses the shared
+-- set_updated_at() defined in the users file (00003). The balance guard protects
 -- the cache; the held-cache trigger maintains held_minor.
-CREATE TRIGGER trg_users_updated_at       BEFORE UPDATE ON users    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_accounts_updated_at    BEFORE UPDATE ON accounts FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_accounts_guard_balance BEFORE UPDATE ON accounts FOR EACH ROW EXECUTE FUNCTION account_guard_balance();
 
@@ -165,7 +156,7 @@ $$ LANGUAGE sql STABLE;
 
 -- create_account: first account for a user becomes the default. The partial unique
 -- index (uq_accounts_one_default) guarantees there is never more than one. Sources
--- its default limit from bank_settings (default_transfer_limit, 00006) when the
+-- its default limit from bank_settings (default_transfer_limit, 00009) when the
 -- caller passes <= 0.
 CREATE OR REPLACE FUNCTION create_account(
     p_user_id              UUID,
@@ -230,7 +221,7 @@ CREATE OR REPLACE FUNCTION open_customer_account(
 ) RETURNS TABLE (account_id UUID, was_replay BOOLEAN) AS $$
 DECLARE
     -- scalar vars, not idempotency_keys%ROWTYPE: %ROWTYPE resolves at CREATE
-    -- time and the table lives in 00005 (this function only runs after both exist).
+    -- time and the table lives in 00008 (this function only runs after both exist).
     v_hash      TEXT := encode(digest('open_account|' || p_user_id::text, 'sha256'), 'hex');
     v_ex_scope  TEXT;
     v_ex_hash   TEXT;
@@ -352,11 +343,9 @@ DROP SEQUENCE IF EXISTS iban_seq;
 DROP TRIGGER IF EXISTS trg_holds_maintain_held    ON holds;
 DROP TRIGGER IF EXISTS trg_accounts_guard_balance ON accounts;
 DROP TRIGGER IF EXISTS trg_accounts_updated_at    ON accounts;
-DROP TRIGGER IF EXISTS trg_users_updated_at       ON users;
 -- +goose StatementBegin
 DROP FUNCTION IF EXISTS holds_maintain_held();
 DROP FUNCTION IF EXISTS account_guard_balance();
-DROP FUNCTION IF EXISTS set_updated_at();
 -- +goose StatementEnd
 DROP TABLE IF EXISTS holds;
 DROP TABLE IF EXISTS accounts;

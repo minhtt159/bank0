@@ -211,19 +211,17 @@ func (s *Server) DecideDispute(w http.ResponseWriter, r *http.Request, id openap
 		writeError(w, http.StatusUnprocessableEntity, "invalid_decision", "decision must be reimbursed, partially_reimbursed or declined")
 		return
 	}
-	payout, err := s.pg.Queries.DecideDispute(r.Context(), sqlc.DecideDisputeParams{
-		DisputeID:      uuid.UUID(id),
-		Resolver:       op.UserID,
-		Decision:       sqlc.DisputeDecision(req.Decision),
-		ReimburseMinor: req.ReimbursedAmountMinor,
-		Vulnerable:     req.Vulnerable,
-		Note:           req.Note,
-	})
+	// One DB call: decide_dispute returns the currency alongside the payout, so a
+	// durably-posted reimbursement can never be misreported by a failed read-back.
+	payout, currency, err := s.pg.DecideDispute(r.Context(), uuid.UUID(id), op.UserID,
+		req.Decision, req.ReimbursedAmountMinor, req.Vulnerable, req.Note)
 	if err != nil {
 		s.mapDBError(w, r, err) // terminal -> 409, bad amount -> 422, unknown -> 404
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "decision": req.Decision, "payout_minor": payout})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": id, "decision": req.Decision, "payout_minor": payout, "currency": currency,
+	})
 }
 
 type recallDisputeReq struct {

@@ -9,10 +9,10 @@
 -- auto-post, reverse_transfer (clawback), deposit/withdraw, and the client_*
 -- ownership wrappers (+ assert_caller_owns).
 --
--- Depends on accounts/holds (00004): the ledger trigger writes accounts.balance_minor
+-- Depends on accounts/holds (00007): the ledger trigger writes accounts.balance_minor
 -- (under the in_ledger guard), and holds.transfer_id gets its FK to transfers here.
 -- bank_settings / maker-checker (the request_money_with_approval staging path) live
--- in 00006; maintenance sweeps + reconcile() in 00007.
+-- in 00009; maintenance sweeps + reconcile() in 00010.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ CREATE TABLE transfers (
     CHECK (hold_expires_at IS NOT NULL OR status NOT IN ('held', 'under_review'))
 );
 
--- Now that transfers exists, wire up holds.transfer_id (declared FK-less in 00004).
+-- Now that transfers exists, wire up holds.transfer_id (declared FK-less in 00007).
 ALTER TABLE holds
     ADD CONSTRAINT holds_transfer_id_fkey FOREIGN KEY (transfer_id) REFERENCES transfers(id);
 
@@ -180,6 +180,46 @@ CREATE TRIGGER trg_ledger_apply_balance BEFORE INSERT ON ledger_entries FOR EACH
 CREATE TRIGGER trg_ledger_immutable     BEFORE UPDATE OR DELETE ON ledger_entries FOR EACH ROW EXECUTE FUNCTION ledger_block_mutation();
 
 -- +goose StatementBegin
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- iso_status: the ISO-20022-aligned parallel status (Rec 20). A pure, enum-only
+-- projection of transfers.status onto the Berlin Group / ISO 20022
+-- ExternalPaymentTransactionStatus code list. It is COMPUTED, never stored — the
+-- native transfer_status stays the source of truth; this only lets the contract
+-- speak a rail-shaped vocabulary before any rail exists (spec §2, docs/12).
+--
+-- The mapping, and why each choice is deliberate:
+--   pending      -> 'PDNG'  A pending transfer is authorized + held, awaiting post;
+--   held         -> 'PDNG'  settlement has NOT begun, so it is PDNG ("pending"),
+--   under_review -> 'PDNG'  never ACSP ("accepted, settlement in progress") — ACSP
+--                           would over-promise a settlement that hasn't started.
+--                           WHY a row is parked lives in the native status +
+--                           hold_reason, not in this coarse ISO code.
+--   posted       -> 'ACSC'  In a closed single-ledger core, POSTING *is* settlement
+--                           completion — the double-entry legs are the final book —
+--                           so posted maps to ACSC ("accepted, settlement completed").
+--   failed       -> 'RJCT'  Rejected.
+--   canceled     -> 'CANC'  Canceled before it ever posted.
+--   reversed     -> 'ACSC'  The ORIGINAL still settled; a reversal does NOT
+--                           un-settle it. The return is a SEPARATE reversal transfer
+--                           (kind='reversal', itself posted -> ACSC), and the
+--                           interbank leg of a real return is
+--                           disputes.recall_status / pacs.004, not a status flip
+--                           here. So a reversed original stays ACSC.
+-- 'RCVD' ("received") is deliberately UNUSED: a transfers row exists only AFTER
+-- validation, so there is no pre-validation "received" state to represent.
+-- (The Berlin Group code list is medium-confidence — see docs/12 §4 / spec §3.5.)
+CREATE FUNCTION iso_status(p transfer_status) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE p
+        WHEN 'pending'      THEN 'PDNG'
+        WHEN 'held'         THEN 'PDNG'
+        WHEN 'under_review' THEN 'PDNG'
+        WHEN 'posted'       THEN 'ACSC'
+        WHEN 'failed'       THEN 'RJCT'
+        WHEN 'canceled'     THEN 'CANC'
+        WHEN 'reversed'     THEN 'ACSC'
+    END
+$$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- request_transfer: create a pending transfer + an authorization hold.
@@ -327,7 +367,7 @@ BEGIN
 
     UPDATE transfers SET status = 'posted', posted_at = now() WHERE id = p_transfer_id;
 
-    -- Notify both HUMAN parties in the same txn (events, 00008): the payer gets
+    -- Notify both HUMAN parties in the same txn (events, 00014): the payer gets
     -- transfer.posted, the payee payment.incoming. System/GL sides (NULL user_id)
     -- emit nothing. Replays never reach here (idempotent no-op above), and the
     -- partial unique index absorbs any double emission. Counterparty is labelled
@@ -361,7 +401,7 @@ $$ LANGUAGE plpgsql;
 -- cancel_transfer: {pending, held, under_review} -> canceled, release the hold.
 -- Held/under_review are cancellable too (customer withdraws a held payment; an
 -- operator rejects a screening row; the sweep lapses either). (Hold-expiry failure
--- is written directly by expire_holds, 00007.)
+-- is written directly by expire_holds, 00010.)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION cancel_transfer(p_transfer_id UUID, p_reason TEXT DEFAULT '')
 RETURNS transfer_status AS $$
@@ -627,7 +667,7 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────────────────────────────────────────
 -- deposit / withdraw: money crossing the bank boundary, via external_clearing.
 -- A deposit is a posted transfer external_clearing -> customer (no money minted).
--- High-value moves that need 4-eyes go through request_money_with_approval (00006),
+-- High-value moves that need 4-eyes go through request_money_with_approval (00009),
 -- which stages a PENDING transfer directly via request_transfer.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION deposit(
@@ -782,6 +822,7 @@ DROP FUNCTION IF EXISTS place_transfer_hold(UUID, transfer_status, TEXT, INT, UU
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS post_transfer(UUID, transfer_status[]);
 DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR, UUID);
+DROP FUNCTION IF EXISTS iso_status(transfer_status);
 -- +goose StatementEnd
 DROP TRIGGER IF EXISTS trg_ledger_immutable     ON ledger_entries;
 DROP TRIGGER IF EXISTS trg_ledger_apply_balance ON ledger_entries;

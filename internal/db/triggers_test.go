@@ -8,7 +8,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Integrity triggers from migration 00005_triggers.sql.
+// Integrity triggers from the schema (account_guard_balance in 00007_accounts.sql,
+// ledger_block_mutation in 00008_transfers.sql, set_updated_at in 00003_users.sql).
 //
 // Both tamper guards (account_guard_balance, ledger_block_mutation) RAISE with
 // USING ERRCODE = 'restrict_violation' -> SQLSTATE 23001. set_updated_at stamps

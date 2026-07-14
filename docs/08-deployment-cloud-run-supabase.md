@@ -115,6 +115,16 @@ bank0 migrate up      # APP_DATABASE_DSN = <supabase session pooler DSN>
 Supabase's own migration history is **not** used — goose remains the single
 migration authority (its embedded migrations are the source of truth).
 
+> **Renumbered migrations invalidate `goose_db_version`.** The 9→16 migration
+> split renamed/renumbered files rather than editing them in place (a stronger
+> case than the usual incubation-mode reset, CLAUDE.md "Common tasks"): goose
+> tracks applied state by version number, and a DB that already recorded the
+> old 9-file history has no valid mapping onto the new 16-file one. Any
+> deployed DB (including Supabase) **must be reset** — drop and recreate the
+> schema, or drop `goose_db_version` and the domain tables, then `bank0
+> migrate up` fresh — before this branch's migrations are applied. There is no
+> incubation-mode "fold it in place" option here; the files themselves moved.
+
 ---
 
 ## 2. Compute — Google Cloud Run (two services + one job)

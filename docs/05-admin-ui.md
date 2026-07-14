@@ -308,7 +308,7 @@ minor units → `€x.xx`).
 ## 7. Auth & session
 
 Portal auth is **DB-backed sessions** (the `sessions` table and session functions
-in [`00003_users.sql`](../db/migrations/00003_users.sql)), consistent with the
+in [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), consistent with the
 "logic in the DB" principle:
 
 - **Login** (`GET/POST /login`, public) → `create_staff_session(...)` verifies
@@ -336,7 +336,7 @@ in [`00003_users.sql`](../db/migrations/00003_users.sql)), consistent with the
 ## 8. Settings & defaults
 
 The console's safety thresholds are DB-resident in `bank_settings`
-([`00006_maker_checker.sql`](../db/migrations/00006_maker_checker.sql)) and
+([`00009_maker_checker.sql`](../db/migrations/00009_maker_checker.sql)) and
 console-editable:
 
 - **Maker-checker threshold** (§5.4): **€10,000**

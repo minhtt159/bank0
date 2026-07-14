@@ -44,9 +44,11 @@ route that collides with the client's `/transfers/{id}` — `GET /transfers/pend
 
 ```
 api/openapi.yaml            HTTP contract (client+admin tags) -> genclient/genadmin
-db/migrations/*.sql         goose migrations — 9 domain files (foundation, iban,
-                            users, accounts, transfers, maker_checker, maintenance,
-                            features, system_seed; schema + ALL PL/pgSQL)
+db/migrations/*.sql         goose migrations — 16 domain files (foundation, iban,
+                            users, auth_tokens, onboarding, mfa, accounts,
+                            transfers, maker_checker, maintenance, beneficiaries,
+                            guided_scenarios, disputes, events, fraud, system_seed;
+                            schema + ALL PL/pgSQL)
 db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.gen.go
 internal/db/bank.go         hand-written pgx for set-returning fns sqlc can't expand
 internal/db/auth.go         sessions + refresh-token DB calls (hand-written pgx)
@@ -117,7 +119,7 @@ a throwaway DB to confirm a new migration is reversible.
   query/body params **client-only**: an op shared by both tags must be path-param
   only, else the two generated packages produce conflicting `Params` types.
 - **New DB logic:** **incubation mode is ON** (no prod data yet): fold changes into
-  the existing 9 domain migration files **in place**, keep every `-- +goose Down`
+  the existing 16 domain migration files **in place**, keep every `-- +goose Down`
   reversible (`TestMigrationsReversible` gates this), and reset deployed DBs on
   merge — goose will NOT re-run an edited version on a DB that already applied it.
   Once real data exists, incubation ends and new logic goes in a new

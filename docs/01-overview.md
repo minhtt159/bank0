@@ -71,10 +71,12 @@ graph LR
 ```
 
 `server.mode=all` serves both Go surfaces in one container for local development.
-The schema is a 9-file domain baseline under `db/migrations/`: `00001_foundation`
-(extensions, `uuidv7()`, enum types), `00002_iban`, `00003_users`, `00004_accounts`,
-`00005_transfers`, `00006_maker_checker`, `00007_maintenance`,
-`00008_features`, `00009_system_seed`.
+The schema is a 16-file domain baseline under `db/migrations/`: `00001_foundation`
+(extensions, `uuidv7()`, enum types), `00002_iban`, `00003_users`,
+`00004_auth_tokens`, `00005_onboarding`, `00006_mfa`, `00007_accounts`,
+`00008_transfers`, `00009_maker_checker`, `00010_maintenance`,
+`00011_beneficiaries`, `00012_guided_scenarios`, `00013_disputes`, `00014_events`,
+`00015_fraud`, `00016_system_seed`.
 
 ---
 
@@ -172,7 +174,8 @@ Prometheus RED + pool gauges.
 | Integrate the fraudbank clients | [`09-fraudbank-integration.md`](09-fraudbank-integration.md) |
 | Review the security model | [`10-security-review.md`](10-security-review.md) |
 | Understand IBAN validation/generation | [`11-iban-verification.md`](11-iban-verification.md) |
+| Understand the closed-core → real-rail seam (rail-readiness) | [`12-rail-readiness.md`](12-rail-readiness.md) |
 
 The open backlog + product roadmap live in [`specs/`](specs/) (start at
 [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md)). The as-built behaviour of every
-shipped feature is documented in the reference docs above (`02`–`11`).
+shipped feature is documented in the reference docs above (`02`–`12`).

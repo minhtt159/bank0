@@ -1474,6 +1474,7 @@ components:
         id:           { type: string, format: uuid }
         decision:     { type: string }
         payout_minor: { type: integer, format: int64, description: "The amount actually credited back." }
+        currency:     { type: string, description: "ISO-4217 currency of the disputed transfer (Rec 19)." }
     RecallDisputeRequest:
       type: object
       required: [status]
@@ -1580,6 +1581,7 @@ components:
         vulnerable_flag:         { type: boolean }
         recall_status:           { type: string, enum: [none, requested, funds_returned, refused], description: "Simulated interbank recall (pacs.004)." }
         recall_reason:           { type: string, description: "e.g. FRAD" }
+        currency:        { type: string, description: "ISO-4217 currency of the disputed transfer (Rec 19)." }
         created_at:      { type: string, format: date-time }
         updated_at:      { type: string, format: date-time }
     DisputeQueueItem:
@@ -1620,6 +1622,7 @@ components:
         amount_minor: { type: integer, format: int64 }
         currency: { type: string }
         status: { type: string, description: "pending | held | under_review | posted | failed | canceled | reversed." }
+        status_iso: { type: string, description: "ISO-20022-aligned ExternalPaymentTransactionStatus (PDNG/ACSC/RJCT/CANC). Computed from status, never stored (Rec 20; see docs/12-rail-readiness.md)." }
         kind: { type: string }
         description: { type: string }
         direction: { type: string, enum: [out, in], description: "Relative to the caller." }
@@ -1702,6 +1705,7 @@ components:
       properties:
         transfer_id: { type: string, format: uuid }
         status: { type: string }
+        status_iso: { type: string, description: "ISO-20022-aligned ExternalPaymentTransactionStatus (PDNG/ACSC/RJCT/CANC). Computed from status, never stored (Rec 20; see docs/12-rail-readiness.md)." }
         was_replay: { type: boolean }
     Transfer:
       type: object
@@ -1712,6 +1716,7 @@ components:
         amount_minor: { type: integer, format: int64 }
         currency: { type: string }
         status: { type: string, description: "pending | held | under_review | posted | failed | canceled | reversed." }
+        status_iso: { type: string, description: "ISO-20022-aligned ExternalPaymentTransactionStatus (PDNG/ACSC/RJCT/CANC). Computed from status, never stored (Rec 20; see docs/12-rail-readiness.md)." }
         kind: { type: string }
         reverses_id: { type: string, format: uuid }
         description: { type: string }

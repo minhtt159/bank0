@@ -147,9 +147,13 @@ erDiagram
 
 > The DDL below communicates intent. The canonical definitions live in
 > `db/migrations/` — types and enums in [`00001_foundation.sql`](../db/migrations/00001_foundation.sql),
-> `users`/sessions in [`00003_users.sql`](../db/migrations/00003_users.sql), the
-> ledger core in [`00005_transfers.sql`](../db/migrations/00005_transfers.sql) (accounts/holds live in [`00004_accounts.sql`](../db/migrations/00004_accounts.sql)),
-> and feature tables in [`00008_features.sql`](../db/migrations/00008_features.sql).
+> `users` in [`00003_users.sql`](../db/migrations/00003_users.sql) (sessions/refresh
+> tokens in [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), the
+> ledger core in [`00008_transfers.sql`](../db/migrations/00008_transfers.sql) (accounts/holds live in [`00007_accounts.sql`](../db/migrations/00007_accounts.sql)),
+> and the feature tables split across [`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql),
+> [`00012_guided_scenarios.sql`](../db/migrations/00012_guided_scenarios.sql),
+> [`00013_disputes.sql`](../db/migrations/00013_disputes.sql), [`00014_events.sql`](../db/migrations/00014_events.sql)
+> and [`00015_fraud.sql`](../db/migrations/00015_fraud.sql).
 > Enum names and column names here are the contract.
 
 ### 3.1 `users`
@@ -307,6 +311,14 @@ insert (stable across idempotent replays — a replay never re-inserts), and
 `end_to_end_id` is the customer's own reference, folded into the idempotency
 fingerprint so the same key with a different reference is a 422 mismatch.
 
+There is also a parallel **`status_iso`** on the transfer *contract* (Rec 20) —
+an ISO-20022 ExternalPaymentTransactionStatus (`PDNG`/`ACSC`/`RJCT`/`CANC`)
+**computed by `iso_status(status)`, never stored**: it is not a column on
+`transfers`, only a projection surfaced on the read endpoints. The native
+`status` enum stays the source of truth; see
+[`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) §1 and
+[`12-rail-readiness.md`](12-rail-readiness.md) §4 for the mapping.
+
 ### 3.4 `ledger_entries` — the append-only source of truth
 
 ```sql
@@ -429,7 +441,7 @@ authorized it and why?" (admin_actions).
 ### 3.8 `guided_scenarios` — "Guided transaction" demo config
 
 Demo/config only — **no money state** (table and functions in
-[`00008_features.sql`](../db/migrations/00008_features.sql)). One row maps an active
+[`00012_guided_scenarios.sql`](../db/migrations/00012_guided_scenarios.sql)). One row maps an active
 named scenario to a target ("mule") `accounts(id)` that `GET /transfers/suggestion`
 suggests: optionally per-user (`target_user_id`), gated by `min_amount_minor`, ordered
 by `priority`. Empty by default, so the resolver (`suggest_transfer_destination()`)
@@ -439,7 +451,7 @@ than confirmation-of-payee (masked owner name + iban via `mask_name()`).
 ### 3.9 `disputes` — customer "I don't recognise this" cases
 
 A dispute against a `transfers(id)` the raiser is a party to (table and functions in
-[`00008_features.sql`](../db/migrations/00008_features.sql)). **Not money state** — the
+[`00013_disputes.sql`](../db/migrations/00013_disputes.sql)). **Not money state** — the
 ledger stays append-only; the remedy is the operator's `reverse_transfer`. Only this
 row's `status` (`open` / `under_review` / `resolved` / `rejected`) +
 `resolution_note` / `resolver_user_id` mutate (state machine in `resolve_dispute`). A
