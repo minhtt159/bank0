@@ -102,7 +102,7 @@ query/body params without colliding with the admin package.
 
 **(b) Saved beneficiaries** (Flow 5) — DB-first per [`01`](01-overview.md)
 
-- **Schema** ([`00008_features.sql`](../db/migrations/00008_features.sql)):
+- **Schema** ([`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql)):
   ```sql
   CREATE TABLE beneficiaries (
       id                 UUID PRIMARY KEY DEFAULT uuidv7(),

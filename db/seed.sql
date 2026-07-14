@@ -32,7 +32,7 @@
 -- account so its statement pages.
 --
 -- Staff logins (dev passwords):
---   admin     / admin       (role admin, from migration 00009_system_seed)
+--   admin     / admin       (role admin, from migration 00016_system_seed)
 --   operator1 / operator    (role operator)
 --   auditor1  / auditor      (role auditor)
 -- The customers have no console access; password "password".
@@ -198,7 +198,7 @@ BEGIN
 END $$;
 
 --- guided-transfer demo: a POOL of mule accounts for the APP-scam "mule menu" ------
--- GET /transfers/suggestion (resolver in 00008_features) draws up to 3 RANDOM
+-- GET /transfers/suggestion (resolver in 00012_guided_scenarios) draws up to 3 RANDOM
 -- third-party targets from the ACTIVE guided_scenarios short-list; without one it
 -- falls back to the caller's OWN account (a safe self-transfer, not a scam). To make
 -- the draw varied, seed a POOL: 10 dedicated mule customers holding 30 accounts

@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// These exercise the auth PL/pgSQL surface directly via raw SQL (sessions,
-// refresh tokens, change_password — all in 00003_users.sql).
+// These exercise the auth PL/pgSQL surface directly via raw SQL (sessions and
+// refresh tokens in 00004_auth_tokens.sql; change_password in 00003_users.sql).
 // All DB functions are invoked with SELECT through pg.Pool; SQLSTATEs raised by
 // the functions are asserted with sqlstate() so the test pins the exact contract
 // the Go layer maps to HTTP (28P01/28000/42501/check_violation=23514).

@@ -4,8 +4,10 @@
 -- Shared primitives every other domain builds on: Postgres extensions, the
 -- uuidv7() polyfill that lets `DEFAULT uuidv7()` work identically on PG17
 -- (Supabase) and PG18+, and ALL enum types (account/user/transfer/ledger/hold/
--- idempotency lifecycles + the dispute taxonomy). No tables or functions live
--- here — just the type vocabulary the rest of the schema is written against.
+-- idempotency lifecycles + the dispute taxonomy). No tables live here — only the
+-- type vocabulary the rest of the schema is written against, plus two
+-- table-independent helper functions every domain leans on: the uuidv7() polyfill
+-- and add_business_days() (the PSR/SEPA business-day SLA clock).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- pgcrypto: bcrypt password/PIN hashing (crypt/gen_salt) and gen_random_bytes.

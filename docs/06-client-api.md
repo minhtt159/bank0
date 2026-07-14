@@ -93,7 +93,7 @@ two are never interchangeable.
 Short access tokens need a way to stay logged in without a long-lived bearer.
 The refresh token is an **opaque random string**; the DB stores only
 `sha256(token)` (the `refresh_tokens` table in
-[`00003_users.sql`](../db/migrations/00003_users.sql)), so a DB leak never yields
+[`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), so a DB leak never yields
 a live token. All state and transitions live in PL/pgSQL — the Go layer calls one
 function and maps typed errors to HTTP, the project's standard discipline
 ([`01-overview.md`](01-overview.md)).
@@ -194,7 +194,7 @@ behalf). One customer can never read or debit another's account.
 
 The MFA/step-up increment hardens login and money moves. Same DB-first discipline;
 the access-token path (`requireJWT`) barely changes. As-built: tables + the
-mfa_* PL/pgSQL live in `00003_users.sql`; handlers in
+mfa_* PL/pgSQL live in `00006_mfa.sql`; handlers in
 `internal/api/handlers_mfa.go`; the planning spec is retired.
 
 ### 6.1 TOTP MFA
@@ -265,11 +265,11 @@ are unchanged, so the ledger and ownership logic don't move.
 - **Beyond the core ledger API**, this surface adds `GET /me`, saved
   **beneficiaries** (with confirmation-of-payee masking), and the refresh-token
   tables/functions — schema in
-  [`00003_users.sql`](../db/migrations/00003_users.sql) and
-  [`00008_features.sql`](../db/migrations/00008_features.sql).
+  [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql) and
+  [`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql).
 - **Onboarding v1 is shipped**: invitation-gated self-registration + contact
   verification (§1 Onboarding/Invitations rows; schema/functions in
-  [`00003_users.sql`](../db/migrations/00003_users.sql)) and customer
+  [`00005_onboarding.sql`](../db/migrations/00005_onboarding.sql)) and customer
   self-service account opening / limit requests (§1 Accounts rows). Registration
   **requires** a single-use `invitation_code` (14-day expiry, not email-bound);
   every verified customer mints codes from a lifetime `invites_remaining` quota

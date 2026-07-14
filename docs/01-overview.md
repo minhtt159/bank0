@@ -71,10 +71,12 @@ graph LR
 ```
 
 `server.mode=all` serves both Go surfaces in one container for local development.
-The schema is a 9-file domain baseline under `db/migrations/`: `00001_foundation`
-(extensions, `uuidv7()`, enum types), `00002_iban`, `00003_users`, `00004_accounts`,
-`00005_transfers`, `00006_maker_checker`, `00007_maintenance`,
-`00008_features`, `00009_system_seed`.
+The schema is a 16-file domain baseline under `db/migrations/`: `00001_foundation`
+(extensions, `uuidv7()`, enum types), `00002_iban`, `00003_users`,
+`00004_auth_tokens`, `00005_onboarding`, `00006_mfa`, `00007_accounts`,
+`00008_transfers`, `00009_maker_checker`, `00010_maintenance`,
+`00011_beneficiaries`, `00012_guided_scenarios`, `00013_disputes`, `00014_events`,
+`00015_fraud`, `00016_system_seed`.
 
 ---
 

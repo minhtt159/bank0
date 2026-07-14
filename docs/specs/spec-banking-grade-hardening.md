@@ -46,7 +46,7 @@ is sources + confidence.
 bank0's closed single-Postgres core is strikingly correct where it counts:
 
 - `request_transfer` (`00008`) **claims the idempotency key** (`INSERT … ON CONFLICT DO NOTHING`, first-writer-wins) **+ validates** accounts/limits/available-funds **+ writes the double-entry ledger legs + the hold + the completion response — all in ONE transaction.** Because the side effect commits atomically with the key-claim, bank0 needs **none** of the distributed machinery (outbox, saga, inbox, recovery-points) the industry built to paper over non-atomic side effects.
-- The ledger is **append-only** with a mutation-blocking trigger; `balance_minor` is a **cache writable only by the ledger trigger** and guarded against any non-ledger write. `reconcile()` (`00009`) continuously asserts cache==ledger, per-transfer zero-sum, and global zero-sum.
+- The ledger is **append-only** with a mutation-blocking trigger; `balance_minor` is a **cache writable only by the ledger trigger** and guarded against any non-ledger write. `reconcile()` (`00010`) continuously asserts cache==ledger, per-transfer zero-sum, and global zero-sum.
 - Genuine **authorize/capture**: `request_transfer` = authorize (pending + active hold, 15-min TTL); `post_transfer` = capture; `available = balance − Σ active holds`; holds auto-expire.
 - **Append-only idempotent reversal** with a clawback funds-check; money as `BIGINT` minor units; cross-bank money modelled against an `EXTERNAL_CLEARING` GL so the books stay zero-sum.
 - **Immutable operator audit** (`admin_actions`) + **maker-checker 4-eyes** for above-threshold console money moves.
@@ -282,9 +282,9 @@ answered as a feature→capability table:
 
 > ✅ **Shipped and retired.** `GET /transfers/suggestion` returns the up-to-3
 > third-party "mule" options wrapper (resolver `suggest_transfer_destinations` in
-> `db/migrations/00008_features.sql`); the PWA picks one at random and synthesises
+> `db/migrations/00012_guided_scenarios.sql`); the PWA picks one at random and synthesises
 > the own-account fallback when empty. As-built:
-> [`../06-client-api.md`](../06-client-api.md) §1 + `00008_features.sql`.
+> [`../06-client-api.md`](../06-client-api.md) §1 + `00012_guided_scenarios.sql`.
 
 ## 6. Sequencing
 
