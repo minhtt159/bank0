@@ -223,7 +223,16 @@ func (s *Server) DecideDispute(w http.ResponseWriter, r *http.Request, id openap
 		s.mapDBError(w, r, err) // terminal -> 409, bad amount -> 422, unknown -> 404
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "decision": req.Decision, "payout_minor": payout})
+	// currency is the disputed transfer's currency (Rec 19) — re-read so the response
+	// carries it alongside the payout without the DB function returning it.
+	d, err := s.pg.Queries.GetDisputeAdmin(r.Context(), uuid.UUID(id))
+	if err != nil {
+		s.mapDBError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": id, "decision": req.Decision, "payout_minor": payout, "currency": d.Currency,
+	})
 }
 
 type recallDisputeReq struct {

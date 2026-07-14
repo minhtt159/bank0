@@ -9,7 +9,8 @@
 -- accounts ties to 'out'). Composite (requested_at, id) keyset cursor (bare array, no
 -- envelope); all filters narg -> omitted = no filter. counterparty_owner is masked.
 SELECT t.id, t.debit_account_id, t.credit_account_id, t.amount_minor, t.currency,
-       t.status, t.kind, t.description, t.hold_reason, t.hold_expires_at, t.requested_at, t.posted_at,
+       t.status, iso_status(t.status) AS status_iso, t.kind, t.description,
+       t.hold_reason, t.hold_expires_at, t.requested_at, t.posted_at,
        CASE WHEN da.user_id = sqlc.arg(subject)::uuid THEN 'out' ELSE 'in' END AS direction,
        CASE WHEN da.user_id = sqlc.arg(subject)::uuid
             THEN COALESCE(ca.iban, ca.system_code, '')
@@ -65,7 +66,8 @@ SELECT reverse_transfer(
 ) AS reversal_id;
 
 -- name: GetTransfer :one
-SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status, kind,
+SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status,
+       iso_status(status) AS status_iso, kind,
        reverses_id, description, uetr, end_to_end_id, failure_reason, hold_reason, hold_expires_at,
        requested_at, posted_at, created_at, updated_at
 FROM transfers WHERE id = sqlc.arg(id)::uuid;
@@ -104,7 +106,8 @@ ORDER BY posted_at DESC, id DESC
 LIMIT sqlc.arg(page_limit)::int;
 
 -- name: GetTransferDetail :one
-SELECT t.id, t.amount_minor, t.currency, t.status, t.kind, t.reverses_id,
+SELECT t.id, t.amount_minor, t.currency, t.status, iso_status(t.status) AS status_iso,
+       t.kind, t.reverses_id,
        t.description, t.failure_reason, t.hold_reason, t.hold_expires_at,
        t.requested_at, t.posted_at, t.idempotency_key,
        COALESCE(da.iban, da.system_code, '') AS debit_label,

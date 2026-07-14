@@ -174,6 +174,7 @@ Prometheus RED + pool gauges.
 | Integrate the fraudbank clients | [`09-fraudbank-integration.md`](09-fraudbank-integration.md) |
 | Review the security model | [`10-security-review.md`](10-security-review.md) |
 | Understand IBAN validation/generation | [`11-iban-verification.md`](11-iban-verification.md) |
+| Understand the closed-core → real-rail seam (rail-readiness) | [`12-rail-readiness.md`](12-rail-readiness.md) |
 
 The open backlog + product roadmap live in [`specs/`](specs/) (start at
 [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md)). The as-built behaviour of every

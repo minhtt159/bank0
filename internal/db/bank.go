@@ -12,10 +12,14 @@ import (
 // whose columns sqlc cannot expand, so they are hand-written with pgx.
 
 // TransferResult mirrors the transfer() / request_transfer() RETURNS TABLE.
+// StatusIso is the computed ISO-20022 projection of Status (Rec 20; never stored);
+// only ClientTransfer populates it — the raw transfer()/request_transfer() shims
+// used by tests scan the three base columns and leave it empty.
 type TransferResult struct {
-	TransferID uuid.UUID          `json:"transfer_id"`
+	TransferID uuid.UUID           `json:"transfer_id"`
 	Status     sqlc.TransferStatus `json:"status"`
-	WasReplay  bool               `json:"was_replay"`
+	StatusIso  string              `json:"status_iso,omitempty"`
+	WasReplay  bool                `json:"was_replay"`
 }
 
 // ClientTransfer is the client-surface auto-post transfer: client_transfer enforces
@@ -32,11 +36,11 @@ func (p *Postgres) ClientTransfer(
 	description string,
 	endToEndID *string,
 ) (TransferResult, error) {
-	const q = `SELECT transfer_id, status, was_replay
-	           FROM client_transfer($1::uuid, $2::text, $3::uuid, $4::uuid, $5::bigint, $6::text, $7::varchar)`
+	const q = `SELECT r.transfer_id, r.status, iso_status(r.status), r.was_replay
+	           FROM client_transfer($1::uuid, $2::text, $3::uuid, $4::uuid, $5::bigint, $6::text, $7::varchar) r`
 	var r TransferResult
 	err := p.Pool.QueryRow(ctx, q, subject, idempotencyKey, debit, credit, amountMinor, description, endToEndID).
-		Scan(&r.TransferID, &r.Status, &r.WasReplay)
+		Scan(&r.TransferID, &r.Status, &r.StatusIso, &r.WasReplay)
 	return r, err
 }
 

@@ -42,9 +42,12 @@ func (q *Queries) DecideDispute(ctx context.Context, arg DecideDisputeParams) (i
 }
 
 const getDisputeAdmin = `-- name: GetDisputeAdmin :one
-SELECT id, transfer_id, status, category, reason, resolution_note,
-       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
-FROM disputes WHERE id = $1::uuid
+SELECT d.id, d.transfer_id, d.status, d.category, d.reason, d.resolution_note,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor, d.vulnerable_flag,
+       d.recall_status, d.recall_reason, t.currency, d.created_at, d.updated_at
+FROM disputes d
+JOIN transfers t ON t.id = d.transfer_id
+WHERE d.id = $1::uuid
 `
 
 type GetDisputeAdminRow struct {
@@ -61,6 +64,7 @@ type GetDisputeAdminRow struct {
 	VulnerableFlag        bool            `json:"vulnerable_flag"`
 	RecallStatus          RecallStatus    `json:"recall_status"`
 	RecallReason          string          `json:"recall_reason"`
+	Currency              string          `json:"currency"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 }
@@ -82,6 +86,7 @@ func (q *Queries) GetDisputeAdmin(ctx context.Context, id uuid.UUID) (GetDispute
 		&i.VulnerableFlag,
 		&i.RecallStatus,
 		&i.RecallReason,
+		&i.Currency,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -89,10 +94,12 @@ func (q *Queries) GetDisputeAdmin(ctx context.Context, id uuid.UUID) (GetDispute
 }
 
 const getDisputeForRaiser = `-- name: GetDisputeForRaiser :one
-SELECT id, transfer_id, status, category, reason, resolution_note,
-       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
-FROM disputes
-WHERE id = $1::uuid AND raised_by_user_id = $2::uuid
+SELECT d.id, d.transfer_id, d.status, d.category, d.reason, d.resolution_note,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor, d.vulnerable_flag,
+       d.recall_status, d.recall_reason, t.currency, d.created_at, d.updated_at
+FROM disputes d
+JOIN transfers t ON t.id = d.transfer_id
+WHERE d.id = $1::uuid AND d.raised_by_user_id = $2::uuid
 `
 
 type GetDisputeForRaiserParams struct {
@@ -114,6 +121,7 @@ type GetDisputeForRaiserRow struct {
 	VulnerableFlag        bool            `json:"vulnerable_flag"`
 	RecallStatus          RecallStatus    `json:"recall_status"`
 	RecallReason          string          `json:"recall_reason"`
+	Currency              string          `json:"currency"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 }
@@ -135,6 +143,7 @@ func (q *Queries) GetDisputeForRaiser(ctx context.Context, arg GetDisputeForRais
 		&i.VulnerableFlag,
 		&i.RecallStatus,
 		&i.RecallReason,
+		&i.Currency,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -235,12 +244,14 @@ func (q *Queries) ListDisputesAdmin(ctx context.Context, arg ListDisputesAdminPa
 }
 
 const listDisputesForRaiser = `-- name: ListDisputesForRaiser :many
-SELECT id, transfer_id, status, category, reason, resolution_note,
-       scam_type, sla_due_at, decision, reimbursed_amount_minor, vulnerable_flag, recall_status, recall_reason, created_at, updated_at
-FROM disputes
-WHERE raised_by_user_id = $1::uuid
-  AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
-ORDER BY created_at DESC
+SELECT d.id, d.transfer_id, d.status, d.category, d.reason, d.resolution_note,
+       d.scam_type, d.sla_due_at, d.decision, d.reimbursed_amount_minor, d.vulnerable_flag,
+       d.recall_status, d.recall_reason, t.currency, d.created_at, d.updated_at
+FROM disputes d
+JOIN transfers t ON t.id = d.transfer_id
+WHERE d.raised_by_user_id = $1::uuid
+  AND ($2::timestamptz IS NULL OR d.created_at < $2::timestamptz)
+ORDER BY d.created_at DESC
 LIMIT $3::int
 `
 
@@ -264,6 +275,7 @@ type ListDisputesForRaiserRow struct {
 	VulnerableFlag        bool            `json:"vulnerable_flag"`
 	RecallStatus          RecallStatus    `json:"recall_status"`
 	RecallReason          string          `json:"recall_reason"`
+	Currency              string          `json:"currency"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 }
@@ -291,6 +303,7 @@ func (q *Queries) ListDisputesForRaiser(ctx context.Context, arg ListDisputesFor
 			&i.VulnerableFlag,
 			&i.RecallStatus,
 			&i.RecallReason,
+			&i.Currency,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

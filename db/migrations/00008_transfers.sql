@@ -182,6 +182,46 @@ CREATE TRIGGER trg_ledger_immutable     BEFORE UPDATE OR DELETE ON ledger_entrie
 -- +goose StatementBegin
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- iso_status: the ISO-20022-aligned parallel status (Rec 20). A pure, enum-only
+-- projection of transfers.status onto the Berlin Group / ISO 20022
+-- ExternalPaymentTransactionStatus code list. It is COMPUTED, never stored — the
+-- native transfer_status stays the source of truth; this only lets the contract
+-- speak a rail-shaped vocabulary before any rail exists (spec §2, docs/12).
+--
+-- The mapping, and why each choice is deliberate:
+--   pending      -> 'PDNG'  A pending transfer is authorized + held, awaiting post;
+--   held         -> 'PDNG'  settlement has NOT begun, so it is PDNG ("pending"),
+--   under_review -> 'PDNG'  never ACSP ("accepted, settlement in progress") — ACSP
+--                           would over-promise a settlement that hasn't started.
+--                           WHY a row is parked lives in the native status +
+--                           hold_reason, not in this coarse ISO code.
+--   posted       -> 'ACSC'  In a closed single-ledger core, POSTING *is* settlement
+--                           completion — the double-entry legs are the final book —
+--                           so posted maps to ACSC ("accepted, settlement completed").
+--   failed       -> 'RJCT'  Rejected.
+--   canceled     -> 'CANC'  Canceled before it ever posted.
+--   reversed     -> 'ACSC'  The ORIGINAL still settled; a reversal does NOT
+--                           un-settle it. The return is a SEPARATE reversal transfer
+--                           (kind='reversal', itself posted -> ACSC), and the
+--                           interbank leg of a real return is
+--                           disputes.recall_status / pacs.004, not a status flip
+--                           here. So a reversed original stays ACSC.
+-- 'RCVD' ("received") is deliberately UNUSED: a transfers row exists only AFTER
+-- validation, so there is no pre-validation "received" state to represent.
+-- (The Berlin Group code list is medium-confidence — see docs/12 §4 / spec §3.5.)
+CREATE FUNCTION iso_status(p transfer_status) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE p
+        WHEN 'pending'      THEN 'PDNG'
+        WHEN 'held'         THEN 'PDNG'
+        WHEN 'under_review' THEN 'PDNG'
+        WHEN 'posted'       THEN 'ACSC'
+        WHEN 'failed'       THEN 'RJCT'
+        WHEN 'canceled'     THEN 'CANC'
+        WHEN 'reversed'     THEN 'ACSC'
+    END
+$$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- request_transfer: create a pending transfer + an authorization hold.
 -- Idempotent: a replayed key returns the original result and never double-posts.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -782,6 +822,7 @@ DROP FUNCTION IF EXISTS place_transfer_hold(UUID, transfer_status, TEXT, INT, UU
 DROP FUNCTION IF EXISTS cancel_transfer(UUID, TEXT);
 DROP FUNCTION IF EXISTS post_transfer(UUID, transfer_status[]);
 DROP FUNCTION IF EXISTS request_transfer(TEXT, UUID, UUID, BIGINT, TEXT, transfer_kind, INTERVAL, VARCHAR, UUID);
+DROP FUNCTION IF EXISTS iso_status(transfer_status);
 -- +goose StatementEnd
 DROP TRIGGER IF EXISTS trg_ledger_immutable     ON ledger_entries;
 DROP TRIGGER IF EXISTS trg_ledger_apply_balance ON ledger_entries;

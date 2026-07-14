@@ -311,6 +311,14 @@ insert (stable across idempotent replays — a replay never re-inserts), and
 `end_to_end_id` is the customer's own reference, folded into the idempotency
 fingerprint so the same key with a different reference is a 422 mismatch.
 
+There is also a parallel **`status_iso`** on the transfer *contract* (Rec 20) —
+an ISO-20022 ExternalPaymentTransactionStatus (`PDNG`/`ACSC`/`RJCT`/`CANC`)
+**computed by `iso_status(status)`, never stored**: it is not a column on
+`transfers`, only a projection surfaced on the read endpoints. The native
+`status` enum stays the source of truth; see
+[`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) §1 and
+[`12-rail-readiness.md`](12-rail-readiness.md) §4 for the mapping.
+
 ### 3.4 `ledger_entries` — the append-only source of truth
 
 ```sql

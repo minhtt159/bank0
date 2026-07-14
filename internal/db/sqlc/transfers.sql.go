@@ -185,7 +185,8 @@ func (q *Queries) GetAccountLedger(ctx context.Context, arg GetAccountLedgerPara
 }
 
 const getTransfer = `-- name: GetTransfer :one
-SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status, kind,
+SELECT id, debit_account_id, credit_account_id, amount_minor, currency, status,
+       iso_status(status) AS status_iso, kind,
        reverses_id, description, uetr, end_to_end_id, failure_reason, hold_reason, hold_expires_at,
        requested_at, posted_at, created_at, updated_at
 FROM transfers WHERE id = $1::uuid
@@ -198,6 +199,7 @@ type GetTransferRow struct {
 	AmountMinor     int64          `json:"amount_minor"`
 	Currency        string         `json:"currency"`
 	Status          TransferStatus `json:"status"`
+	StatusIso       string         `json:"status_iso"`
 	Kind            TransferKind   `json:"kind"`
 	ReversesID      *uuid.UUID     `json:"reverses_id"`
 	Description     string         `json:"description"`
@@ -222,6 +224,7 @@ func (q *Queries) GetTransfer(ctx context.Context, id uuid.UUID) (GetTransferRow
 		&i.AmountMinor,
 		&i.Currency,
 		&i.Status,
+		&i.StatusIso,
 		&i.Kind,
 		&i.ReversesID,
 		&i.Description,
@@ -239,7 +242,8 @@ func (q *Queries) GetTransfer(ctx context.Context, id uuid.UUID) (GetTransferRow
 }
 
 const getTransferDetail = `-- name: GetTransferDetail :one
-SELECT t.id, t.amount_minor, t.currency, t.status, t.kind, t.reverses_id,
+SELECT t.id, t.amount_minor, t.currency, t.status, iso_status(t.status) AS status_iso,
+       t.kind, t.reverses_id,
        t.description, t.failure_reason, t.hold_reason, t.hold_expires_at,
        t.requested_at, t.posted_at, t.idempotency_key,
        COALESCE(da.iban, da.system_code, '') AS debit_label,
@@ -255,6 +259,7 @@ type GetTransferDetailRow struct {
 	AmountMinor    int64          `json:"amount_minor"`
 	Currency       string         `json:"currency"`
 	Status         TransferStatus `json:"status"`
+	StatusIso      string         `json:"status_iso"`
 	Kind           TransferKind   `json:"kind"`
 	ReversesID     *uuid.UUID     `json:"reverses_id"`
 	Description    string         `json:"description"`
@@ -276,6 +281,7 @@ func (q *Queries) GetTransferDetail(ctx context.Context, id uuid.UUID) (GetTrans
 		&i.AmountMinor,
 		&i.Currency,
 		&i.Status,
+		&i.StatusIso,
 		&i.Kind,
 		&i.ReversesID,
 		&i.Description,
@@ -334,7 +340,8 @@ func (q *Queries) HoldForTransfer(ctx context.Context, transferID uuid.UUID) ([]
 const listMyTransfers = `-- name: ListMyTransfers :many
 
 SELECT t.id, t.debit_account_id, t.credit_account_id, t.amount_minor, t.currency,
-       t.status, t.kind, t.description, t.hold_reason, t.hold_expires_at, t.requested_at, t.posted_at,
+       t.status, iso_status(t.status) AS status_iso, t.kind, t.description,
+       t.hold_reason, t.hold_expires_at, t.requested_at, t.posted_at,
        CASE WHEN da.user_id = $1::uuid THEN 'out' ELSE 'in' END AS direction,
        CASE WHEN da.user_id = $1::uuid
             THEN COALESCE(ca.iban, ca.system_code, '')
@@ -385,6 +392,7 @@ type ListMyTransfersRow struct {
 	AmountMinor       int64          `json:"amount_minor"`
 	Currency          string         `json:"currency"`
 	Status            TransferStatus `json:"status"`
+	StatusIso         string         `json:"status_iso"`
 	Kind              TransferKind   `json:"kind"`
 	Description       string         `json:"description"`
 	HoldReason        *string        `json:"hold_reason"`
@@ -431,6 +439,7 @@ func (q *Queries) ListMyTransfers(ctx context.Context, arg ListMyTransfersParams
 			&i.AmountMinor,
 			&i.Currency,
 			&i.Status,
+			&i.StatusIso,
 			&i.Kind,
 			&i.Description,
 			&i.HoldReason,

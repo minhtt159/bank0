@@ -30,15 +30,23 @@ stateDiagram-v2
     reversed --> [*]
 ```
 
-| State | Meaning | Balance effect | Available effect |
-|-------|---------|----------------|------------------|
-| `pending` | requested, funds reserved | none (no ledger yet) | debit account ↓ by amount (hold) |
-| `held` | parked for a **customer** confirmation / cooling-off (Rec 22 `review` decision) | none (no ledger yet) | hold stays active (funds still reserved) |
-| `under_review` | parked for **operator** screening/AML review (Rec 25 watchlist hit) | none (no ledger yet) | hold stays active (funds still reserved) |
-| `posted` | settled, ledger written | debit ↓, credit ↑ | hold released, balance already reflects it |
-| `failed` | rejected / expired | none | hold released |
-| `canceled` | withdrawn before posting | none | hold released |
-| `reversed` | settled then corrected | inverse entries applied | n/a |
+| State | `status_iso` | Meaning | Balance effect | Available effect |
+|-------|--------------|---------|----------------|------------------|
+| `pending` | `PDNG` | requested, funds reserved | none (no ledger yet) | debit account ↓ by amount (hold) |
+| `held` | `PDNG` | parked for a **customer** confirmation / cooling-off (Rec 22 `review` decision) | none (no ledger yet) | hold stays active (funds still reserved) |
+| `under_review` | `PDNG` | parked for **operator** screening/AML review (Rec 25 watchlist hit) | none (no ledger yet) | hold stays active (funds still reserved) |
+| `posted` | `ACSC` | settled, ledger written | debit ↓, credit ↑ | hold released, balance already reflects it |
+| `failed` | `RJCT` | rejected / expired | none | hold released |
+| `canceled` | `CANC` | withdrawn before posting | none | hold released |
+| `reversed` | `ACSC` | settled then corrected | inverse entries applied | n/a |
+
+The **`status_iso`** column is the ISO-20022-aligned parallel status (Rec 20) —
+a **computed** projection of `status` onto the Berlin Group
+ExternalPaymentTransactionStatus code list (`iso_status()`, [`00008`](../db/migrations/00008_transfers.sql)),
+never stored, exposed additively alongside the flat `status`. It exists so the
+contract speaks rail before a rail exists; the mapping rationale (why `posted →
+ACSC`, why a `reversed` original *stays* `ACSC`, why `RCVD` is unused) lives in
+[`12-rail-readiness.md`](12-rail-readiness.md) §4.
 
 **Two parked states between `pending` and `posted`** (Recs 22/25): `held` and
 `under_review` both sit on money that hasn't reached the ledger yet — the
@@ -375,6 +383,12 @@ $$;
 
 The original transfer and its entries are never touched — the correction is new
 history. Reconciliation invariants I1–I3 still hold after a reversal.
+
+> **A `reversed` original keeps `status_iso = ACSC`** — it *did* settle, and a
+> reversal does not un-settle it. The return is a **separate** reversal transfer
+> (`kind='reversal'`, itself `ACSC`); the interbank leg of a real return would be
+> `disputes.recall_status`/`pacs.004`, not a status flip. This asymmetry is the
+> saga shape a real rail inherits — see [`12-rail-readiness.md`](12-rail-readiness.md) §4/§2.
 
 Reverse is idempotent on **two** axes (Rec 4): on the `Idempotency-Key` (a replay
 with the same key returns the stored reversal id), *and* on the transfer itself (a

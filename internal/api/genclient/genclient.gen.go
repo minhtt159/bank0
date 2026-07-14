@@ -733,11 +733,14 @@ type CreateTransferRequest struct {
 
 // Dispute defines model for Dispute.
 type Dispute struct {
-	Category  *DisputeCategory    `json:"category,omitempty"`
-	CreatedAt *time.Time          `json:"created_at,omitempty"`
-	Decision  *DisputeDecision    `json:"decision,omitempty"`
-	Id        *openapi_types.UUID `json:"id,omitempty"`
-	Reason    *string             `json:"reason,omitempty"`
+	Category  *DisputeCategory `json:"category,omitempty"`
+	CreatedAt *time.Time       `json:"created_at,omitempty"`
+
+	// Currency ISO-4217 currency of the disputed transfer (Rec 19).
+	Currency *string             `json:"currency,omitempty"`
+	Decision *DisputeDecision    `json:"decision,omitempty"`
+	Id       *openapi_types.UUID `json:"id,omitempty"`
+	Reason   *string             `json:"reason,omitempty"`
 
 	// RecallReason e.g. FRAD
 	RecallReason *string `json:"recall_reason,omitempty"`
@@ -1091,6 +1094,9 @@ type Transfer struct {
 	// Status pending | held | under_review | posted | failed | canceled | reversed.
 	Status *string `json:"status,omitempty"`
 
+	// StatusIso ISO-20022-aligned ExternalPaymentTransactionStatus (PDNG/ACSC/RJCT/CANC). Computed from status, never stored (Rec 20; see docs/12-rail-readiness.md).
+	StatusIso *string `json:"status_iso,omitempty"`
+
 	// Uetr Bank-minted UUIDv4 end-to-end trace reference (SWIFT UETR). Stable across idempotent replays.
 	Uetr *openapi_types.UUID `json:"uetr,omitempty"`
 }
@@ -1158,6 +1164,9 @@ type TransferListItem struct {
 
 	// Status pending | held | under_review | posted | failed | canceled | reversed.
 	Status *string `json:"status,omitempty"`
+
+	// StatusIso ISO-20022-aligned ExternalPaymentTransactionStatus (PDNG/ACSC/RJCT/CANC). Computed from status, never stored (Rec 20; see docs/12-rail-readiness.md).
+	StatusIso *string `json:"status_iso,omitempty"`
 }
 
 // TransferListItemDirection Relative to the caller.
@@ -1165,7 +1174,10 @@ type TransferListItemDirection string
 
 // TransferResult defines model for TransferResult.
 type TransferResult struct {
-	Status     *string             `json:"status,omitempty"`
+	Status *string `json:"status,omitempty"`
+
+	// StatusIso ISO-20022-aligned ExternalPaymentTransactionStatus (PDNG/ACSC/RJCT/CANC). Computed from status, never stored (Rec 20; see docs/12-rail-readiness.md).
+	StatusIso  *string             `json:"status_iso,omitempty"`
 	TransferId *openapi_types.UUID `json:"transfer_id,omitempty"`
 	WasReplay  *bool               `json:"was_replay,omitempty"`
 }
