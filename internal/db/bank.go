@@ -162,6 +162,23 @@ func (p *Postgres) EvaluateTransfer(
 	return e, err
 }
 
+// DecideDispute wraps decide_dispute() (RETURNS TABLE — sqlc can't expand it).
+// One round trip: the payout AND the disputed transfer's currency come back from
+// the same transaction that may have moved reimbursement money, so the handler
+// never needs a post-commit read-back that could misreport a durable payout as
+// an error. reimburseMinor/vulnerable are nullable (NULL = decline / keep flag).
+func (p *Postgres) DecideDispute(
+	ctx context.Context, disputeID, resolver uuid.UUID, decision string,
+	reimburseMinor *int64, vulnerable *bool, note string,
+) (payoutMinor int64, currency string, err error) {
+	const q = `SELECT r.payout_minor, r.currency
+	           FROM decide_dispute($1::uuid, $2::uuid, $3::dispute_decision,
+	                               $4::bigint, $5::boolean, $6::text) r`
+	err = p.Pool.QueryRow(ctx, q, disputeID, resolver, decision, reimburseMinor, vulnerable, note).
+		Scan(&payoutMinor, &currency)
+	return payoutMinor, currency, err
+}
+
 // TransferSuggestion mirrors one row of suggest_transfer_destinations()'s RETURNS
 // TABLE — a guided-transfer menu candidate (a third-party "mule"). Read-only; never
 // exposes a full name or balance (mask_name, same masking as confirmation-of-payee).

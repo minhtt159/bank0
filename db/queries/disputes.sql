@@ -62,10 +62,9 @@ WHERE (sqlc.narg(status)::dispute_status IS NULL OR d.status = sqlc.narg(status)
 ORDER BY d.created_at DESC, d.id DESC
 LIMIT sqlc.arg(page_limit)::int;
 
--- name: DecideDispute :one
-SELECT decide_dispute(sqlc.arg(dispute_id)::uuid, sqlc.arg(resolver)::uuid,
-    sqlc.arg(decision)::dispute_decision, sqlc.narg(reimburse_minor)::bigint,
-    sqlc.narg(vulnerable)::boolean, sqlc.arg(note)::text) AS payout_minor;
+-- decide_dispute() RETURNS TABLE (payout_minor, currency) — sqlc can't expand
+-- set-returning functions, so its wrapper is hand-written in internal/db/bank.go
+-- (DecideDispute), same pattern as client_transfer.
 
 -- name: SetDisputeRecall :one
 SELECT set_dispute_recall(sqlc.arg(dispute_id)::uuid, sqlc.arg(actor)::uuid,

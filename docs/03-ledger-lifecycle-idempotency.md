@@ -40,7 +40,7 @@ stateDiagram-v2
 | `canceled` | `CANC` | withdrawn before posting | none | hold released |
 | `reversed` | `ACSC` | settled then corrected | inverse entries applied | n/a |
 
-The **`status_iso`** column is the ISO-20022-aligned parallel status (Rec 20) —
+The **`status_iso`** response field is the ISO-20022-aligned parallel status (Rec 20) —
 a **computed** projection of `status` onto the Berlin Group
 ExternalPaymentTransactionStatus code list (`iso_status()`, [`00008`](../db/migrations/00008_transfers.sql)),
 never stored, exposed additively alongside the flat `status`. It exists so the

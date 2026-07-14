@@ -184,7 +184,10 @@ CREATE OR REPLACE FUNCTION decide_dispute(
     p_reimburse_minor BIGINT  DEFAULT NULL,
     p_vulnerable      BOOLEAN DEFAULT NULL,
     p_note            TEXT    DEFAULT ''
-) RETURNS BIGINT AS $$
+    -- currency rides along (Rec 19) so the handler needs no post-commit read-back:
+    -- money may have MOVED by the time this returns — a second round-trip that
+    -- failed would misreport a durably-posted reimbursement as an error.
+) RETURNS TABLE (payout_minor BIGINT, currency CHAR(3)) AS $$
 DECLARE
     v_d       disputes%ROWTYPE;
     v_t       transfers%ROWTYPE;
@@ -257,7 +260,7 @@ BEGIN
             jsonb_build_object('dispute_id', p_dispute_id, 'status', v_status,
                                'decision', p_decision, 'payout_minor', v_payout));
 
-    RETURN v_payout;
+    RETURN QUERY SELECT v_payout, v_t.currency;
 END;
 $$ LANGUAGE plpgsql;
 
