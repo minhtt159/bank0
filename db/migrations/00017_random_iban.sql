@@ -4,9 +4,10 @@
 -- visibly sequential, which reads as fake in demos and leaks account-open order.
 -- Now: NL format (NLkk XXXX nnnnnnnnnn, 18 chars) — the 4-letter bank code comes
 -- from bank_settings (operator-tunable like every other bank policy knob; default
--- 'BNKO', deliberately not a real NL bank's BIC prefix) + 10 random digits through
--- iban_generate (unchanged MOD-97 checksum), re-rolling on the unlikely collision
--- (n²/2·10⁻¹⁰ over the 10-digit space — fine for a demo bank).
+-- 'RABO' for a realistic look — still internal-only/non-routable, 00007 header)
+-- + 10 random digits through iban_generate (unchanged MOD-97 checksum),
+-- re-rolling on the unlikely collision (n²/2·10⁻¹⁰ over the 10-digit space —
+-- fine for a demo bank).
 -- UNIQUE(accounts.iban) remains the backstop for the check/insert race.
 -- random() (not crypto-strong) is deliberate: an IBAN is an identifier, not a
 -- secret, and these are internal-only / non-routable (00007 header).
@@ -15,7 +16,7 @@
 -- iban_seq is kept for Down; nothing else reads it.
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE bank_settings
-    ADD COLUMN iban_bank_code TEXT NOT NULL DEFAULT 'BNKO'
+    ADD COLUMN iban_bank_code TEXT NOT NULL DEFAULT 'RABO'
         CHECK (iban_bank_code ~ '^[A-Z]{4}$');
 
 -- +goose StatementBegin
