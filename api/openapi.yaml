@@ -1296,6 +1296,7 @@ components:
       properties:
         username: { type: string }
         password: { type: string }
+        device_label: { type: string, maxLength: 64, description: "Optional human-readable device name shown in the sessions list (e.g. \"Pixel 8\"). Display metadata only — never a trust signal." }
     LoginResponse:
       type: object
       properties:
@@ -1449,6 +1450,7 @@ components:
       properties:
         mfa_token: { type: string }
         code: { type: string, description: "6-digit TOTP, or a recovery code" }
+        device_label: { type: string, maxLength: 64, description: "Optional human-readable device name shown in the sessions list (e.g. \"Pixel 8\"). Display metadata only — never a trust signal." }
         link:
           type: object
           description: >-

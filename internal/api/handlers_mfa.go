@@ -119,8 +119,9 @@ func (s *Server) MfaConfirm(w http.ResponseWriter, r *http.Request) {
 }
 
 type mfaVerifyReq struct {
-	MfaToken string `json:"mfa_token"`
-	Code     string `json:"code"`
+	MfaToken    string `json:"mfa_token"`
+	Code        string `json:"code"`
+	DeviceLabel string `json:"device_label"`
 	// Optional dynamic-linking commitment (PSD2 RTS Art. 5): binds THIS otp to
 	// one payment. Required to pass the step-up gate; a login-time verify
 	// (no link) yields a token that cannot authorize a gated transfer.
@@ -199,7 +200,7 @@ func (s *Server) MfaVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), userID, hashToken(refresh),
-		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), ""); err != nil {
+		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), clampLabel(req.DeviceLabel)); err != nil {
 		s.mapDBError(w, r, err)
 		return
 	}

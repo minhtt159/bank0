@@ -135,8 +135,20 @@ func (s *Server) UpdateMe(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginReq struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	DeviceLabel string `json:"device_label"`
+}
+
+// clampLabel bounds the optional client-supplied device label (display metadata
+// only, never a trust signal) to the spec's 64 chars — defense against a client
+// ignoring maxLength.
+func clampLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > 64 {
+		return string(r[:64])
+	}
+	return s
 }
 
 // Login implements genclient.ServerInterface.
@@ -173,7 +185,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh := newSessionToken()
 	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
-		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), ""); err != nil {
+		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), clampLabel(req.DeviceLabel)); err != nil {
 		s.mapDBError(w, r, err)
 		return
 	}

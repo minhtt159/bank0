@@ -10,8 +10,9 @@ import (
 )
 
 type sessionRow struct {
-	FamilyID string `json:"family_id"`
-	Current  bool   `json:"current"`
+	FamilyID    string `json:"family_id"`
+	Current     bool   `json:"current"`
+	DeviceLabel string `json:"device_label"`
 }
 
 func listSessions(t *testing.T, ts *httptest.Server, token, refresh string) []sessionRow {
@@ -45,6 +46,29 @@ func doDelete(t *testing.T, ts *httptest.Server, token, path string) int {
 
 // GET /me/sessions lists the caller's devices (one row per refresh family) with a
 // current flag; DELETE /me/sessions/{family} is selective, idempotent sign-out.
+// A device_label sent at login is clamped/trimmed and echoed on the session row.
+func TestHTTPLoginDeviceLabelShowsInSessions(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, name := mkUser(t, pg, sqlc.UserRoleCustomer)
+
+	r := postJSON(t, ts.URL+"/auth/login", nil, map[string]string{
+		"username": name, "password": "pw", "device_label": "  Pixel 8  ",
+	})
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("login = %d, want 200", r.StatusCode)
+	}
+	var out struct {
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	decodeBody(t, r, &out)
+
+	rows := listSessions(t, ts, out.Token, out.RefreshToken)
+	if len(rows) != 1 || rows[0].DeviceLabel != "Pixel 8" {
+		t.Fatalf("sessions = %+v, want one row labeled %q", rows, "Pixel 8")
+	}
+}
+
 func TestHTTPListAndRevokeSessions(t *testing.T) {
 	ts, pg := newTestServer(t)
 	_, name := mkUser(t, pg, sqlc.UserRoleCustomer)
