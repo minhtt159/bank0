@@ -38,7 +38,7 @@ func TestHTTPOpenMyAccount(t *testing.T) {
 		t.Errorf("no key = %d, want 400", r.StatusCode)
 	}
 
-	// Open: 201 with a server-minted SE IBAN, owned by the caller.
+	// Open: 201 with a server-minted NL IBAN (00017), owned by the caller.
 	key := uuid.NewString()
 	hdr := map[string]string{"Authorization": "Bearer " + tok, "Idempotency-Key": key}
 	r = postJSON(t, ts.URL+"/me/accounts", hdr, nil)
@@ -51,8 +51,8 @@ func TestHTTPOpenMyAccount(t *testing.T) {
 		Iban   string `json:"iban"`
 	}
 	decodeBody(t, r, &acct)
-	if !strings.HasPrefix(acct.Iban, "SE") || len(acct.Iban) != 24 {
-		t.Errorf("iban = %q, want SE ISO IBAN", acct.Iban)
+	if !strings.HasPrefix(acct.Iban, "NL") || len(acct.Iban) != 18 {
+		t.Errorf("iban = %q, want NL ISO IBAN", acct.Iban)
 	}
 	if acct.UserID != uid.String() {
 		t.Errorf("owner = %s, want caller %s", acct.UserID, uid)
