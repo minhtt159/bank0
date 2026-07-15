@@ -192,36 +192,11 @@ $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Customer self-service account opening (spec-customer-account-opening).
--- The server mints the IBAN: a REAL ISO 13616 'NL' IBAN (iban_generate, 00002 —
--- valid MOD-97 check digits, so it passes the accounts checksum CHECK and every
--- client-side validator): a bank code drawn at random from the
--- bank_settings.iban_bank_codes policy knob (00009; real NL retail-bank codes,
--- same list the dev seed uses) + a RANDOM 10-digit account number — sequential
--- BBANs read as fake in demos and leak account-open order. The loop re-rolls the
--- astronomically unlikely collision; UNIQUE(accounts.iban) is the backstop for
--- the check/insert race. random() (not crypto-strong) is deliberate: an IBAN is
--- an identifier, not a secret. Internal-only: not routable at any real NL bank.
--- bank_settings binds at CALL time (plpgsql), long after 00009 — the same
--- later-table pattern open_customer_account uses for idempotency_keys (00008).
+-- The server mints the IBAN via allocate_iban() — bank0's own minting POLICY,
+-- deliberately not part of this generic accounts domain; it lives in
+-- 00017_iban_minting.sql and binds at CALL time (plpgsql), the same later-object
+-- pattern open_customer_account uses for idempotency_keys (00008).
 -- ─────────────────────────────────────────────────────────────────────────────
--- +goose StatementEnd
-
--- +goose StatementBegin
-CREATE OR REPLACE FUNCTION allocate_iban() RETURNS VARCHAR AS $$
-DECLARE
-    v_codes TEXT[];
-    v_iban  VARCHAR;
-BEGIN
-    SELECT iban_bank_codes INTO v_codes FROM bank_settings;
-    LOOP
-        v_iban := iban_generate('NL',
-            v_codes[1 + floor(random() * array_length(v_codes, 1))::int]
-            || lpad((floor(random() * 1e10))::bigint::text, 10, '0'));
-        EXIT WHEN NOT EXISTS (SELECT 1 FROM accounts WHERE iban = v_iban);
-    END LOOP;
-    RETURN v_iban;
-END;
-$$ LANGUAGE plpgsql;
 
 -- open_customer_account: a customer opens an account for THEMSELVES — the server
 -- allocates the IBAN, the limit comes from bank_settings (create_account sources
@@ -352,7 +327,6 @@ DROP FUNCTION IF EXISTS update_transfer_limit(UUID, BIGINT);
 DROP FUNCTION IF EXISTS set_account_status(UUID, account_status);
 DROP FUNCTION IF EXISTS set_default_account(UUID, UUID);
 DROP FUNCTION IF EXISTS open_customer_account(TEXT, UUID);
-DROP FUNCTION IF EXISTS allocate_iban();
 DROP FUNCTION IF EXISTS create_account(UUID, VARCHAR, TEXT, BIGINT);
 DROP FUNCTION IF EXISTS account_available(UUID);
 -- +goose StatementEnd
