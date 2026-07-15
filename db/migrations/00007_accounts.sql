@@ -192,19 +192,11 @@ $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Customer self-service account opening (spec-customer-account-opening).
--- The server mints the IBAN: a REAL ISO 13616 'SE' IBAN (iban_generate, 00002 —
--- valid MOD-97 check digits, so it passes the accounts checksum CHECK and every
--- client-side validator) whose 20-digit BBAN comes off a sequence. The sequence
--- guarantees uniqueness; UNIQUE(accounts.iban) is the backstop. Internal-only:
--- these are not routable at any real Swedish bank.
+-- The server mints the IBAN via allocate_iban() — bank0's own minting POLICY,
+-- deliberately not part of this generic accounts domain; it lives in
+-- 00017_iban_minting.sql and binds at CALL time (plpgsql), the same later-object
+-- pattern open_customer_account uses for idempotency_keys (00008).
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE SEQUENCE iban_seq START 1000000000000001;
--- +goose StatementEnd
-
--- +goose StatementBegin
-CREATE OR REPLACE FUNCTION allocate_iban() RETURNS VARCHAR AS $$
-    SELECT iban_generate('SE', lpad(nextval('iban_seq')::text, 20, '0'));
-$$ LANGUAGE sql;
 
 -- open_customer_account: a customer opens an account for THEMSELVES — the server
 -- allocates the IBAN, the limit comes from bank_settings (create_account sources
@@ -335,11 +327,9 @@ DROP FUNCTION IF EXISTS update_transfer_limit(UUID, BIGINT);
 DROP FUNCTION IF EXISTS set_account_status(UUID, account_status);
 DROP FUNCTION IF EXISTS set_default_account(UUID, UUID);
 DROP FUNCTION IF EXISTS open_customer_account(TEXT, UUID);
-DROP FUNCTION IF EXISTS allocate_iban();
 DROP FUNCTION IF EXISTS create_account(UUID, VARCHAR, TEXT, BIGINT);
 DROP FUNCTION IF EXISTS account_available(UUID);
 -- +goose StatementEnd
-DROP SEQUENCE IF EXISTS iban_seq;
 DROP TRIGGER IF EXISTS trg_holds_maintain_held    ON holds;
 DROP TRIGGER IF EXISTS trg_accounts_guard_balance ON accounts;
 DROP TRIGGER IF EXISTS trg_accounts_updated_at    ON accounts;

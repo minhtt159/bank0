@@ -883,6 +883,7 @@ type BankSetting struct {
 	MaxAccountsPerUser         int32      `json:"max_accounts_per_user"`
 	ReimbursementCapMinor      int64      `json:"reimbursement_cap_minor"`
 	ReimbursementExcessMinor   int64      `json:"reimbursement_excess_minor"`
+	IbanBankCode               string     `json:"iban_bank_code"`
 }
 
 type Beneficiary struct {

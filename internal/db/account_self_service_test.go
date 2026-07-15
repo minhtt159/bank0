@@ -35,8 +35,10 @@ func TestOpenCustomerAccountMintsValidIban(t *testing.T) {
 		t.Fatal("two opens must mint two accounts")
 	}
 
-	// Server-minted IBANs are REAL ISO 13616 SE IBANs: they pass the DB validator
-	// (the accounts checksum CHECK already proved this at insert) and are distinct.
+	// Server-minted IBANs are REAL ISO 13616 NL IBANs (bank code from
+	// bank_settings.iban_bank_code + 10 random digits, 00017): they pass the DB
+	// validator (the accounts checksum CHECK already proved this at insert) and
+	// are distinct.
 	var iban1, iban2 string
 	var valid bool
 	var limit int64
@@ -46,8 +48,8 @@ func TestOpenCustomerAccountMintsValidIban(t *testing.T) {
 		Scan(&iban1, &valid, &limit, &isDefault); err != nil {
 		t.Fatalf("read account: %v", err)
 	}
-	if !valid || !strings.HasPrefix(iban1, "SE") || len(iban1) != 24 {
-		t.Errorf("iban %q: valid=%v, want SE 24-char ISO IBAN", iban1, valid)
+	if !valid || !strings.HasPrefix(iban1, "NL") || len(iban1) != 18 {
+		t.Errorf("iban %q: valid=%v, want NL 18-char ISO IBAN", iban1, valid)
 	}
 	if !isDefault {
 		t.Error("first account must be the default")
