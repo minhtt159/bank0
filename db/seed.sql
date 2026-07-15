@@ -94,7 +94,7 @@ DECLARE
     n_total    INT := 88;            -- 30 named + 58 generated -> ~200 accounts
     -- Real NL bank codes, cycled, so the BBAN is bank-code + 10-digit account number
     -- (a realistic NL IBAN) rather than 14 raw digits.
-    bankcodes  TEXT[] := ARRAY['ABNA', 'INGB', 'RABO', 'TRIO', 'SNSB', 'KNAB'];
+    bankcodes  TEXT[] := ARRAY['ABNA','ADYB','ARSN','ASNB','BUNQ','INGB','KNAB','RABO','RBRB','SNSB','TRIO'];
     aids       UUID[] := '{}';
     v_username TEXT;
     v_fullname TEXT;
@@ -217,7 +217,7 @@ DECLARE
     lnames    TEXT[] := ARRAY['Eklund','Lindqvist','Visser','Berg','Holm','Dahl','Nyman','Falk','Sandberg','Ek',
                               'Lund','Strom','Aaltonen','Bakker','Vos','Jansen','Larsson','Moller','Haugen','Voss'];
     reasons   TEXT[] := ARRAY['Recommended payee','Trusted payee','Verified payee','Saved payee','Frequent payee','Known recipient','Your contact'];
-    bankcodes TEXT[] := ARRAY['ABNA','INGB','RABO','TRIO','SNSB','KNAB'];
+    bankcodes TEXT[] := ARRAY['ABNA','ADYB','ARSN','ASNB','BUNQ','INGB','KNAB','RABO','RBRB','SNSB','TRIO'];
     mules     UUID[] := '{}';
     v_owner   UUID;
     v_acct    UUID;

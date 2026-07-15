@@ -192,19 +192,36 @@ $$ LANGUAGE plpgsql;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Customer self-service account opening (spec-customer-account-opening).
--- The server mints the IBAN: a REAL ISO 13616 'SE' IBAN (iban_generate, 00002 —
+-- The server mints the IBAN: a REAL ISO 13616 'NL' IBAN (iban_generate, 00002 —
 -- valid MOD-97 check digits, so it passes the accounts checksum CHECK and every
--- client-side validator) whose 20-digit BBAN comes off a sequence. The sequence
--- guarantees uniqueness; UNIQUE(accounts.iban) is the backstop. Internal-only:
--- these are not routable at any real Swedish bank.
+-- client-side validator): a bank code drawn at random from the
+-- bank_settings.iban_bank_codes policy knob (00009; real NL retail-bank codes,
+-- same list the dev seed uses) + a RANDOM 10-digit account number — sequential
+-- BBANs read as fake in demos and leak account-open order. The loop re-rolls the
+-- astronomically unlikely collision; UNIQUE(accounts.iban) is the backstop for
+-- the check/insert race. random() (not crypto-strong) is deliberate: an IBAN is
+-- an identifier, not a secret. Internal-only: not routable at any real NL bank.
+-- bank_settings binds at CALL time (plpgsql), long after 00009 — the same
+-- later-table pattern open_customer_account uses for idempotency_keys (00008).
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE SEQUENCE iban_seq START 1000000000000001;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION allocate_iban() RETURNS VARCHAR AS $$
-    SELECT iban_generate('SE', lpad(nextval('iban_seq')::text, 20, '0'));
-$$ LANGUAGE sql;
+DECLARE
+    v_codes TEXT[];
+    v_iban  VARCHAR;
+BEGIN
+    SELECT iban_bank_codes INTO v_codes FROM bank_settings;
+    LOOP
+        v_iban := iban_generate('NL',
+            v_codes[1 + floor(random() * array_length(v_codes, 1))::int]
+            || lpad((floor(random() * 1e10))::bigint::text, 10, '0'));
+        EXIT WHEN NOT EXISTS (SELECT 1 FROM accounts WHERE iban = v_iban);
+    END LOOP;
+    RETURN v_iban;
+END;
+$$ LANGUAGE plpgsql;
 
 -- open_customer_account: a customer opens an account for THEMSELVES — the server
 -- allocates the IBAN, the limit comes from bank_settings (create_account sources
@@ -339,7 +356,6 @@ DROP FUNCTION IF EXISTS allocate_iban();
 DROP FUNCTION IF EXISTS create_account(UUID, VARCHAR, TEXT, BIGINT);
 DROP FUNCTION IF EXISTS account_available(UUID);
 -- +goose StatementEnd
-DROP SEQUENCE IF EXISTS iban_seq;
 DROP TRIGGER IF EXISTS trg_holds_maintain_held    ON holds;
 DROP TRIGGER IF EXISTS trg_accounts_guard_balance ON accounts;
 DROP TRIGGER IF EXISTS trg_accounts_updated_at    ON accounts;

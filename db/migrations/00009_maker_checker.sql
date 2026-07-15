@@ -55,7 +55,14 @@ CREATE TABLE bank_settings (
     -- stand-in for the UK £85k) and the claim excess deducted unless the customer
     -- is flagged vulnerable (the PSR waives it for them).
     reimbursement_cap_minor       BIGINT      NOT NULL DEFAULT 8500000 CHECK (reimbursement_cap_minor >= 0),
-    reimbursement_excess_minor    BIGINT      NOT NULL DEFAULT 10000   CHECK (reimbursement_excess_minor >= 0)
+    reimbursement_excess_minor    BIGINT      NOT NULL DEFAULT 10000   CHECK (reimbursement_excess_minor >= 0),
+    -- 4-letter NL bank codes allocate_iban (00007) draws from at random — real
+    -- retail-bank codes for a realistic look (accounts stay internal-only /
+    -- non-routable). The CHECK: concatenation must be non-empty groups of 4
+    -- uppercase letters, i.e. every element is exactly [A-Z]{4}.
+    iban_bank_codes               TEXT[]      NOT NULL
+        DEFAULT ARRAY['ABNA','ADYB','ARSN','ASNB','BUNQ','INGB','KNAB','RABO','RBRB','SNSB','TRIO']
+        CHECK (array_to_string(iban_bank_codes, '') ~ '^([A-Z]{4})+$')
 );
 INSERT INTO bank_settings (id) VALUES (TRUE);  -- the one row, all defaults
 
