@@ -873,8 +873,10 @@ type LimitRequestResponse struct {
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
-	Password string `json:"password"`
-	Username string `json:"username"`
+	// DeviceLabel Optional human-readable device name shown in the sessions list (e.g. "Pixel 8"). Display metadata only — never a trust signal.
+	DeviceLabel *string `json:"device_label,omitempty"`
+	Password    string  `json:"password"`
+	Username    string  `json:"username"`
 }
 
 // LoginResponse defines model for LoginResponse.
@@ -933,6 +935,9 @@ type MfaRecoveryCodes struct {
 type MfaVerifyRequest struct {
 	// Code 6-digit TOTP, or a recovery code
 	Code string `json:"code"`
+
+	// DeviceLabel Optional human-readable device name shown in the sessions list (e.g. "Pixel 8"). Display metadata only — never a trust signal.
+	DeviceLabel *string `json:"device_label,omitempty"`
 
 	// Link Dynamic-linking commitment (PSD2 RTS Art. 5 / WYSIWYS): binds this OTP to ONE payment. REQUIRED to pass the transfer step-up gate; changing amount or payee invalidates the factor. Omit for a plain login verify.
 	Link *struct {
