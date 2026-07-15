@@ -381,7 +381,7 @@ paths:
           description: Filter to one event type.
           schema:
             type: string
-            enum: [transfer.posted, payment.incoming, device.new, dispute.updated]
+            enum: [transfer.posted, transfer.held, payment.incoming, device.new, dispute.updated]
         - name: unread_only
           in: query
           required: false
@@ -1401,7 +1401,7 @@ components:
         id: { type: string, format: uuid }
         type:
           type: string
-          enum: [transfer.posted, payment.incoming, device.new, dispute.updated]
+          enum: [transfer.posted, transfer.held, payment.incoming, device.new, dispute.updated]
         title: { type: string, description: "Short human-readable summary (server-driven copy)." }
         body: { type: string }
         related_transfer_id: { type: string, format: uuid }

@@ -151,6 +151,7 @@ const (
 	EventTypeDeviceNew       EventType = "device.new"
 	EventTypeDisputeUpdated  EventType = "dispute.updated"
 	EventTypePaymentIncoming EventType = "payment.incoming"
+	EventTypeTransferHeld    EventType = "transfer.held"
 	EventTypeTransferPosted  EventType = "transfer.posted"
 )
 
@@ -162,6 +163,8 @@ func (e EventType) Valid() bool {
 	case EventTypeDisputeUpdated:
 		return true
 	case EventTypePaymentIncoming:
+		return true
+	case EventTypeTransferHeld:
 		return true
 	case EventTypeTransferPosted:
 		return true
@@ -571,6 +574,7 @@ const (
 	ListMyEventsParamsTypeDeviceNew       ListMyEventsParamsType = "device.new"
 	ListMyEventsParamsTypeDisputeUpdated  ListMyEventsParamsType = "dispute.updated"
 	ListMyEventsParamsTypePaymentIncoming ListMyEventsParamsType = "payment.incoming"
+	ListMyEventsParamsTypeTransferHeld    ListMyEventsParamsType = "transfer.held"
 	ListMyEventsParamsTypeTransferPosted  ListMyEventsParamsType = "transfer.posted"
 )
 
@@ -582,6 +586,8 @@ func (e ListMyEventsParamsType) Valid() bool {
 	case ListMyEventsParamsTypeDisputeUpdated:
 		return true
 	case ListMyEventsParamsTypePaymentIncoming:
+		return true
+	case ListMyEventsParamsTypeTransferHeld:
 		return true
 	case ListMyEventsParamsTypeTransferPosted:
 		return true
