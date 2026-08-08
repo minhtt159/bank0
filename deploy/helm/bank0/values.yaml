@@ -17,6 +17,11 @@ migrations:
 service:
   port: 80
 
+logging:
+  # Raise to debug to troubleshoot a live release without rebuilding the image.
+  level: info               # debug | info | warn | error
+  encoding: json            # json for log collectors; console only for a human tty
+
 admin:
   # NB: the maker-checker threshold + default transfer limit are NOT app config —
   # they live in the DB (bank_settings, API-8) and are edited from the console

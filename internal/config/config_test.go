@@ -37,3 +37,26 @@ func TestConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+// LOG-LEVEL-DEFAULT: config.yaml is baked into the image, so whatever it says is
+// what an unconfigured deployment logs at. It must not ship `debug` — the local
+// compose stack opts back in with APP_LOGGING_LEVEL instead.
+func TestShippedConfigLogsAtProductionLevel(t *testing.T) {
+	cfg, err := LoadConfig("../..")
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Logging.Level == "debug" {
+		t.Errorf("config.yaml ships logging.level = debug; production pods would log at debug")
+	}
+
+	// The escape hatch the compose stack and the chart both rely on.
+	t.Setenv("APP_LOGGING_LEVEL", "debug")
+	cfg, err = LoadConfig("../..")
+	if err != nil {
+		t.Fatalf("LoadConfig with env override: %v", err)
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("APP_LOGGING_LEVEL override = %q, want debug", cfg.Logging.Level)
+	}
+}
