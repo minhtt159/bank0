@@ -3,7 +3,11 @@ import { apiLogin, uiLogin } from "./fixtures";
 
 test("customer adds a payee and completes a transfer end to end", async ({ page, request }) => {
   // You can't add your OWN account as a payee, so use another seeded customer's IBAN.
-  const payeeIban = (await apiLogin(request, "bob")).accounts[0].iban;
+  // Bob's LAST account, not his first: disputes.spec files a fraud dispute against
+  // accounts[0] on the shared seeded backend, which flags it (destination_flagged) and
+  // turns this happy path into an ack-gated "Possible scam payment" warning.
+  const bob = await apiLogin(request, "bob");
+  const payeeIban = bob.accounts[bob.accounts.length - 1].iban;
 
   await uiLogin(page); // alice
   await page.goto("/transfer");

@@ -5,7 +5,7 @@ name: bank0
 
 services:
   db:
-    image: postgres:${PG_VERSION:-18}   # default 18; PG_VERSION=17 for Supabase parity
+    image: postgres:18   # the only supported version (schema uses the PG18 uuidv7())
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin

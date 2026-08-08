@@ -111,7 +111,7 @@ func LoadConfig(path string) (Config, error) {
 	v := viper.New()
 
 	v.SetDefault("app.name", "bank0")
-	v.SetDefault("app.version", "0.1.0")
+	v.SetDefault("app.version", "1.0.0")
 	v.SetDefault("app.env", "development")
 	v.SetDefault("app.debug", true)
 
@@ -157,9 +157,9 @@ func LoadConfig(path string) (Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Cloud Run (and most PaaS) inject the listen port as $PORT, not
+	// Most PaaS/container platforms inject the listen port as $PORT, not
 	// $APP_SERVER_PORT. Bind both so the app honors the platform's port without
-	// dropping the existing APP_-prefixed override. See docs/08 §2.1.
+	// dropping the existing APP_-prefixed override.
 	_ = v.BindEnv("server.port", "APP_SERVER_PORT", "PORT")
 
 	if err := v.ReadInConfig(); err != nil {

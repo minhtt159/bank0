@@ -12,9 +12,10 @@
 > and the schema + PL/pgSQL in `db/migrations/`. The retired companion line-level
 > specs (spec-step-up-mfa, spec-notifications-events) are folded into those docs.
 > The tables below keep **only the open recommendations**; each pillar's "Current"
-> prose is updated to the as-built baseline. Rec 17 (RFC 9457) stays deferred: it
-> changes the error content-type for all three fraudbank clients and needs a
-> coordinated bump.
+> prose is updated to the as-built baseline. Rec 17 (RFC 9457) is **re-deferred at
+> 1.0.0 (P0→P3)** — the `error` token already gives machine-branchable classes, and
+> the recorded adoption path is additive content negotiation (no coordinated bump;
+> see [`../06-client-api.md`](../06-client-api.md) §5).
 >
 > **Confidence & hedges (qualify the remaining open recs).** EUR-Lex, IETF, UK PSR
 > and EU Instant Payments Regulation facts are high-confidence. EPC primary PDFs
@@ -96,7 +97,8 @@ now returns the **existing** reversal id idempotently (200) instead of raising
 
 **Target:** wire the IETF `Idempotency-Key` draft-07 contract at the HTTP layer —
 **done** for the closed core; only the content-type migration to RFC 9457 (Rec 17,
-§3.5) remains, and it is deferred pending a coordinated three-client bump.
+§3.5) remains — re-deferred at 1.0.0, adoption path is additive content negotiation
+([`../06-client-api.md`](../06-client-api.md) §5), no coordinated bump needed.
 
 **Gaps:** none tracked in this pillar.
 
@@ -106,7 +108,7 @@ now returns the **existing** reversal id idempotently (200) instead of raising
 balance cache, `reconcile()` invariants, real authorize/capture + holds,
 append-only reversal). The maintenance runners are now **independently
 schedulable** (Rec 6 shipped): a one-shot `bank0 maintenance` subcommand
-(`cmd/app/main.go`; CronJob/Cloud-Scheduler-friendly, [`../08-deployment-cloud-run-supabase.md`](../08-deployment-cloud-run-supabase.md) §3.4)
+(`cmd/app/main.go`; CronJob-friendly)
 runs `expire_holds` + the cleanups + a `reconcile()` pass and logs the counts. Two
 accepted nits: a **reconcile-drift** result and a **lock-held** run (another
 replica holds the advisory lock) both **exit 0** — alerting keys on the emitted
@@ -192,7 +194,7 @@ remaining private-dialect item is the error body: a flat `{error, message}`, not
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
-| 17 | **Migrate the error model to RFC 9457 `application/problem+json`** `{type (stable URI per class), title, status, detail, instance}` so clients branch on `type`, not prose. **Deferred** pending a coordinated bump across all three fraudbank clients (it changes the error content-type). *(draft-07 itself cites RFC 7807; use its successor **9457** — do not attribute 9457 to the draft.)* | P0 | M |
+| 17 | **Migrate the error model to RFC 9457 `application/problem+json`**. **Re-deferred at 1.0.0 (P0→P3):** the `error` code token already gives clients machine-branchable error classes (9457 has no code member — a `code` extension would carry the same token), no client or proxy reads the error content-type, and the recorded adoption path is additive content negotiation (`Accept: application/problem+json`) per the error-contract note in [`../06-client-api.md`](../06-client-api.md) §5 — so this never requires a coordinated client bump or a major version. *(draft-07 itself cites RFC 7807; use its successor **9457**.)* | P3 | M |
 | 19 | **Additive-only contract CI + cross-client DTO conformance** (the remainder of Rec 19). `currency` is now explicit on all money-bearing **responses**; **request-side `currency` is deliberately omitted** — the server derives it from the debit account ([`../12-rail-readiness.md`](../12-rail-readiness.md) §5). Open scope: enforce additive-only contract CI (fail on removed/renamed fields or narrowed enums) and **extend conformance to the hand-written iOS/Android DTOs** (only web is checked today). | P1 | S |
 
 ### 3.6 Fraud-UX backend enablers (decision/warning + events feed)
@@ -271,7 +273,7 @@ answered as a feature→capability table:
 | "I was warned and chose to proceed" ack that holds up for liability | Warning-evidence capture tied to the transfer attempt | P0 |
 | Replay-safe retry after a network failure / after step-up (charge once) | Replay stored `response` body + `Idempotency-Replayed: true`; `403 step_up_required` **before** the key is claimed | P0 |
 | Notification badge + incoming-payment + "new sign-in" alerts | `GET /me/events` feed (**shipped**) | P0 |
-| Branch on error class without string-matching prose | RFC 9457 `problem+json` with a stable `type` URI per class | P0 |
+| Branch on error class without string-matching prose | Already met by the stable `error` code-token registry ([`../06-client-api.md`](../06-client-api.md) §5); RFC 9457 `type` URIs add nothing for the closed clients | ~~P0~~ met |
 | High-value / new-payee step-up, code bound to this exact amount+payee | Step-up MFA + dynamic-linking challenge `hash(debit│credit│amount│kind)` | P0 |
 | "High-risk / newly-opened / reported" destination badge; first-payment friction | Recipient-risk on resolve + new-payee cooling fields | P1 |
 | Category-specific scam interstitial copy, tunable without an app release | Warning/decision endpoint with server-side rule table | P1 |
@@ -311,15 +313,16 @@ building nothing (§2 RESOLVED).
 
 - **Wave 4 — standards depth, edge surfaces (P1/P2, additive):** Recs 5/27, 16, 24, 26, 28,
   plus the **Rec 19 remainder** (additive-only contract CI + iOS/Android DTO conformance).
-- **Deferred:** Rec 17 (RFC 9457) — waits on a coordinated bump across all three fraudbank
-  clients (it changes the error content-type); Recs 7 (partial capture) and 8 (ISO-4217
+- **Deferred:** Rec 17 (RFC 9457) — re-deferred at 1.0.0; adoption path is additive
+  content negotiation ([`../06-client-api.md`](../06-client-api.md) §5), no coordinated
+  bump needed; Recs 7 (partial capture) and 8 (ISO-4217
   metadata table) — **deferred-as-YAGNI**, triggers in [`../12-rail-readiness.md`](../12-rail-readiness.md) §5.
 
 ## 7. Effort summary (remaining recs only)
 
 | Priority | Recs | Rough size |
 |---|---|---|
-| **P0 (deferred)** | 17 | M — coordinated three-client bump |
+| **P3 (re-deferred at 1.0.0)** | 17 | M — additive content negotiation when ever wanted; no client bump |
 | **P1** | 5/27, 19 (remainder), 26 | edge surfaces + auditor read views + contract CI |
 | **P2 (active)** | 16, 24, 28 | additive standards; never blocks the closed core |
 | **P2 (deferred-YAGNI)** | 7, 8 | partial capture + ISO-4217 metadata; triggers in docs/12 §5 |
