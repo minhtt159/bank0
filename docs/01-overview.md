@@ -152,9 +152,9 @@ From `portal.*`, a staff member (cookie session, role-gated) provisions and supe
 
 ### Deploy it
 
-Two supported paths, same image: a **self-managed** Kubernetes/Helm + Gateway API
-setup ([`04-deployment.md`](04-deployment.md)) and a **serverless** Supabase + Cloud
-Run + Cloudflare path ([`08-deployment-cloud-run-supabase.md`](08-deployment-cloud-run-supabase.md)).
+bank0 is **self-hosted**: published container images + the Kubernetes/Helm +
+Gateway API setup ([`04-deployment.md`](04-deployment.md)), on a Postgres 18 you
+provision yourself.
 Migrations run as a pre-upgrade job; readiness pings the DB; `/metrics` exposes
 Prometheus RED + pool gauges.
 
@@ -170,7 +170,6 @@ Prometheus RED + pool gauges.
 | Use the operator console | [`05-admin-ui.md`](05-admin-ui.md) |
 | Use the customer client API (auth, ownership, endpoints) | [`06-client-api.md`](06-client-api.md) |
 | Build/run the customer PWA | [`07-client-web-app.md`](07-client-web-app.md) |
-| Deploy (serverless Supabase + Cloud Run) | [`08-deployment-cloud-run-supabase.md`](08-deployment-cloud-run-supabase.md) |
 | Integrate the fraudbank clients | [`09-fraudbank-integration.md`](09-fraudbank-integration.md) |
 | Review the security model | [`10-security-review.md`](10-security-review.md) |
 | Understand IBAN validation/generation | [`11-iban-verification.md`](11-iban-verification.md) |

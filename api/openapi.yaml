@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: bank0 API
-  version: 0.1.0
+  version: 1.0.0
   description: |
     Core-banking backend. Two surfaces, separated by domain:
       * **client** (api.bank0.hnimn.art) — customer-facing money operations

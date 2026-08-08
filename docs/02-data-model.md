@@ -507,8 +507,7 @@ check the `reconcile()` function and the admin dashboard run.
 - **Time**: always `TIMESTAMPTZ`, default `now()`. `updated_at` maintained by a
   `BEFORE UPDATE` trigger on every mutable table.
 - **IDs**: `UUID` PKs, `DEFAULT uuidv7()` (time-ordered → index-friendly inserts;
-  native in PG18, with a version-gated polyfill for PG17 in
-  [`00001_foundation.sql`](../db/migrations/00001_foundation.sql)).
+  the PG18 built-in — PG18 is the floor, there is no polyfill).
 - **Enums**: PostgreSQL `ENUM` types, named `<noun>_<attr>` (e.g. `transfer_status`).
 - **No hard deletes** of financial data: `ON DELETE RESTRICT` on every FK into
   `accounts`/`transfers`/`ledger_entries`. People/accounts are *closed*, not deleted.

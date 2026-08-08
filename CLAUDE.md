@@ -44,11 +44,11 @@ route that collides with the client's `/transfers/{id}` — `GET /transfers/pend
 
 ```
 api/openapi.yaml            HTTP contract (client+admin tags) -> genclient/genadmin
-db/migrations/*.sql         goose migrations — 16 domain files (foundation, iban,
+db/migrations/*.sql         goose migrations — 17 domain files (foundation, iban,
                             users, auth_tokens, onboarding, mfa, accounts,
                             transfers, maker_checker, maintenance, beneficiaries,
-                            guided_scenarios, disputes, events, fraud, system_seed;
-                            schema + ALL PL/pgSQL)
+                            guided_scenarios, disputes, events, fraud, system_seed,
+                            iban_minting; schema + ALL PL/pgSQL)
 db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.gen.go
 internal/db/bank.go         hand-written pgx for set-returning fns sqlc can't expand
 internal/db/auth.go         sessions + refresh-token DB calls (hand-written pgx)
@@ -85,26 +85,23 @@ After regenerating, **commit the generated files** (`internal/db/sqlc/*`,
 `internal/api/gen*/*.gen.go`, `web/template/*_templ.go`) — the repo builds without
 the tools installed.
 
-## Testing against PostgreSQL (default 18; 17 for Supabase parity)
+## Testing against PostgreSQL 18
 
 The integration tests (DB + HTTP) are **DSN-gated**: they skip unless
-`TEST_DATABASE_DSN` is set, and `TestMain` migrates the target DB fresh. **Postgres
-18 is the default** everywhere (local dev + CI). Postgres 17 (the Supabase deploy
-target) is supported as an **opt-in** via the `uuidv7()` polyfill in migration
-`00001_foundation.sql` (a no-op on PG18+, where the built-in wins). Don't go below 17.
+`TEST_DATABASE_DSN` is set, and `TestMain` migrates the target DB fresh.
+**Postgres 18 is the only supported version** — the schema's `DEFAULT uuidv7()`
+uses the PG18 built-in and there is no polyfill for older servers.
 
 ```bash
 # preferred: Taskfile (deploy/docker-compose.dev.yml, postgres:18)
-task test:db            # Postgres 18 (default)
-task test:db PG=17      # Postgres 17 — Supabase parity (recreates a fresh db container)
+task test:db
 
 # manual, full suite:
 export TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable'
 go test -count=1 ./internal/db/ ./internal/api/
 ```
 
-CI defaults to `postgres:18`; trigger the workflow manually (Actions →
-**workflow_dispatch** → `pg_version: 17`) to run the suite against PG17.
+CI runs `postgres:18` in every job.
 
 If Docker Hub is rate-limited in your environment, pull PG18 from the GCR mirror:
 `docker run -d --name pg18 -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=bank0_test -p 5544:5432 mirror.gcr.io/library/postgres:18-alpine`,
@@ -118,12 +115,14 @@ a throwaway DB to confirm a new migration is reversible.
   do) → scope to the subject with `clientSubject(r.Context())`. Keep ops that need
   query/body params **client-only**: an op shared by both tags must be path-param
   only, else the two generated packages produce conflicting `Params` types.
-- **New DB logic:** **incubation mode is ON** (no prod data yet): fold changes into
-  the existing 16 domain migration files **in place**, keep every `-- +goose Down`
-  reversible (`TestMigrationsReversible` gates this), and reset deployed DBs on
-  merge — goose will NOT re-run an edited version on a DB that already applied it.
-  Once real data exists, incubation ends and new logic goes in a new
-  `db/migrations/NNNN_*.sql` instead. Either way: add a query in `db/queries/*.sql`
+- **New DB logic:** **incubation mode is ON until the `v1.0.0` tag** (no published
+  install exists yet): fold changes into the existing 17 domain migration files
+  **in place**, keep every `-- +goose Down` reversible (`TestMigrationsReversible`
+  gates this), and reset deployed DBs on merge — goose will NOT re-run an edited
+  version on a DB that already applied it, and the Helm pre-upgrade migrate Job
+  makes that skip silent. **Pushing `v1.0.0` ends incubation**: those files freeze
+  as the baseline and every later change — schema or a one-line PL/pgSQL fix —
+  goes in a new `db/migrations/NNNN_*.sql`. Either way: add a query in `db/queries/*.sql`
   and `task generate:sqlc`. **sqlc cannot expand set-returning functions**
   (`RETURNS TABLE`) — hand-write those with pgx in `internal/db/bank.go` or
   `auth.go` (see `Transfer`, `ResolveAccountByIban`, `RotateRefreshToken`).

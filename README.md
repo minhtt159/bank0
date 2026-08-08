@@ -51,7 +51,7 @@ Without Docker: `task install && task generate && task migrate:up && psql "$APP_
 
 ## Deploy
 
-Same image, two supported paths:
+Self-hosted Kubernetes is the primary path — one image, one Helm chart:
 
 ```bash
 helm install bank0 deploy/helm/bank0 --set database.existingSecret=bank0-db
@@ -59,12 +59,12 @@ helm install bank0 deploy/helm/bank0 --set database.existingSecret=bank0-db
 
 creates `bank0-api` (mode=api, HPA) and `bank0-portal` (mode=portal) behind Gateway
 API/Envoy, with a pre-upgrade migrate job ([`docs/04-deployment.md`](docs/04-deployment.md)).
-A serverless Supabase + Cloud Run + Cloudflare path is in
-[`docs/08-deployment-cloud-run-supabase.md`](docs/08-deployment-cloud-run-supabase.md).
+Image publishing and the remaining chart work are planned in
+[`docs/specs/spec-container-helm-pivot.md`](docs/specs/spec-container-helm-pivot.md).
 
 ## Tech stack
 
-Go 1.26 · PostgreSQL 18 (native `uuidv7()`; a polyfill keeps PG17/Supabase working) ·
+Go 1.26 · PostgreSQL 18 (native `uuidv7()`; 18 is the floor) ·
 pgx/v5 + sqlc · goose migrations · slog · BIGINT minor units · bcrypt (pgcrypto) ·
 Templ + HTMX (console) · OpenAPI 3.1 contract-first (oapi-codegen + Scalar) · Helm.
 

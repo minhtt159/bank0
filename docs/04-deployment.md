@@ -1,12 +1,12 @@
 # bank0 — Deployment, Scaling & API Contract
 
-> How bank0 runs: three public surfaces, one Go image (two run modes), a
-> Cloudflare edge, in-cluster migrations, and a contract-first OpenAPI surface.
+> How bank0 runs: three public surfaces, one Go image (two run modes),
+> in-cluster migrations, and a contract-first OpenAPI surface.
 >
-> **This is the self-managed (Postgres + Kubernetes/Helm) path.** For the
-> managed/serverless path — **Supabase + Google Cloud Run + Cloudflare** — see
-> [`08-deployment-cloud-run-supabase.md`](08-deployment-cloud-run-supabase.md).
-> The application code is identical across both; only §§2–3 (hosting) differ.
+> **This is the deployment path** — self-hosted Postgres 18 + Kubernetes/Helm +
+> Gateway API. It is the only one; there is no managed/serverless variant. The
+> remaining work to get there (image publishing, chart hardening, PWA hosting) is
+> [`specs/spec-container-helm-pivot.md`](specs/spec-container-helm-pivot.md).
 
 ---
 
@@ -33,14 +33,13 @@ graph LR
     API --> PG
 ```
 
-### Edge: Cloudflare now, Gateway API as an option
+### Edge: Gateway API
 
-**Today** the client API sits **behind a Cloudflare proxy** (TLS termination,
-WAF/rate-limiting, DDoS protection at the edge); the PWA is a Cloudflare Worker.
-This needs no in-cluster ingress for the customer surfaces. The **Helm + Gateway
-API/Envoy** setup in §3 remains a fully-supported **alternative/cluster-internal**
-path (e.g. self-hosted, or to expose `portal.*`) — choose one edge per host; the
-Go app is identical either way.
+The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster —
+TLS, routing, and rate-limiting are the Gateway's job. The PWA is still built and
+served as a Cloudflare Worker today; moving it in-cluster (and what that means for
+the same-origin `/api/*` proxy) is planned in
+[`specs/spec-container-helm-pivot.md`](specs/spec-container-helm-pivot.md) §5.
 
 ---
 
@@ -109,7 +108,7 @@ rather than collapsing into `mode=all`:
 
 | Service | Role | Notes |
 |---------|------|-------|
-| `db` | `postgres:18` (`PG_VERSION=17` for Supabase parity) | exposes `:5432` |
+| `db` | `postgres:18` | exposes `:5432` |
 | `migrate` | one-shot `migrate up`, then exits | runs after `db` is healthy |
 | `seed` | one-shot `psql … db/seed.sql`, then exits | runs after `migrate` succeeds |
 | `admin` | `APP_SERVER_MODE=portal` → `:8080` | console + admin API; auto-migrate **off**, maintenance loop on |

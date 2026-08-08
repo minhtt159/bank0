@@ -18,6 +18,7 @@
 > | Spec | Covers | Relates to P3 § |
 > |------|--------|-----------------|
 > | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
+> | [`spec-container-helm-pivot.md`](spec-container-helm-pivot.md) | deployment pivot: publish container images + the Helm chart for self-hosted k8s (Kyverno-clean chart, GHCR, per-surface Gateways, in-cluster PWA) | infra, not a product domain |
 >
 > **Already shipped** items are no longer re-listed here — the as-built truth lives in
 > the reference docs ([`../06-client-api.md`](../06-client-api.md) /

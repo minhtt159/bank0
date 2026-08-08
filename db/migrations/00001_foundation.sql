@@ -1,13 +1,13 @@
 -- +goose Up
 -- ─────────────────────────────────────────────────────────────────────────────
 -- DATA MODEL — FOUNDATION
--- Shared primitives every other domain builds on: Postgres extensions, the
--- uuidv7() polyfill that lets `DEFAULT uuidv7()` work identically on PG17
--- (Supabase) and PG18+, and ALL enum types (account/user/transfer/ledger/hold/
--- idempotency lifecycles + the dispute taxonomy). No tables live here — only the
--- type vocabulary the rest of the schema is written against, plus two
--- table-independent helper functions every domain leans on: the uuidv7() polyfill
--- and add_business_days() (the PSR/SEPA business-day SLA clock).
+-- Shared primitives every other domain builds on: Postgres extensions and ALL
+-- enum types (account/user/transfer/ledger/hold/idempotency lifecycles + the
+-- dispute taxonomy). No tables live here — only the type vocabulary the rest of
+-- the schema is written against, plus the one table-independent helper function
+-- every domain leans on: add_business_days() (the PSR/SEPA business-day SLA
+-- clock). `DEFAULT uuidv7()` uses the PostgreSQL 18 built-in, so PG18 is the
+-- floor — there is no polyfill for older servers.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- pgcrypto: bcrypt password/PIN hashing (crypt/gen_salt) and gen_random_bytes.
@@ -19,43 +19,6 @@ CREATE EXTENSION IF NOT EXISTS citext;
 -- Substring ILIKE and word_similarity() both use the GIN indexes built in the
 -- user-model / core-banking files below.
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
--- uuidv7(): built into PostgreSQL 18. On older servers (e.g. Supabase, currently
--- PG17) we install a pure-SQL polyfill so the schema's `DEFAULT uuidv7()` works
--- unchanged. The guard makes this a no-op on PG18+, where the built-in wins and
--- this function is never created — so the same migrations run on both. See
--- docs/08-deployment-cloud-run-supabase.md §1.1.
--- +goose StatementBegin
-DO $$
-BEGIN
-    IF current_setting('server_version_num')::int < 180000 THEN
-        -- Time-ordered v7 UUID: millisecond unix timestamp in the high 48 bits,
-        -- random elsewhere, with the version (7) and variant (RFC 4122) bits set.
-        -- gen_random_uuid() (built in since PG13) supplies the randomness.
-        CREATE OR REPLACE FUNCTION uuidv7() RETURNS uuid
-        LANGUAGE sql VOLATILE PARALLEL SAFE AS $f$
-            SELECT encode(
-                set_bit(
-                    set_bit(
-                        overlay(
-                            uuid_send(gen_random_uuid())
-                            PLACING substring(
-                                int8send((extract(epoch FROM clock_timestamp()) * 1000)::bigint)
-                                FROM 3
-                            )
-                            FROM 1 FOR 6
-                        ),
-                        52, 1
-                    ),
-                    53, 1
-                ),
-                'hex'
-            )::uuid;
-        $f$;
-    END IF;
-END
-$$;
--- +goose StatementEnd
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Enum types — the shared vocabulary for every domain below.
@@ -143,16 +106,6 @@ DROP TYPE IF EXISTS account_kind;
 DROP TYPE IF EXISTS user_status;
 DROP TYPE IF EXISTS user_role;
 
--- Drop the polyfill only where we created it; never touch the PG18 built-in.
--- +goose StatementBegin
-DO $$
-BEGIN
-    IF current_setting('server_version_num')::int < 180000 THEN
-        DROP FUNCTION IF EXISTS uuidv7();
-    END IF;
-END
-$$;
--- +goose StatementEnd
 DROP EXTENSION IF EXISTS pg_trgm;
 DROP EXTENSION IF EXISTS citext;
 DROP EXTENSION IF EXISTS pgcrypto;

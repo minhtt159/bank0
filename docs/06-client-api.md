@@ -186,6 +186,19 @@ behalf). One customer can never read or debit another's account.
 - `mapDBError` is the only place HTTP status is derived from DB SQLSTATEs — every
   business rule still lives in the database. New codes: `422 payment_blocked` and
   `409 ack_required` from the fraud gate (§8).
+- **Error contract (stable at 1.0).** Every non-2xx JSON response is
+  `{"error": <code>, "message": <human text>}` with `Content-Type:
+  application/json` — including errors minted by the Worker proxy (`bad_gateway`)
+  and by request binding (`bad_request`). Clients MUST branch on `error` and the
+  HTTP status only; `message` is display text and may change without notice. The
+  `error` code tokens are a registry: existing tokens are never renamed or removed
+  in 1.x, and new tokens may be added at any time (treat an unknown token as a
+  generic failure for its status class). The envelope is additive: new top-level
+  members may appear in 1.x and MUST be ignored if unrecognised. **Path to
+  RFC 9457:** if `application/problem+json` is ever adopted (Rec 17), it will be
+  served via content negotiation (`Accept: application/problem+json`) with the
+  `error` token carried as a `code` extension member, leaving the default
+  response above untouched — never as an in-place replacement.
 - Money is **int64 minor units** end to end; `currency` is single (EUR) for now,
   and now ships explicitly on every money-bearing **response** (Rec 19) — including
   `Dispute`/`DecideDisputeResponse`. Requests **inherit** the debit account's
