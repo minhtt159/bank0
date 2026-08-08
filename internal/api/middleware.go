@@ -85,9 +85,10 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 // securityHeaders sets safe, high-value response headers on every surface. The
 // customer PWA gets its full CSP from the Worker; the Go operator console (a
 // higher-privilege HTML surface) previously shipped NONE. These are harmless on
-// JSON API responses too. A stricter script-src CSP is intentionally omitted so
-// the CDN-loaded htmx keeps working (self-hosting htmx + script-src lockdown is a
-// separate follow-up); what's here is the anti-clickjacking / sniffing core.
+// JSON API responses too. htmx is already vendored + served same-origin from
+// /static, so the remaining blocker on a script-src 'self' lockdown is the
+// console's inline onclick/hx-on handlers (a separate follow-up, docs/10);
+// what's here is the anti-clickjacking / sniffing core.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -121,7 +122,7 @@ func (s *Server) timeout(next http.Handler) http.Handler {
 // credentials (bearer header, no cookies). It answers the preflight OPTIONS itself
 // so an unmatched method doesn't fall through to mux's 405; for that reason it is
 // wrapped OUTSIDE the mux (see Router). Idempotency-Key is allow-listed or
-// POST /transfers preflight would fail. See docs/09-fraudbank-integration.md §1.2.
+// POST /transfers preflight would fail. See docs/09-fraudbank-integration.md §1.1.
 func (s *Server) cors(next http.Handler) http.Handler {
 	allowed := s.cfg.Server.CORSOrigins
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +130,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
 			h.Add("Vary", "Origin")
-			h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
 			h.Set("Access-Control-Max-Age", "600")
 		}

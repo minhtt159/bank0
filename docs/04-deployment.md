@@ -1,6 +1,6 @@
 # bank0 — Deployment, Scaling & API Contract
 
-> How bank0 runs: three public surfaces, one Go image (two run modes),
+> How bank0 runs: three public surfaces, one Go image (run modes `api`/`portal`/`all`),
 > in-cluster migrations, and a contract-first OpenAPI surface.
 >
 > **This is the deployment path** — self-hosted Postgres 18 + Kubernetes/Helm +
@@ -76,7 +76,7 @@ bank0 maintenance      # run expire_holds + cleanup once
 
 | Surface | Mechanism | Public routes |
 |---------|-----------|---------------|
-| `api` (client) | **JWT bearer** (HS256) + rotating **refresh tokens**. `POST /auth/login` issues an access token (`aud=bank0-client`) + refresh token; `requireJWT` validates and ownership-scopes every request to the subject ([`06-client-api.md`](06-client-api.md)). | `/auth/login`, `/auth/refresh`, `/auth/logout`, `/health`, `/readyz`, `/metrics`, `/docs`, `/openapi.yaml` |
+| `api` (client) | **JWT bearer** (HS256) + rotating **refresh tokens**. `POST /auth/login` issues an access token (`aud=bank0-client`) + refresh token; `requireJWT` validates and ownership-scopes every request to the subject ([`06-client-api.md`](06-client-api.md)). | `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`, `/auth/verify-contact`, `/auth/resend-code`, `/auth/mfa/verify` (all rate-limited), `/health`, `/readyz`, `/metrics`, `/docs`, `/openapi.yaml` |
 | `portal` (admin) | **DB-backed cookie session** (`bank0_session`), staff-role check, 30-min sliding idle. | `/login`, `/logout`, `/health`, `/readyz`, `/metrics`, `/docs`, `/openapi.yaml` |
 
 `/health` is a DB-blind liveness probe; `/readyz` is DB-aware readiness; `/metrics`
@@ -97,34 +97,38 @@ and `cmd/app/main.go` logs `invalid configuration` and exits non-zero. Only in
 
 ---
 
-## 2. Local: docker-compose (postgres + migrate + seed + admin + client)
+## 2. Local: docker-compose (postgres + migrate + admin + client)
 
 ```bash
 docker compose -f deploy/docker-compose.dev.yml up --build
 ```
 
-The stack is **five services**, mirroring the split-surface production topology
+The stack is **four services**, mirroring the split-surface production topology
 rather than collapsing into `mode=all`:
 
 | Service | Role | Notes |
 |---------|------|-------|
 | `db` | `postgres:18` | exposes `:5432` |
 | `migrate` | one-shot `migrate up`, then exits | runs after `db` is healthy |
-| `seed` | one-shot `psql … db/seed.sql`, then exits | runs after `migrate` succeeds |
 | `admin` | `APP_SERVER_MODE=portal` → `:8080` | console + admin API; auto-migrate **off**, maintenance loop on |
 | `client` | `APP_SERVER_MODE=api` → `:8090` | client JSON API; auto-migrate **off** |
 
 No container runs `mode=all` or `APP_SERVER_AUTO_MIGRATE=true` — migrations are
-applied by the dedicated `migrate` job. Visit `http://localhost:8080/` (console)
-and `http://localhost:8090/docs` (client API reference).
+applied by the dedicated `migrate` job. The stack comes up migrated but
+**unseeded**: load data with `task seed` (or `task dev:reset` for a fresh seeded
+stack), then visit `http://localhost:8080/` (console) and
+`http://localhost:8090/docs` (client API reference).
 
 ---
 
 ## 3. Kubernetes: Helm chart (`deploy/helm/bank0`)
 
 ```bash
+# database secret has key "dsn"; auth secret has key "jwt-secret"
+# (api pods fail closed without a JWT secret — see §1)
 helm install bank0 deploy/helm/bank0 \
-  --set database.existingSecret=bank0-db    # secret with key "dsn"
+  --set database.existingSecret=bank0-db \
+  --set auth.existingSecret=bank0-auth
 ```
 
 What the chart creates:
@@ -139,7 +143,7 @@ graph TD
       GW --> SvcP[Service bank0-portal]
       SvcA --> DepA["Deployment bank0-api<br/>mode=api · HPA 3–10"]
       SvcP --> DepP["Deployment bank0-portal<br/>mode=portal · 2 replicas · maintenance"]
-      Job["pre-upgrade Job: bank0 migrate up"] --> PG[(PostgreSQL)]
+      Job["pre-install/pre-upgrade Job: bank0 migrate up"] --> PG[(PostgreSQL)]
       DepA --> PG
       DepP --> PG
     end
@@ -154,7 +158,7 @@ graph TD
 | **DB credentials** | `APP_DATABASE_DSN` from a Secret (`existingSecret` recommended; chart can create one from `database.dsn` for dev). |
 | **Probes** | **liveness → `/health`** (cheap, DB-blind — a DB blip must not kill the pod); **readiness → `/readyz`** (pings Postgres with a 1s deadline, 503 when the pool can't serve, so a pod with a dead/exhausted pool leaves the Service rotation). Both deployments. |
 | **Metrics** | `/metrics` — a real Prometheus **histogram** (`bank0_http_request_duration_seconds`, labelled by method/route-template/status → `histogram_quantile` p50/p95/p99 + rate + error-rate) plus a live pgxpool gauge and the Go/process collectors (`client_golang`). Optional, off by default: a **ServiceMonitor** (`metrics.serviceMonitor.enabled`, needs the Prometheus Operator) and a **Grafana dashboard** ConfigMap auto-discovered by the kube-prometheus-stack sidecar (`metrics.dashboard.enabled`). |
-| **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault`, and `automountServiceAccountToken: false` (values: `podSecurityContext` / `securityContext`). |
+| **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault` (values: `podSecurityContext` / `securityContext`), and a hardcoded `automountServiceAccountToken: false`. |
 | **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here, both surfaces behind a trusted edge) makes the auth rate limiter key on the real client IP (`CF-Connecting-IP` / `X-Forwarded-For`) instead of `RemoteAddr`. |
 | **JWT secret** | The `api` deployment mounts `APP_AUTH_JWT_SECRET` (Helm `auth.existingSecret`); the `portal` deployment doesn't need one (cookie sessions), and `Config.Validate` only requires it when the served mode includes the api surface. |
 | **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP→HTTPS. |

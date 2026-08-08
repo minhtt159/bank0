@@ -10,8 +10,14 @@
 > (`POST /me/accounts`, server-minted IBAN), transfer-limit requests
 > (`POST /accounts/{id}/limit-requests` + the operator queue), and rail-ready
 > transfer ids (`uetr`, `end_to_end_id`) — see [`06-client-api.md`](06-client-api.md) §1.
-> The remaining backlog (notifications, step-up MFA, the rest of the
-> banking-grade hardening roadmap) lives in [`docs/specs/`](specs/) — see
+> Notifications (the `events` feed behind `GET /me/events`, `/me/events/unread`,
+> `/me/events/read`) and step-up MFA (`/auth/mfa/*` plus `evaluate_transfer`'s
+> `step_up` decision) have shipped since. The remaining backlog is the **open half
+> of the banking-grade roadmap** — server-side CoP/VOP, SCA, RFC 9457 (re-deferred
+> P0→P3 at 1.0.0) — and the P3 product domains; both live in
+> [`docs/specs/`](specs/) — see
+> [`specs/spec-banking-grade-hardening.md`](specs/spec-banking-grade-hardening.md)
+> (open recommendations only) and
 > [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).
 > Companion on the client side: fraudbank `docs/02-api-contract.md`.
 
@@ -23,15 +29,21 @@ fraudbank web and the native apps authenticate against the client API exactly as
 the bank0 PWA does ([`06-client-api.md`](06-client-api.md) §2–3):
 
 - `POST /auth/login` → short (15m) HS256 access token **+ refresh token**.
+  When the user has MFA enrolled, login instead returns `mfa_required: true` +
+  a short-lived (5m) `mfa_token` and **no tokens at all** — exchange the
+  `mfa_token` + code at `POST /auth/mfa/verify` to get the pair.
 - `POST /auth/refresh` rotates the pair, with reuse detection: a replayed refresh
   token revokes the whole family.
 - `POST /auth/logout` revokes one session; `POST /auth/logout-all` revokes all.
 
-**Web holds tokens server-side via the Worker BFF.** The same-origin seam already
-exists: `worker/index.ts` serves the SPA and proxies `/api/*`
-([`07-client-web-app.md`](07-client-web-app.md) §2). fraudbank web points a Worker
-route (or a second assets binding on the same Worker) at its SPA and the proxy
-holds the refresh token:
+**Web should hold tokens server-side via a Worker BFF — planned, not built.**
+Today `worker/index.ts` is a **pass-through proxy**: it serves the SPA and
+forwards `/api/*` upstream verbatim (its own comment calls the token-holding BFF
+"future"), so the browser still holds the refresh token
+([`07-client-web-app.md`](07-client-web-app.md) §2). That same-origin proxy is the
+seam the BFF slots into. fraudbank web would point a Worker route (or a second
+assets binding on the same Worker) at its SPA and have the proxy hold the refresh
+token:
 
 - **Login:** the Worker forwards `POST /api/auth/login` upstream; on 200 it strips
   `refresh_token` from the JSON before returning it to the browser and sets it as
@@ -46,8 +58,8 @@ holds the refresh token:
   clears the cookie.
 - **Everything else:** proxied as today, `Authorization: Bearer` passed through.
 
-"BFF" is an architecture term — it never appears in a client URL. The long-lived
-refresh credential stays out of browser JS entirely.
+"BFF" is an architecture term — it never appears in a client URL. Once built, the
+long-lived refresh credential stays out of browser JS entirely.
 
 **Native apps use direct API access** — JWT + refresh held in
 Keystore/Keychain. A BFF adds nothing for them and only an extra hop, so they call
@@ -61,7 +73,7 @@ browser → `:8090` calls:
 
 ```
 Access-Control-Allow-Origin: <matched origin>          # exact match from the list, no *
-Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS
+Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Headers: Authorization, Content-Type, Idempotency-Key
 Access-Control-Max-Age: 600
 Vary: Origin
@@ -101,8 +113,15 @@ exposes more than confirmation-of-payee (a masked owner name + IBAN). Full desig
 ## 4. Disputes fraud hook — flag only
 
 `raise_dispute` emits the `admin_actions` `dispute_raised` audit row — the
-fraud-engine seam — and nothing else. There is **no auto-freeze**; an opt-in
-freeze toggle is documented in the spec as a future option.
+fraud-engine seam. There is **no auto-freeze**; an opt-in freeze toggle is
+documented in the spec as a future option.
+
+It is not inert, though: `assess_transfer_risk` scores **+3 `destination_flagged`**
+for any account on the **credit side** of an `open`/`under_review` dispute whose
+category is `fraud` or `unrecognised`
+([`00015_fraud.sql`](../db/migrations/00015_fraud.sql)). So raising a dispute
+raises the risk band for **later payments to that same destination** — which can
+escalate them to `warn`/`review`/`step_up` via `evaluate_transfer`.
 
 ---
 

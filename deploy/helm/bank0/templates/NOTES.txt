@@ -20,3 +20,9 @@ by a Postgres advisory lock so only one replica acts per tick.
 WARNING: no database.existingSecret and no database.dsn set — pods will fail to
 start. Provide one (existingSecret recommended).
 {{- end }}
+{{- if and (not .Values.auth.existingSecret) (not .Values.auth.jwtSecret) }}
+
+WARNING: no auth.existingSecret and no auth.jwtSecret set — api pods run with
+app.env=production and fail closed at startup without a JWT secret. Provide one
+(existingSecret recommended).
+{{- end }}

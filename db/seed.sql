@@ -16,7 +16,7 @@
 --
 -- Run:  psql "$DSN" -f db/seed.sql      (or `task seed`)
 --
--- Shape: ~89 customers (alice + 88), 2-3 accounts each (~200 accounts) — the
+-- Shape: 98 customers (88 + 10 mules), 2-3 accounts each (242 accounts) — the
 -- LIGHTWEIGHT default, a fraction of the heavy randomized demo seed (generated on
 -- demand by `task seed:demo`); this just gives realistic volume so lists/statements
 -- span pages. Usernames: alice + bob stay PINNED bare (docs + the e2e suite log in

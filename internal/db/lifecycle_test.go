@@ -8,10 +8,11 @@ import (
 )
 
 // These exercise the maintenance/dispute/beneficiary/guided/reconcile PL/pgSQL
-// (migrations 00009, 00020, 00016, 00019). DB functions are invoked via raw
+// (migrations 00010_maintenance, 00013_disputes, 00011_beneficiaries,
+// 00012_guided_scenarios). DB functions are invoked via raw
 // pg.Pool SELECTs so we assert on real SQLSTATEs, not guessed Go wrappers.
 
-// ─── expire_holds (00009) ────────────────────────────────────────────────────
+// ─── expire_holds (00010_maintenance.sql) ────────────────────────────────────
 
 // A pending transfer holds funds (available drops). Once the hold is past its
 // expiry, expire_holds() flips the hold -> 'expired' and the transfer -> 'failed',
@@ -160,7 +161,7 @@ func TestCleanupReapsStaleInProgressKeys(t *testing.T) {
 	}
 }
 
-// ─── disputes (00020) ────────────────────────────────────────────────────────
+// ─── disputes (00013_disputes.sql) ───────────────────────────────────────────
 
 // postedTransfer creates a posted transfer a->b (a owned by ownerA, b by ownerB).
 func postedTransfer(t *testing.T, pg *Postgres, a, b uuid.UUID) uuid.UUID {
@@ -298,7 +299,7 @@ func TestResolveDisputeStateMachine(t *testing.T) {
 	}
 }
 
-// ─── beneficiaries (00016) ───────────────────────────────────────────────────
+// ─── beneficiaries (00011_beneficiaries.sql) ─────────────────────────────────
 
 // resolve_account_by_iban returns a row for an active customer account, and
 // raises (P0001 -> 404) when the account is frozen (existence hidden).
@@ -376,14 +377,14 @@ func TestAddBeneficiaryRejectsOwnAndDuplicate(t *testing.T) {
 	}
 }
 
-// ─── guided suggestion / mule menu (00032) ───────────────────────────────────
+// ─── guided suggestion / mule menu (00012_guided_scenarios.sql) ──────────────
 // The v2 resolver suggest_transfer_destinations draws only from the active
 // guided_scenarios short-list, so it's exercised end-to-end in the API suite
 // (internal/api/suggestion_test.go), which owns guided_scenarios writes
 // sequentially. A DB-layer test here would race that suite's TRUNCATE on the
 // shared test database, so the coverage lives there.
 
-// ─── reconcile drift detection (00009) ───────────────────────────────────────
+// ─── reconcile drift detection (00010_maintenance.sql) ───────────────────────
 
 // reconcile() reports drift. We bypass triggers in a rolled-back tx, introduce a
 // single unbalanced ledger row, and assert reconcile() (run in the same tx) sees

@@ -4,6 +4,10 @@
 //
 //   k6 run -e BASE_URL=https://api.bank0.hnimn.art -e USER=alice -e PASS=password load/transfers.js
 //
+// Paths are BARE (/auth/login, /transfers) — that is what mode=api serves. The
+// /api prefix the PWA uses is a Worker/Vite proxy artifact and is stripped before
+// it reaches the binary, so BASE_URL points straight at the API origin.
+//
 // reconcile() is the real correctness oracle — run `SELECT * FROM reconcile();`
 // against the DB after a run and assert zero rows. A load test that breaks a ledger
 // invariant is the most important signal a bank can get; latency is secondary.
@@ -48,16 +52,16 @@ export const options = {
 
 // setup runs once: authenticate and discover the caller's two accounts.
 export function setup() {
-  const res = http.post(`${BASE}/api/auth/login`, JSON.stringify({ username: USER, password: PASS }), {
+  const res = http.post(`${BASE}/auth/login`, JSON.stringify({ username: USER, password: PASS }), {
     headers: { "Content-Type": "application/json" },
   });
   if (res.status !== 200) fail(`login failed: ${res.status} ${res.body}`);
   const token = res.json("token");
 
   const auth = { headers: { Authorization: `Bearer ${token}` } };
-  const me = http.get(`${BASE}/api/me`, auth);
+  const me = http.get(`${BASE}/me`, auth);
   const uid = me.json("id");
-  const accts = http.get(`${BASE}/api/users/${uid}/accounts`, auth).json();
+  const accts = http.get(`${BASE}/users/${uid}/accounts`, auth).json();
   if (!Array.isArray(accts) || accts.length < 2) {
     fail(`need >=2 accounts for ${USER}; got ${accts && accts.length}`);
   }
@@ -76,13 +80,13 @@ export default function (data) {
   // attempt would reuse it and is safe. (For the burst-contention stage, reuse a
   // shared key across VUs and assert exactly one ledger effect downstream.)
   const tx = http.post(
-    `${BASE}/api/transfers`,
+    `${BASE}/transfers`,
     JSON.stringify({ debit_account: debit, credit_account: credit, amount_minor: AMOUNT, description: "k6 baseline" }),
     { headers: { "Content-Type": "application/json", Authorization: `Bearer ${data.token}`, "Idempotency-Key": uuidv4() }, tags: { name: "transfer" } },
   );
   check(tx, { "transfer 200": (r) => r.status === 200 });
 
   // Read mix: the account list endpoint should stay flat (keyset, no OFFSET).
-  const list = http.get(`${BASE}/api/transfers?limit=25`, { ...auth, tags: { name: "list" } });
+  const list = http.get(`${BASE}/transfers?limit=25`, { ...auth, tags: { name: "list" } });
   check(list, { "list 200": (r) => r.status === 200 });
 }

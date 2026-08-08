@@ -12,10 +12,14 @@
 
 ## 1. Why this document exists
 
-bank0's whole correctness story rests on one move: `request_transfer` (in
-[`00008_transfers.sql`](../db/migrations/00008_transfers.sql)) **claims the
-idempotency key, validates, writes the double-entry ledger legs, records the
-completion — all in ONE Postgres transaction.** Because the side effect commits
+bank0's whole correctness story rests on one move, and all of it happens in **ONE
+Postgres transaction** (all in
+[`00008_transfers.sql`](../db/migrations/00008_transfers.sql)): `request_transfer`
+**claims the idempotency key, validates, inserts the `pending` transfer + its hold,
+and records the completion response**; `post_transfer` **writes the two
+double-entry ledger legs** (the `ledger_apply_to_balance` trigger moves the balance
+cache); and the `transfer()` wrapper — what `POST /transfers` calls — **composes
+claim → validate → gates → legs → completion in that single transaction.** Because the side effect commits
 atomically with the key-claim, bank0 needs **none** of the distributed machinery
 the industry built to paper over non-atomic side effects: no transactional
 outbox, no at-least-once relay, no inbox/consumer-dedup, no recovery-point
@@ -96,12 +100,25 @@ That is precisely the Order→Execution handoff drawn as a guarded edge.
 Payment Order (instruction + lifecycle)        │  Payment Execution (settlement)
 ──────────────────────────────────────────────┼───────────────────────────────
 request_transfer → pending (+ hold)            │
+  ↳ transfer() gates, in the same txn:         │
+     screen_payment hit ─► under_review        │
+     evaluate_transfer  block  ─► 23514 raise  │
+                        review ─► held         │
 place_transfer_hold → held / under_review      │
    client_confirm_transfer  ───{held}────────► │  post_transfer → ledger legs
    approve_request          ─{under_review}──► │       ↳ trigger writes balance
 cancel_transfer → canceled                     │
                               ──{pending}─────► │  post_transfer (auto-post)
 ```
+
+The two gate edges are the newest entrances into the order lifecycle, and both sit
+**inside** `transfer()`: an AML watchlist hit (`screen_payment`) parks the payment
+at `under_review` for 4 business days, and `evaluate_transfer`'s verdict either
+raises (`block`), parks at `held` (`review`), or falls through to auto-post. Its
+other two verdicts never reach `post_transfer` unchanged either: `step_up` is
+refused earlier by the Go gate (`403 step_up_required`, re-verify at
+`/auth/mfa/verify`), and `warn` demands a prior acknowledgement
+(`assert_warning_ack`). Sentinel (system/operator) callers bypass both gates.
 
 Today both sides run in **one** transaction, so the seam is invisible at runtime
 — but it is a clean conceptual cut. A future rail separates them: the **order**
@@ -165,7 +182,7 @@ warranted.
 | Deferred | What it would add | Build trigger |
 |---|---|---|
 | **Rec 7 — partial capture** | `post_transfer(amount_to_capture ≤ hold.amount_minor)`: post the captured legs, release the residual hold. Keeps the single-transaction shape. | A product need for authorize-now / capture-less-later (card-style incremental capture, tips/adjustments). No current flow captures less than it authorized. |
-| **Rec 8 — ISO-4217 currency-metadata table** | A table carrying the minor-unit exponent per currency, so formatting/rounding are currency-driven rather than the hard-coded exponent-2 EUR assumption. Prerequisite for multi-currency / an FX-GL leg model. | The first non-EUR currency. Today `accounts.currency` is effectively single-valued and every amount is EUR minor units. |
+| **Rec 8 — ISO-4217 currency-metadata table** | A table carrying the minor-unit exponent per currency, so formatting/rounding are currency-driven rather than the hard-coded exponent-2 EUR assumption. Prerequisite for multi-currency / an FX-GL leg model. | The first non-EUR currency. Today `accounts.currency` is single-valued **structurally** — a hard `CHECK (currency = 'EUR')` on `accounts` ([`00007`](../db/migrations/00007_accounts.sql)) — and every amount is EUR minor units. Rec 8 therefore also requires **dropping that CHECK**, not just adding a table. |
 | **Request-side `currency`** | Accepting `currency` on `CreateTransferRequest`. | Multi-currency (with Rec 8). **Deliberately omitted by design:** the server derives currency from the **debit account**, and `request_transfer` rejects a debit/credit currency mismatch — so a request-side currency would be redundant and a spoofing surface. `currency` now ships on money-bearing **responses** (Rec 19); requests **inherit** it. |
 
 ---

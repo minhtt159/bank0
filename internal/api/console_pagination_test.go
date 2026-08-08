@@ -214,7 +214,7 @@ func seedTaggedAccounts(t *testing.T, pg *db.Postgres, tag string, n int) map[st
 	ibans := make(map[string]bool, n)
 	for i := 0; i < n; i++ {
 		// A real, checksum-valid IBAN — the accounts table has a
-		// CHECK (iban_is_valid(iban)) backstop (migration 00022).
+		// CHECK (iban_is_valid(iban)) backstop (00007_accounts.sql).
 		ib, err := iban.Generate("NL")
 		if err != nil {
 			t.Fatalf("gen iban %d: %v", i, err)

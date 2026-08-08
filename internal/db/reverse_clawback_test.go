@@ -10,7 +10,7 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-// REVERSE-SPENT-FUNDS (migration 00031): reverse_transfer appends an inverse
+// REVERSE-SPENT-FUNDS (00008_transfers.sql): reverse_transfer appends an inverse
 // 'reversal' transfer that DEBITS the original CREDIT account. If the recipient
 // still holds the money the clawback succeeds and the ledger nets to zero; if
 // they have already SPENT it (balance_minor < amount), the up-front funds check

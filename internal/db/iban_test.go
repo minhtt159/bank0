@@ -7,11 +7,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// These exercise the DB IBAN authority added in migrations 00022 + 00023:
-// iban_is_valid / iban_generate / iban_country_length, plus the two CHECK
-// constraints (accounts_iban_checksum, beneficiaries_iban_checksum). After
-// 00023 the validator is length- and country-aware, and iban_generate RAISES
-// for an unregistered country or a wrong-length BBAN.
+// These exercise the DB IBAN authority in 00002_iban.sql — iban_is_valid /
+// iban_generate / iban_country_length — plus the two CHECK constraints that
+// live with their tables: accounts_iban_checksum (00007_accounts.sql) and
+// beneficiaries_iban_checksum (00011_beneficiaries.sql). The validator is
+// length- and country-aware, and iban_generate RAISES for an unregistered
+// country or a wrong-length BBAN.
 
 // TestIbanIsValid is table-driven over iban_is_valid, covering the normalized
 // forms (lowercase + spaces), bad checksums, wrong per-country length, and an
@@ -116,7 +117,7 @@ func TestIbanGenerateRoundTrip(t *testing.T) {
 	}
 }
 
-// TestIbanGenerateRejectsBadInput asserts 00023's hardening: iban_generate now
+// TestIbanGenerateRejectsBadInput asserts 00002_iban.sql's hardening: iban_generate
 // RAISES for an unregistered country code and for a wrong-length BBAN. Both are
 // bare RAISE EXCEPTION (no ERRCODE) -> P0001, so assert err != nil and a
 // non-empty SQLSTATE.
@@ -161,8 +162,9 @@ func TestAccountsIbanChecksumCheck(t *testing.T) {
 	// Sanity: the happy path works — a valid customer account is created.
 	_ = mkAccount(t, pg, owner)
 
-	// Bad: checksum-invalid IBAN. Format-valid (alnum, 22 chars, GB length) so it
-	// passes the 00003 format CHECK and reaches the checksum CHECK; both raise 23514.
+	// Bad: checksum-invalid IBAN. Format-valid (alnum, 22 chars, GB length) — there
+	// is no separate format CHECK (the length/country-aware iban_is_valid subsumes
+	// it, 00007_accounts.sql), so this exercises accounts_iban_checksum: 23514.
 	owner2 := mkCustomer(t, pg)
 	_, err := pg.Pool.Exec(ctx,
 		`INSERT INTO accounts (user_id, kind, iban) VALUES ($1, 'customer', $2)`,
@@ -175,7 +177,8 @@ func TestAccountsIbanChecksumCheck(t *testing.T) {
 	}
 }
 
-// TestBeneficiariesIbanChecksumCheck asserts the 00023 beneficiaries CHECK: a
+// TestBeneficiariesIbanChecksumCheck asserts the beneficiaries_iban_checksum
+// CHECK (00011_beneficiaries.sql): a
 // direct INSERT with a checksum-invalid IBAN fails with 23514. We borrow a real
 // account's id + owner so only the IBAN CHECK is exercised.
 func TestBeneficiariesIbanChecksumCheck(t *testing.T) {

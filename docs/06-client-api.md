@@ -38,7 +38,7 @@ JWT subject.
 | Sessions | DELETE | `/me/sessions/{family_id}` | bearer | selective sign-out of one device (idempotent; 404 if not the caller's) |
 | Accounts | GET | `/users/{id}/accounts` | bearer | own accounts only (404 otherwise) |
 | Accounts | GET | `/accounts/{id}` | bearer | account + available balance |
-| Accounts | POST | `/me/accounts` | bearer | open a new account for the caller — server-minted ISO SE IBAN, default limit + per-user cap from `bank_settings`; `Idempotency-Key` required; cap → 409 `account_limit` |
+| Accounts | POST | `/me/accounts` | bearer | open a new account for the caller — server-minted **NL** IBAN (`allocate_iban` → `iban_generate('NL', bank_settings.iban_bank_code ‖ …)`, default bank code `INGB`; internal-only, never routable), default limit + per-user cap from `bank_settings`; `Idempotency-Key` required; cap → 409 `account_limit` |
 | Accounts | POST | `/accounts/{id}/limit-requests` | bearer | ask for a transfer-limit change on an OWNED account (403 otherwise); lands in the operator maker-checker queue — never self-applied |
 | Statement | GET | `/accounts/{id}/ledger?cursor&cursor_id&limit&from&to&direction&q&min_minor&max_minor` | bearer | composite-keyset cursor (`cursor`+`cursor_id`, fixes same-timestamp tie-skip), running balance, counterparty; server-side filters (date range, direction, free text, amount range) |
 | Beneficiaries | GET | `/beneficiaries` | bearer | saved payees (fuzzy search is client-side) |
@@ -62,10 +62,15 @@ JWT subject.
 | Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
 | Metrics | GET | `/metrics` | public | RED counters |
 
+`/readyz` and `/metrics` are real routes on every surface but deliberately **absent
+from `api/openapi.yaml`**: they are the ops surface (probes and scrape target), not
+part of the customer contract — so the spec stays the source of truth for what
+clients may call.
+
 Public routes (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/register`,
-`/auth/verify-contact`, `/auth/resend-code`, `/health`, `/readyz`, `/metrics`,
-`/docs`, `/openapi.yaml`) are registered on the parent router ahead of the
-JWT-guarded subrouter, so they aren't shadowed. `logout-all` needs the subject,
+`/auth/verify-contact`, `/auth/resend-code`, `/auth/mfa/verify`, `/health`,
+`/readyz`, `/metrics`, `/docs`, `/openapi.yaml`) are registered on the parent router
+ahead of the JWT-guarded subrouter, so they aren't shadowed. `logout-all` needs the subject,
 so it stays behind `requireJWT`. The three onboarding routes share the strict
 per-IP login limiter; every `Transfer` carries the rail-ready `uetr`
 (bank-minted UUIDv4) and optional originator `end_to_end_id`.

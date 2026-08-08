@@ -244,12 +244,22 @@ and the BBAN-length guard in `iban_generate` all live in
 sit alongside their tables: `accounts.iban` in
 [`00007_accounts.sql`](../db/migrations/00007_accounts.sql) and
 `beneficiaries.iban` in
-[`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql). All three layers —
+[`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql). The bank's own
+**allocation policy** is deliberately separate: `allocate_iban()` in
+[`00017_iban_minting.sql`](../db/migrations/00017_iban_minting.sql) mints the NL IBAN
+for `POST /me/accounts` (called by `open_customer_account`,
+[`00007`](../db/migrations/00007_accounts.sql)) — `iban_generate('NL', …)` over the
+operator-tunable `bank_settings.iban_bank_code` (default `INGB`) plus a **random**
+10-digit account number, in a re-roll loop backstopped by `UNIQUE(accounts.iban)`.
+All three layers —
 `internal/iban`, the DB migrations, and `web/app/src/lib/iban.ts` — carry the
 **same 89-country table** and agree byte-for-byte. Column CHECKs are used rather
-than a shared `DOMAIN`. DB-layer coverage lives in `internal/db/iban_test.go`; the
-demo seed mints deterministic, checksum-valid-but-unregistered IBANs via
-`iban.Generate`, fenced to demo mode.
+than a shared `DOMAIN`. DB-layer coverage lives in `internal/db/iban_test.go`; the demo
+seed generator (`db/seedgen`, a standalone `go run` dev tool — no runtime fence)
+draws **real vendored IBANs from `db/seedgen/ibans` first** and only falls back to
+`iban.Generate` (crypto/rand — `iban.Compute` is the deterministic one) for the
+remainder, so the account count isn't capped by the vendored pool and every seeded
+IBAN passes the checksum CHECK.
 
 ---
 

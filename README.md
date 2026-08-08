@@ -26,7 +26,7 @@ not just at the edge); the third is a Cloudflare Worker.
 |------|---------|------|------|
 | `portal.bank0.hnimn.art` | admin API + operator console | Go `mode=portal` (Templ/HTMX) | DB cookie session (staff roles, 30-min idle) |
 | `api.bank0.hnimn.art` | customer JSON API | Go `mode=api`, behind Cloudflare | JWT bearer + rotating refresh tokens (ownership-scoped) |
-| `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite, ~15 KB gzip) | proxies `/api/*` to the client API |
+| `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite) | proxies `/api/*` to the client API |
 
 `server.mode=all` serves both Go surfaces in one container for local development.
 
@@ -54,7 +54,9 @@ Without Docker: `task install && task generate && task migrate:up && psql "$APP_
 Self-hosted Kubernetes is the primary path — one image, one Helm chart:
 
 ```bash
-helm install bank0 deploy/helm/bank0 --set database.existingSecret=bank0-db
+helm install bank0 deploy/helm/bank0 \
+  --set database.existingSecret=bank0-db \
+  --set auth.existingSecret=bank0-auth
 ```
 
 creates `bank0-api` (mode=api, HPA) and `bank0-portal` (mode=portal) behind Gateway
@@ -72,7 +74,7 @@ Templ + HTMX (console) · OpenAPI 3.1 contract-first (oapi-codegen + Scalar) · 
 
 Start at [`docs/01-overview.md`](docs/01-overview.md) — it frames the design and walks
 through how you use bank0 (the customer money-move and the operator journeys). The
-reference docs ([`docs/02`](docs/02-data-model.md)–[`docs/12`](docs/12-rail-readiness.md))
+reference docs ([`docs/02`](docs/02-data-model.md)–[`docs/12`](docs/12-rail-readiness.md), no `08`)
 cover the data model, ledger lifecycle, deployment, the two surfaces, the PWA, fraudbank
 integration, security, IBAN handling, and the closed-core-to-rail readiness seam. The
 product roadmap is in [`docs/specs/`](docs/specs/).

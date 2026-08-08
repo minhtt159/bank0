@@ -1,21 +1,12 @@
 # Spec — Banking-grade hardening & guided-transfer v2
 
-> **Status: recommendation spec — partly SHIPPED, remainder open.** Shipped and
-> now as-built (see the reference docs, not this spec): all of Waves 0–2 (Recs 1,
-> 2/29, 9, 10, 13, 18, 21), the **full Wave-3 set** (Recs 11, 12, 14, 15 **plus the
-> adaptive-fraud remainder 22, 23, 25**), Rec 3 (per-owner idempotency namespace),
-> Rec 4 (idempotency semantics documented on all mutating money POSTs + idempotent
-> second reverse), and guided-transfer v2 (former §5). As-built
-> homes: the client surfaces in [`../06-client-api.md`](../06-client-api.md), the
-> operator surfaces in [`../05-admin-ui.md`](../05-admin-ui.md), the ledger +
-> idempotency engine in [`../03-ledger-lifecycle-idempotency.md`](../03-ledger-lifecycle-idempotency.md),
-> and the schema + PL/pgSQL in `db/migrations/`. The retired companion line-level
-> specs (spec-step-up-mfa, spec-notifications-events) are folded into those docs.
-> The tables below keep **only the open recommendations**; each pillar's "Current"
-> prose is updated to the as-built baseline. Rec 17 (RFC 9457) is **re-deferred at
-> 1.0.0 (P0→P3)** — the `error` token already gives machine-branchable classes, and
-> the recorded adoption path is additive content negotiation (no coordinated bump;
-> see [`../06-client-api.md`](../06-client-api.md) §5).
+> **Status: open recommendations only.** Everything shipped is retired from this
+> spec and lives as-built in the reference docs —
+> [`../03`](../03-ledger-lifecycle-idempotency.md) (ledger + idempotency),
+> [`../05`](../05-admin-ui.md) (operator), [`../06`](../06-client-api.md) (client),
+> [`../12`](../12-rail-readiness.md) (rail seam), `db/migrations/` (schema +
+> PL/pgSQL). Rec 17 (RFC 9457) is **re-deferred at 1.0.0 (P0→P3)**. Section and Rec
+> numbers are stable — other docs and code comments cite them.
 >
 > **Confidence & hedges (qualify the remaining open recs).** EUR-Lex, IETF, UK PSR
 > and EU Instant Payments Regulation facts are high-confidence. EPC primary PDFs
@@ -32,90 +23,38 @@
 
 ## 0. How to read this
 
-Section 1 says what is already banking-grade and must not be touched. Section 2
-is the single hardest architectural problem. Section 3 is the eight pillars, each
-with bank0's **current state → target → gaps → recommendations** (every
-recommendation carries a `P0/P1/P2` priority and an `S/M/L/XL` effort). Section 4
-maps each client-side fraud-UX feature to the backend capability it needs (the
-"what's still missing that the backend must provide" question). Section 5 is a
-tombstone — the guided-transfer v2 design shipped and is now as-built. Section 6
-sequences the remaining work into waves; Section 7 is the effort summary; Section 8
-is sources + confidence.
+Sections 1, 2, 3.1, 3.3, 3.8 and 5 are **tombstones** — closed work, kept only so
+external references resolve; each points at its as-built home. Live content:
+§3.2/§3.4/§3.5/§3.6/§3.7 (open rec tables, `P0…P3` + `S/M/L/XL`), §4 (unmet
+client-UX rows), §6 next, §7 effort, §8 sources.
 
 ## 1. What is already banking-grade (do NOT re-architect)
 
-bank0's closed single-Postgres core is strikingly correct where it counts:
-
-- `request_transfer` (`00008`) **claims the idempotency key** (`INSERT … ON CONFLICT DO NOTHING`, first-writer-wins) **+ validates** accounts/limits/available-funds **+ writes the double-entry ledger legs + the hold + the completion response — all in ONE transaction.** Because the side effect commits atomically with the key-claim, bank0 needs **none** of the distributed machinery (outbox, saga, inbox, recovery-points) the industry built to paper over non-atomic side effects.
-- The ledger is **append-only** with a mutation-blocking trigger; `balance_minor` is a **cache writable only by the ledger trigger** and guarded against any non-ledger write. `reconcile()` (`00010`) continuously asserts cache==ledger, per-transfer zero-sum, and global zero-sum.
-- Genuine **authorize/capture**: `request_transfer` = authorize (pending + active hold, 15-min TTL); `post_transfer` = capture; `available = balance − Σ active holds`; holds auto-expire.
-- **Append-only idempotent reversal** with a clawback funds-check; money as `BIGINT` minor units; cross-bank money modelled against an `EXTERNAL_CLEARING` GL so the books stay zero-sum.
-- **Immutable operator audit** (`admin_actions`) + **maker-checker 4-eyes** for above-threshold console money moves.
-
-The fingerprint `sha256(debit│credit│amount│kind)` is, in the IETF draft's own
-terms, a "selected-elements checksum" — exactly right, and deliberately excluding
-cosmetic fields. **The gaps are at the edges and in the contract, not the engine.**
+> ✅ **Closed.** The engine — append-only ledger, trigger-guarded `balance_minor`,
+> `reconcile()` invariants, authorize/capture + holds, immutable `admin_actions` +
+> maker-checker — is as-built in [`../03`](../03-ledger-lifecycle-idempotency.md) §1.
+> The gaps are at the edges and in the contract, not the engine.
 
 ## 2. The hardest problem — the closed-core-vs-rail dual contract
 
-> ✅ **Resolved.** The dual contract is made **rail-ready additively, with no rail
-> built** — the resolution the problem itself prescribed (correctness stays
-> load-bearing only because the core is closed; a real rail would force the full
-> distributed stack — outbox, relay, idempotent consumer, recovery points, an
-> asymmetric `pacs.004` saga — that a closed core needs none of).
->
-> Shipped as the cheap additive pre-work: a bank-minted `uetr` + originator
-> `end_to_end_id` (Rec 18); an ISO-20022-aligned parallel **`status_iso`**,
-> computed-never-stored (Rec 20, §3.5); and the fraud verdict + warning evidence
-> already moved server-side (Recs 22/23/25) so they survive an async future. The
-> outbox / at-least-once relay / idempotent rail-submit / recovery-point /
-> asymmetric-`pacs.004`-saga machinery (Recs 30/31) is written as the **seam
-> documentation** — [`../12-rail-readiness.md`](../12-rail-readiness.md) — and the
-> rail itself is **deliberately unbuilt**: every trigger for building it is "a real
-> external creditor exists," and bank0 has none. The day a rail is added, the core
-> converges on the Stripe/brandur design behind a contract the clients already
-> speak — **zero breaking change**.
+> ✅ **Resolved.** Rail-ready **additively, with no rail built**; the outbox /
+> relay / idempotent-consumer / recovery-point / `pacs.004`-saga machinery is seam
+> documentation in [`../12`](../12-rail-readiness.md), deliberately unbuilt — every
+> trigger for building it is "a real external creditor exists," and bank0 has none.
 
 ## 3. The eight pillars
 
 ### 3.1 Idempotency & exactly-once
 
-**Current (as-built):** best-in-class for a closed core (see §1). The HTTP contract
-is now mapped (Rec 1 shipped — ERRCODE→status map + replay of the stored `response`
-JSONB + `Idempotency-Replayed: true`); the stale-`in_progress` sweep exists in
-`cleanup_idempotency_keys` (Rec 2/29); and the namespace is **per-owner** —
-`PK(owner_id, key)`, sentinel-namespaced for pre-auth/operator paths (Rec 3 shipped;
-as-built in [`../03-ledger-lifecycle-idempotency.md`](../03-ledger-lifecycle-idempotency.md) §3). Header required on
-`/transfers`, `/transfers/{id}/reverse`, deposit/withdraw; 7-day `expires_at`. The
-**IETF draft-07 semantics are now documented** across the surface (Rec 4 shipped):
-the OpenAPI spec spells out the replay + `Idempotency-Replayed: true`, `422
-idempotency_key_conflict`, `409 in_progress` and 7-day TTL on `postTransfer`,
-`confirmTransfer`, `cancelTransfer`, `raiseDispute` and `reverseTransfer`; and a
-second reverse of an already-reversed original — even under a **different** key —
-now returns the **existing** reversal id idempotently (200) instead of raising
-(as-built [`../03-ledger-lifecycle-idempotency.md`](../03-ledger-lifecycle-idempotency.md) §2.4, [`../06-client-api.md`](../06-client-api.md) §5).
-
-**Target:** wire the IETF `Idempotency-Key` draft-07 contract at the HTTP layer —
-**done** for the closed core; only the content-type migration to RFC 9457 (Rec 17,
-§3.5) remains — re-deferred at 1.0.0, adoption path is additive content negotiation
-([`../06-client-api.md`](../06-client-api.md) §5), no coordinated bump needed.
-
-**Gaps:** none tracked in this pillar.
+> ✅ **Closed** (Recs 1, 2/29, 3, 4). As-built in
+> [`../03`](../03-ledger-lifecycle-idempotency.md) §2–§3 +
+> [`../06`](../06-client-api.md) §5. Only descendant still open: Rec 17, in §3.5.
 
 ### 3.2 Ledger & money correctness
 
-**Current (as-built):** production-shaped (append-only ledger, trigger-guarded
-balance cache, `reconcile()` invariants, real authorize/capture + holds,
-append-only reversal). The maintenance runners are now **independently
-schedulable** (Rec 6 shipped): a one-shot `bank0 maintenance` subcommand
-(`cmd/app/main.go`; CronJob-friendly)
-runs `expire_holds` + the cleanups + a `reconcile()` pass and logs the counts. Two
-accepted nits: a **reconcile-drift** result and a **lock-held** run (another
-replica holds the advisory lock) both **exit 0** — alerting keys on the emitted
-logs (`reconcile drift detected …`), not the process exit code. `currency` now
-ships explicitly on every money-bearing **response** (Rec 19, §3.5).
-
-**Target:** keep the core exactly as-is; add only the edge surfaces auditors/clients need.
+**Current (as-built):** production-shaped core plus schedulable maintenance (Rec 6)
+and explicit `currency` on money-bearing responses (Rec 19 subset) —
+[`../03`](../03-ledger-lifecycle-idempotency.md). Keep the core as-is.
 
 **Gaps:** no settlement/finality state beyond `posted`; no partial capture (Rec 7,
 deferred-YAGNI); single-currency (`CHECK currency='EUR'`) with a hard-coded
@@ -130,44 +69,15 @@ intra-ledger invariants.
 
 ### 3.3 Payee verification & APP fraud (CoP / VOP, disputes, reimbursement)
 
-**Regulatory anchors.** EU **Verification of Payee (VOP)** under the Instant
-Payments Regulation (Reg (EU) 2024/886) is in force, free to the payer, on all
-SEPA credit transfers, IBAN-keyed, with **four outcomes** and a liability pivot:
-*if the payer is warned of a mismatch and proceeds anyway, the payer bears the
-loss.* UK **Confirmation of Payee** likewise has four outcomes (match / close
-match **with the real name returned** / no match / unavailable). UK **PSR
-mandatory APP-scam reimbursement** is live (7 Oct 2024) with a maximum
-reimbursement cap, a 50/50 split between sending and receiving PSP, a business-day
-SLA clock, and a consumer-standard-of-caution exception. *(Exact EPC VOP code
-tokens and rulebook article locators are hedged; the semantics are certain.)*
-
-**Current (as-built):** the regulatory substance shipped. `/beneficiaries/resolve`
-now returns the **server-side** CoP/VOP verdict (`match_result` ∈
-match/close_match/no_match/unable + `reason_code` + `suggested_name` on close_match
-+ a server `gate`) plus **recipient risk** (`recipient_risk`, `mule_suspected`,
-`signals[]`, `is_first_payment_to_payee`) — clients render, never decide (Rec 9,
-Rec 11; as-built [`../06-client-api.md`](../06-client-api.md)). Warning-shown /
--acknowledged evidence persists via `POST /me/warning-acks` (Rec 10). Disputes are
-a PSR claim machine — `scam_type`, business-day `sla_due_at`, decision with a real
-clearing→victim reimbursement net of the `bank_settings` cap/excess, vulnerable
-waiver, simulated `pacs.004` recall states (Rec 12). bank0 is its own (intra-bank,
-simulated) VOP responder and can only *simulate* the interbank recall.
-
-**Gaps:** none tracked in this pillar — the adaptive-fraud surfaces (server-driven
-warning copy, held/under-review lifecycle, AML screening) have since shipped and are
-described in §3.6/§3.7 (Recs 22, 23, 25).
+> ✅ **Shipped** (Recs 9, 10, 11, 12): server-side CoP/VOP verdict + recipient risk
+> on `/beneficiaries/resolve`, warning-ack evidence, and the PSR dispute claim
+> machine (SLA clock, reimbursement net of cap/excess, simulated `pacs.004` recall).
+> As-built in [`../06`](../06-client-api.md); regulatory anchors in §8. Nothing open.
 
 ### 3.4 SCA & transaction risk (PSD2, step-up, TRA)
 
-**Current (as-built):** TOTP MFA + step-up shipped (Rec 13) — RFC 6238, AES-256-GCM
-seed at rest, hashed recovery codes, `mfa_required` login branch + `/auth/mfa/verify`,
-`amr`/`auth_time` claims, 403 `step_up_required` before the key is claimed, same-key
-retry (as-built [`../06-client-api.md`](../06-client-api.md) §6). The step-up
-challenge is **dynamically linked** to `(debit│credit│amount)` via the JWT `txn_link`
-— a generic fresh OTP no longer authorises any payment (Rec 14, PSD2 RTS Art. 5). The
-**server-side TRA seam** ships too — `assess_transfer_risk()` scores
-velocity/first-payment/flagged-destination/account-age and ORs `high` into the gate's
-trigger set (Rec 15).
+**Current (as-built):** TOTP MFA + dynamically-linked step-up + the
+`assess_transfer_risk()` TRA seam ship (Recs 13, 14, 15) — [`../06`](../06-client-api.md) §6.
 
 **Gaps:** beneficiary creation isn't yet gated (RTS Art. 13). (Clients *can* now
 pre-warn a step-up before submit via the `POST /transfers/intent` preflight — Rec 22,
@@ -180,17 +90,11 @@ exposing the raw `step_up_limit_minor` constant.)
 
 ### 3.5 API & data standards (ISO 20022, RFC 9457, status vocabulary, rail IDs)
 
-**Current (as-built):** the idempotency design is strongly standards-aligned. Rail-ready
-identifiers shipped (Rec 18) — a bank-minted **UETR** UUIDv4 + originator `end_to_end_id`
-on `transfers`, surfaced on the contract and folded into the idempotency fingerprint. The
-status vocabulary is now **dual** (Rec 20 shipped): a computed, never-stored `status_iso`
-maps the private status set onto the ISO-20022 ExternalPaymentTransactionStatus family
-(`PDNG`/`ACSC`/`RJCT`/`CANC`; `iso_status()` in `00008_transfers.sql`), surfaced additively
-on `Transfer`/`TransferListItem`/`TransferResult` alongside the flat `status` (mapping +
-rationale in [`../12-rail-readiness.md`](../12-rail-readiness.md) §4). `currency` is now
-explicit (ISO-4217) on every money-bearing **response** (Rec 19 subset shipped). The one
-remaining private-dialect item is the error body: a flat `{error, message}`, not RFC 9457
-`application/problem+json` (Rec 17, deferred).
+**Current (as-built):** rail-ready identifiers (UETR + `end_to_end_id`, Rec 18), the
+computed never-stored ISO-20022 `status_iso` (Rec 20; mapping in
+[`../12`](../12-rail-readiness.md) §4) and explicit ISO-4217 `currency` on responses
+(Rec 19 subset) all ship. The one remaining private-dialect item is the error body:
+a flat `{error, message}`, not RFC 9457 `application/problem+json` (Rec 17, deferred).
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
@@ -199,23 +103,11 @@ remaining private-dialect item is the error body: a flat `{error, message}`, not
 
 ### 3.6 Fraud-UX backend enablers (decision/warning + events feed)
 
-**Current (as-built):** the `GET /me/events` feed shipped (Rec 21; as-built
-[`../06-client-api.md`](../06-client-api.md) §1) — per-user append-only, keyset-paginated,
-`unread_count` + `/me/events/read`, **written in the same txn as the cause**, replacing
-poll-on-focus and enabling a badge + "new sign-in" alert. The **adaptive-fraud surfaces
-now ship** (Recs 22 & 23): a `transfer.held` event type notifies the payer when a payment
-is parked, and the risk-decision endpoint `POST /transfers/intent` (read-only preflight,
-Rec 22) returns `{decision: allow|warn|step_up|review|block, risk_band, reason_codes[],
-warning:{warning_id, category, severity, headline, body, required_ack, cooling_off_seconds},
-step_up_method}` — server-driven copy from a console-tunable `warning_rules` table
-(generalising the fixed `assess_transfer_risk` weights), **with the numeric score never
-surfaced**; the PWA renders the warning card with correct ARIA roles + an ack checkbox +
-cooling-off countdown. The **held / under_review lifecycle** (Rec 23) adds both parked
-states with `hold_reason`/`hold_expires_at` (business-day delay clock, cf. FCA FG24/6), a
-customer confirm/cancel action for `held`, and screening routed to the maker-checker queue
-for `under_review` (as-built [`../03-ledger-lifecycle-idempotency.md`](../03-ledger-lifecycle-idempotency.md) §1/§2.8,
-[`../06-client-api.md`](../06-client-api.md) §8, [`../05-admin-ui.md`](../05-admin-ui.md) §4.4a/§4.8). The mule risk signal on
-resolve also shipped (Rec 11, §3.3).
+**Current (as-built):** the `GET /me/events` feed (Rec 21), the server-driven
+risk-decision preflight `POST /transfers/intent` + console-tunable `warning_rules`
+(Rec 22) and the `held`/`under_review` lifecycle with customer confirm/cancel
+(Rec 23) all ship — [`../06`](../06-client-api.md) §1/§8,
+[`../03`](../03-ledger-lifecycle-idempotency.md) §1/§2.8, [`../05`](../05-admin-ui.md) §4.4a/§4.8.
 
 **Gaps:** velocity/daily-limit meters + new-payee cooling fields (Rec 24) are still open.
 
@@ -226,19 +118,13 @@ resolve also shipped (Rec 11, §3.3).
 ### 3.7 Observability, audit & AML/sanctions
 
 **Current (as-built):** audit is strong-by-construction for money (`admin_actions`,
-maker-checker 4-eyes, `reconcile()`), and the **AML/sanctions name-screening gate now
-ships** (Rec 25). A console-managed, demo-seeded `watchlist_entries` list (ILIKE
-patterns against a party's registered name) is checked by `screen_payment`, which runs
-**inside `transfer()` between authorize and capture**; a hit parks the payment
-`under_review` (`hold_reason='screening'`, a 4-business-day window) and files a
-`screening_hold` row into the existing maker-checker queue **rather than auto-posting** —
-and it is **never auto-released**: an operator releases (`approve_request`, posting via
-`post_transfer` allow-from `under_review`) or refuses (cancels), all audited. The
-`transfer()` auto-post convenience respects the gate (sentinel system/operator callers
-bypass it) (as-built [`../03-ledger-lifecycle-idempotency.md`](../03-ledger-lifecycle-idempotency.md) §2.8,
-[`../05-admin-ui.md`](../05-admin-ui.md) §4.4a/§4.9). *(Industry — Wolfsberg-summarised — guidance, not a
-quoted mandate.)* Still open: PEP/onboarding screening (Rec 28) and the auditor-role
-read views (Recs 26/27).
+maker-checker 4-eyes, `reconcile()`), and the AML/sanctions name-screening gate ships
+(Rec 25 — `screen_payment` inside `transfer()`, hits park `under_review` into the
+maker-checker queue, never auto-released; [`../03`](../03-ledger-lifecycle-idempotency.md) §2.8,
+[`../05`](../05-admin-ui.md) §4.4a/§4.9). *(Wolfsberg-summarised guidance, not a quoted mandate.)*
+
+**Gaps:** the fraud decision trail isn't in the audit feed (Rec 26); no auditor-role
+read views (Rec 27); no PEP/onboarding screening (Rec 28).
 
 | # | Rec | P | Effort |
 |---|-----|---|--------|
@@ -248,66 +134,33 @@ read views (Recs 26/27).
 
 ### 3.8 Resilience, recovery & rail-readiness
 
-**Current (as-built):** strongest-possible for a closed core *because* the side effect
-commits atomically with the key-claim (the degenerate ideal — no recovery point to
-manage). The operational durability hole is **closed** (Rec 2/29): the stale-`in_progress`
-sweep now reaps wedged keys. Sweeps are also independently schedulable (Rec 6 shipped,
-§3.2). The rail-readiness seam is now **documented** (Recs 30/31 shipped as docs):
-[`../12-rail-readiness.md`](../12-rail-readiness.md) writes the outbox / at-least-once
-relay / idempotent rail-submit (keyed by the deterministic UETR/`end_to_end_id`) /
-recovery-point / asymmetric-`pacs.004`-saga checklist (§2) and the BIAN Payment
-Order vs Payment Execution seam at the `post_transfer(id, allow_from)` boundary (§3) —
-**building nothing**, since bank0 has no external creditor to trigger it.
-
-**Gaps:** none tracked — the rail itself is deliberately unbuilt (§2 RESOLVED).
+> ✅ **Closed.** The stale-`in_progress` sweep (Rec 2/29) and schedulable
+> maintenance (Rec 6) ship; the outbox / relay / idempotent rail-submit /
+> recovery-point / `pacs.004`-saga checklist and the BIAN Payment Order vs Payment
+> Execution seam at the `post_transfer(id, allow_from)` boundary are documented in
+> [`../12`](../12-rail-readiness.md) §2/§3 (Recs 30/31, shipped as docs). Nothing
+> open — the rail is deliberately unbuilt (§2 RESOLVED).
 
 ## 4. UX → backend capability map
 
-The client question — *"what's still missing that the backend can provide?"* —
-answered as a feature→capability table:
+*"What's still missing that the backend can provide?"* — **rows already met are
+removed**; only the unmet set remains.
 
 | Client fraud-UX feature | Backend capability needed | P |
 |---|---|---|
-| CoP/VOP 4-state badge (match / close-match **with revealed name** / no-match / unable), colour **+ text** (a11y) | `/beneficiaries/resolve` returns `{match_result, reason_code, suggested_name, account_type, checked_at}` — verdict **server-side** | P0 |
-| Continue gated identically across web/iOS/Android (no `copBlocks` drift) | Server-driven gate `status = ok\|awaiting_acknowledgement\|blocked` | P0 |
-| "I was warned and chose to proceed" ack that holds up for liability | Warning-evidence capture tied to the transfer attempt | P0 |
-| Replay-safe retry after a network failure / after step-up (charge once) | Replay stored `response` body + `Idempotency-Replayed: true`; `403 step_up_required` **before** the key is claimed | P0 |
-| Notification badge + incoming-payment + "new sign-in" alerts | `GET /me/events` feed (**shipped**) | P0 |
-| Branch on error class without string-matching prose | Already met by the stable `error` code-token registry ([`../06-client-api.md`](../06-client-api.md) §5); RFC 9457 `type` URIs add nothing for the closed clients | ~~P0~~ met |
-| High-value / new-payee step-up, code bound to this exact amount+payee | Step-up MFA + dynamic-linking challenge `hash(debit│credit│amount│kind)` | P0 |
-| "High-risk / newly-opened / reported" destination badge; first-payment friction | Recipient-risk on resolve + new-payee cooling fields | P1 |
-| Category-specific scam interstitial copy, tunable without an app release | Warning/decision endpoint with server-side rule table | P1 |
-| "Payment under review / held" with a clock + release action | `held`/`under_review` statuses + hold metadata | P1 |
-| Dispute / scam-claim timeline with the regulatory clock + reimbursement/recall | Dispute enrichment (SLA, decision, recall, scam_type, cap/excess) | P1 |
-| Remaining daily/transaction limit meter + pre-warn step-up | Limits endpoint + `step_up_limit_minor` | P2 |
+| First-payment friction on a new payee (the recipient-risk badge half already ships on `/beneficiaries/resolve`) | New-payee cooling fields (Rec 24) | P1 |
+| Remaining daily/transaction limit meter + pre-warn step-up | Limits endpoint (Rec 24) + `step_up_limit_minor` (Rec 16) | P2 |
 | Anti-impersonation "we aren't calling you" banner | `GET /me/call-status` (Starling/Monzo pattern) | P2 |
-| End-to-end trace reference on a payment / for support | Server-minted UETR + `end_to_end_id` on `Transfer` + events (**shipped**, Rec 18); ISO-20022 `status_iso` also on the contract (**shipped**, Rec 20) | P2 |
 
 ## 5. Guided transfer v2 — SHIPPED (retired)
 
 > ✅ **Shipped and retired.** `GET /transfers/suggestion` returns the up-to-3
 > third-party "mule" options wrapper (resolver `suggest_transfer_destinations` in
-> `db/migrations/00012_guided_scenarios.sql`); the PWA picks one at random and synthesises
-> the own-account fallback when empty. As-built:
+> `db/migrations/00012_guided_scenarios.sql`); the PWA picks one at random and
+> synthesises the own-account fallback when empty. As-built:
 > [`../06-client-api.md`](../06-client-api.md) §1 + `00012_guided_scenarios.sql`.
 
 ## 6. Sequencing
-
-**Done (collapsed):** Wave 0 (Recs 1, 2/29) — ERRCODE→HTTP map + replay stored body,
-stale-`in_progress` sweep. Wave 1 (Recs 9, 10, 21) — server-side CoP verdict, warning
-evidence, `/me/events` feed. Wave 2 (Recs 13, 14) — TOTP MFA + dynamically-linked
-step-up. Wave 3, in full (Recs 11, 12, 15 — recipient/mule risk on resolve, PSR dispute
-claim machine, TRA seam; **plus the adaptive-fraud remainder** Recs 22 — server-driven
-warning/decision endpoint `/transfers/intent` + `warning_rules` + `transfer.held` event,
-23 — held/under_review lifecycle + customer confirm, 25 — sanctions/AML `screen_payment`
-gate + watchlist + console screening queue). Plus Rec 18 (UETR/`end_to_end_id`), Rec 3
-(per-owner idempotency namespace), **Rec 4 (documented idempotency semantics on all
-mutating money POSTs + idempotent second reverse)**, and guided-transfer v2 (former §5).
-**Plus, now collapsed in:** Rec 6 (schedulable `bank0 maintenance` one-shot), Rec 19
-subset (`currency` on all money-bearing responses), Rec 20 (computed `status_iso` on the
-transfer contract), and **all of former Wave 5** — Recs 30/31 shipped as the
-rail-readiness seam **documentation** ([`../12-rail-readiness.md`](../12-rail-readiness.md)),
-building nothing (§2 RESOLVED).
 
 **Next:**
 

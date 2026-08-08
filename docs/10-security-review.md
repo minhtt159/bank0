@@ -31,9 +31,15 @@
   A global limit across replicas needs a shared store — the Cloudflare edge (the
   primary control) or a DB/Redis-backed counter. `/me/password` is not yet rate
   limited: it sits behind a valid JWT, so it is a lower-priority oracle.
-- **Stricter console CSP.** The `securityHeaders` CSP omits a `script-src`
-  lockdown so the CDN-loaded htmx keeps working. Self-hosting htmx (with SRI)
-  would allow `script-src 'self'`.
+- **Stricter console CSP.** The prerequisite is **done** — htmx is vendored,
+  embedded and served same-origin from `/static/htmx.min.js`
+  ([`web/static/htmx.min.js`](../web/static/htmx.min.js), `htmxSrc` in
+  [`web/template/components.templ`](../web/template/components.templ); regression
+  test `TestHTMXSelfHosted`). What remains is adding the `script-src 'self'`
+  directive to the `securityHeaders` CSP (`internal/api/middleware.go`) — which
+  first needs the console's remaining inline handlers (`onclick=` in
+  `shell.templ`/`layout.templ`, `hx-on:click` in `pending.templ`) moved into
+  `console.js`, since `script-src 'self'` blocks them.
 - **No distributed tracing.** `/metrics` covers RED + pool saturation, and
   request-scoped logs carry `request_id`, but OpenTelemetry spans across the
   proxy → api → DB hops are not in place.
@@ -44,9 +50,17 @@
 ## Re-run the security tests
 
 ```bash
+# no DB needed — fail-closed JWT secret (TestConfigValidate)
+go test ./internal/config/ -run 'TestConfigValidate' -count=1 -v
+
 export TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmode=disable'
-go test ./internal/api/ -run 'TestSecurity|TestCSRFGuard|TestRateLimit' -count=1 -v
+go test ./internal/api/ \
+  -run 'TestSecurity|TestCSRFGuard|TestRateLimit|TestClientIP|TestHTMXSelfHosted' \
+  -count=1 -v
 ```
 
-The `internal/api` suite derives its own database from the DSN (drops/recreates
-`bank0_test_api` in `TestMain`), so the DSN's role needs `CREATE DATABASE`.
+`TestClientIP` (trusted-proxy IP) and `TestHTMXSelfHosted` live in
+`internal/api/helpers_test.go`, and `TestConfigValidate` in
+`internal/config/config_test.go` — hence the two commands. The `internal/api`
+suite derives its own database from the DSN (drops/recreates `bank0_test_api` in
+`TestMain`), so the DSN's role needs `CREATE DATABASE`.
