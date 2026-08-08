@@ -132,8 +132,8 @@ jobs:
 
   # Tier A end-to-end: the REAL two-binary split topology (portal + api processes)
   # behind `//go:build e2e`. Go + Postgres only (no browser), so it gates every PR as
-  # the regression net for split-mode routing. The heavy browser tier (e2e-browser)
-  # stays a manual dispatch.
+  # the regression net for split-mode routing. The browser tier (e2e-browser) gates
+  # PRs too, below.
   e2e-go:
     runs-on: ubuntu-latest
     services:
