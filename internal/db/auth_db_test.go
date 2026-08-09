@@ -595,12 +595,12 @@ func TestPerAccountLoginLockout(t *testing.T) {
 	name, id := mkStaff(t, pg, "admin", "correct-horse-battery")
 
 	// Under the threshold, the right password still works.
-	for i := 0; i < 9; i++ {
+	for i := 0; i < 24; i++ {
 		pg.NoteFailedLogin(ctx, name)
 	}
 	if _, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery",
 		"tok"+uniqHex(16), 60, "ua", "ip"); err != nil {
-		t.Fatalf("9 failures must not lock: %v", err)
+		t.Fatalf("24 failures must not lock: %v", err)
 	}
 	// ...and success cleared the counter.
 	var n int16
@@ -611,13 +611,13 @@ func TestPerAccountLoginLockout(t *testing.T) {
 		t.Errorf("successful login must reset the counter; got %d", n)
 	}
 
-	// Ten consecutive failures lock it, and the CORRECT password is then refused.
-	for i := 0; i < 10; i++ {
+	// 25 consecutive failures lock it, and the CORRECT password is then refused.
+	for i := 0; i < 25; i++ {
 		pg.NoteFailedLogin(ctx, name)
 	}
 	_, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery", "tok"+uniqHex(16), 60, "ua", "ip")
 	if err == nil {
-		t.Fatal("account must be locked after 10 consecutive failures")
+		t.Fatal("account must be locked after 25 consecutive failures")
 	}
 	if !errors.Is(err, ErrLoginDenied) {
 		t.Errorf("locked account must look exactly like bad credentials; got %v", err)

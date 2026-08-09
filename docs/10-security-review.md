@@ -68,16 +68,26 @@ Sources: [NIST SP 800-63B Rev 4](https://pages.nist.gov/800-63-4/sp800-63b.html)
 | Layer | Keyed on | Where |
 |---|---|---|
 | Sliding window | client IP | Go middleware, all public `/auth/*` |
-| **Consecutive-failure lockout** | **account** | `note_failed_login()` + the two login functions |
+| **Consecutive-failure lockout** | **account** | `note_failed_login()` + the two login functions (25 failures → 15 min) |
 
 The per-IP window alone does not satisfy NIST SP 800-63B Rev 4 §3.2.2, which
 requires limiting consecutive failures *per account* — distributed credential
 stuffing spreads across IPs and never trips a per-IP counter.
 
-**10 consecutive failures locks the account for 15 minutes**, then the counter
+**25 consecutive failures locks the account for 15 minutes**, then the counter
 resets, so each further lock costs another full run. A successful login clears both.
-The window expires on its own; there is no admin unlock, because a time-boxed lock
-cannot strand the only administrator.
+The window expires on its own; there is no admin unlock, because bank0 ships with one
+admin — a time-boxed lock cannot strand them, an admin-only unlock could, and its
+recovery path would lead back to `psql`.
+
+**Lockout is also a DoS primitive**, and the threshold is set with that in mind.
+Anyone who knows an operator's username can hold that account down with N wrong
+guesses per window, and operators are exactly who an attacker wants locked out during
+an incident. NIST §3.2.2 caps consecutive failures at 100; 25 leaves credential
+stuffing hopeless while making the denial-of-service materially more expensive than a
+tighter threshold would. When the portal gains MFA, the better shape is to let a
+*correct* password through during lockout — the lock then stops guessing without
+stopping the legitimate user.
 
 A locked account answers **exactly** like a wrong password (28P01 / no rows), so the
 lock is not an enumeration oracle. An unknown username is a no-op — nothing to grow,

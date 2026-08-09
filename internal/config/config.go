@@ -120,7 +120,7 @@ func LoadConfig(path string) (Config, error) {
 	v := viper.New()
 
 	v.SetDefault("app.name", "bank0")
-	v.SetDefault("app.version", "1.0.1")
+	v.SetDefault("app.version", "1.0.2")
 	v.SetDefault("app.env", "development")
 	v.SetDefault("app.debug", true)
 

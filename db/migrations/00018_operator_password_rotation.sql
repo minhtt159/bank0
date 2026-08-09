@@ -254,7 +254,13 @@ $$ LANGUAGE plpgsql;
 -- each further lock costs another full run of attempts.
 CREATE OR REPLACE FUNCTION note_failed_login(p_username CITEXT) RETURNS VOID AS $$
 DECLARE
-    c_max_attempts CONSTANT SMALLINT  := 10;
+    -- 25, not 10: a lockout is also a DoS primitive — anyone who knows a username
+    -- can hold that account down with N wrong guesses per window, and operators are
+    -- exactly who an attacker wants locked out during an incident. NIST SP 800-63B
+    -- Rev 4 §3.2.2 caps consecutive failures at 100; 25 keeps stuffing hopeless
+    -- while making the DoS 2.5x more expensive than the first cut. Revisit toward
+    -- "correct password still admits during lockout" once the portal has MFA.
+    c_max_attempts CONSTANT SMALLINT  := 25;
     c_lock_window  CONSTANT INTERVAL  := INTERVAL '15 minutes';
 BEGIN
     UPDATE users

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/minhtt159/bank0/internal/db"
 	template "github.com/minhtt159/bank0/web/template"
 )
@@ -146,9 +148,17 @@ func (s *Server) passwordRotationOK(w http.ResponseWriter, r *http.Request, su d
 	}
 	must, err := s.pg.MustChangePassword(r.Context(), su.UserID)
 	if err != nil {
-		// Fail OPEN: one failed SELECT must not lock every operator out.
 		s.log.Error("must-change-password lookup", "err", err)
-		return true
+		// Fail CLOSED, except for the one error that means the schema predates this
+		// feature (binary rolled ahead of its migration): there the column is absent
+		// for EVERY request, and denying would brick the console instead of guarding
+		// it. Any other error is a hard stop — the console needs the DB anyway, so
+		// there is nothing to keep working.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42703" { // undefined_column
+			return true
+		}
+		must = true // treat as flagged: hold them on the password screen
 	}
 	if !must {
 		return true

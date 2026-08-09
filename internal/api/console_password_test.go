@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	url2 "net/url"
 	"strings"
@@ -216,5 +217,31 @@ func TestAdminCanRequirePasswordChange(t *testing.T) {
 	if r := get(t, login(t, ts, targetName, "a-long-enough-one"), ts.URL+"/console/dashboard",
 		map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
 		t.Errorf("console after rotation = %d, want 200", r.StatusCode)
+	}
+}
+
+// The rotation gate fails CLOSED: a flag lookup that errors holds the operator on
+// the password screen instead of waving them through. Simulated by dropping the
+// column — which is also the one case that must NOT deny (42703 = the binary is
+// ahead of its migration), so this pins both halves of that decision.
+func TestPasswordGateFailsClosedExceptOnMissingColumn(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, name := mkUser(t, pg, sqlc.UserRoleAdmin)
+	c := login(t, ts, name, "pw")
+
+	if r := get(t, c, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
+		t.Fatalf("baseline dashboard = %d, want 200", r.StatusCode)
+	}
+
+	// Version skew: the column does not exist yet. The console must keep working.
+	if _, err := pg.Pool.Exec(t.Context(), `ALTER TABLE users DROP COLUMN must_change_password`); err != nil {
+		t.Fatalf("drop column: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pg.Pool.Exec(context.Background(),
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE`)
+	})
+	if r := get(t, c, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
+		t.Errorf("undefined_column must not brick the console; got %d", r.StatusCode)
 	}
 }

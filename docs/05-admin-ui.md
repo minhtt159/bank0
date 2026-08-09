@@ -219,6 +219,13 @@ nagged. While the flag is set, the console redirects every other screen (and the
 JSON API answers `403 password_change_required`) until it is cleared. On a fresh
 install the first login lands on this screen and cannot leave it.
 
+The gate **fails closed**: if the flag lookup errors, the operator is held on the
+password screen rather than let through. The console needs the database for every
+screen anyway, so there is nothing to keep working by failing open. The one
+exception is SQLSTATE `42703` (undefined column) — that means the binary is running
+ahead of its migration, where the lookup fails on *every* request and denying would
+brick the console instead of guarding it.
+
 **Forcing another user to rotate.** A user's rail (admin-only) has **Require
 password change**: it sets the flag *and* drops every session that account holds, on
 both surfaces. Flagging alone would only inconvenience the legitimate user — whoever

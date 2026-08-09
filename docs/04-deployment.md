@@ -130,7 +130,7 @@ stack), then visit `http://localhost:8080/` (console) and
 ```bash
 # database secret has key "dsn"; auth secret has key "jwt-secret"
 # (api pods fail closed without a JWT secret — see §1)
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.1 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
