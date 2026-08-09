@@ -201,6 +201,27 @@ $$ LANGUAGE plpgsql;
 
 -- +goose StatementBegin
 
+-- revoke_user_sessions: drop a user's PORTAL sessions (p_keep is for callers that
+-- must survive their own call; password rotation passes NULL and drops them all).
+-- Sessions slide on every request, so an attacker's live console session would
+-- otherwise never age out. revoke_user_refresh is the client-token half; staff have
+-- no refresh tokens, which is why that one did not cover this.
+CREATE OR REPLACE FUNCTION revoke_user_sessions(p_user_id UUID, p_keep TEXT DEFAULT NULL)
+RETURNS INTEGER AS $$
+DECLARE v_n INTEGER;
+BEGIN
+    DELETE FROM sessions
+     WHERE user_id = p_user_id
+       AND (p_keep IS NULL OR id <> p_keep);
+    GET DIAGNOSTICS v_n = ROW_COUNT;
+    RETURN v_n;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+
 -- note_failed_login: one consecutive-failure step for an EXISTING user. Called by
 -- Go AFTER a denial, never from inside the login functions — create_staff_session
 -- RAISEs on denial and a RAISE rolls back its own writes, so the counter would
@@ -364,6 +385,7 @@ $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
 DROP FUNCTION IF EXISTS note_failed_login(CITEXT);
+DROP FUNCTION IF EXISTS revoke_user_sessions(UUID, TEXT);
 
 -- +goose StatementBegin
 

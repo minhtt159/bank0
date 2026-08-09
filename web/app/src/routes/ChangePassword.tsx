@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
+import { clearAuth } from "../store/auth";
 import { ErrorBanner } from "../lib/feedback";
 
 const MIN_LEN = 12; // matches ChangePasswordRequest.new_password minLength in the spec
@@ -25,6 +26,9 @@ export function ChangePassword() {
     setErr("");
     try {
       await api.changePassword(current, next);
+      // Every session went with the old password, including this one — drop the
+      // local tokens so the app stops trying to use them.
+      clearAuth();
       setOk(true);
       setCurrent("");
       setNext("");
@@ -41,7 +45,7 @@ export function ChangePassword() {
       <>
         <h1>Password changed</h1>
         <div class="card">
-          <p>Your password has been updated. Any other devices were signed out.</p>
+          <p>Your password has been updated. Every device, including this one, was signed out — sign in again with the new password.</p>
         </div>
         <button class="block" onClick={() => route("/profile")}>Back to profile</button>
       </>

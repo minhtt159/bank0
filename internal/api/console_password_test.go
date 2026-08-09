@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -43,12 +44,17 @@ func TestConsoleOperatorCanRotateOwnPassword(t *testing.T) {
 		t.Errorf("confirmation mismatch should be reported; got %q", firstLine(b))
 	}
 
-	// The real rotation succeeds, and the OLD password stops working.
+	// The real rotation succeeds and signs the caller out (303 -> /login).
 	r, _ = c.PostForm(ts.URL+"/console/password", url.Values{
 		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
 	})
-	if b := body(t, r); !strings.Contains(b, "Password changed") {
-		t.Fatalf("rotation should succeed; got %q", firstLine(b))
+	if r.StatusCode != 303 || !strings.HasPrefix(r.Header.Get("Location"), "/login") {
+		t.Fatalf("rotation = %d -> %q, want 303 -> /login", r.StatusCode, r.Header.Get("Location"))
+	}
+	r.Body.Close()
+	// The rotating session is dead too — no session survives its own password change.
+	if rr := get(t, c, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"}); rr.StatusCode != 303 {
+		t.Errorf("rotating session after change = %d, want 303 (revoked)", rr.StatusCode)
 	}
 	old := newClient()
 	resp, _ := old.PostForm(ts.URL+"/login", url.Values{"username": {name}, "password": {"pw"}})
@@ -59,6 +65,40 @@ func TestConsoleOperatorCanRotateOwnPassword(t *testing.T) {
 	fresh := login(t, ts, name, "a-long-enough-one") // the new one works
 	if r := get(t, fresh, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
 		t.Errorf("new password should log in; dashboard = %d", r.StatusCode)
+	}
+}
+
+// Rotating must kill the operator's OTHER portal sessions. Staff have no refresh
+// tokens, so the client-side revoke covered nothing here — and sessions slide on
+// every request, so a live attacker session would never have aged out.
+func TestPasswordChangeRevokesOtherPortalSessions(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, name := mkUser(t, pg, sqlc.UserRoleAdmin)
+	rotating := login(t, ts, name, "pw")
+	other := login(t, ts, name, "pw") // a second device, same account
+
+	if r := get(t, other, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
+		t.Fatalf("second session should start valid; got %d", r.StatusCode)
+	}
+
+	resp, _ := rotating.PostForm(ts.URL+"/console/password", url.Values{
+		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
+	})
+	resp.Body.Close()
+
+	// BOTH are out: the old password may be in someone else's hands and there is no
+	// telling which session is theirs, so none survives.
+	for name, c := range map[string]*http.Client{"other": other, "rotating": rotating} {
+		r := get(t, c, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"})
+		if r.StatusCode != 303 {
+			t.Errorf("%s session after rotation = %d, want 303 to /login", name, r.StatusCode)
+		}
+		r.Body.Close()
+	}
+	// The new password gets back in.
+	if r := get(t, login(t, ts, name, "a-long-enough-one"), ts.URL+"/console/dashboard",
+		map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
+		t.Errorf("new password should sign in; got %d", r.StatusCode)
 	}
 }
 
@@ -100,12 +140,13 @@ func TestConsoleBlocksUntilSeededPasswordRotated(t *testing.T) {
 		t.Fatalf("password screen while flagged = %d, want 200", r.StatusCode)
 	}
 
-	// Rotating clears the flag (change_password does it, not the handler) and the
-	// console opens up again.
+	// Rotating clears the flag (change_password does it, not the handler); the
+	// session is revoked with it, so the console is reached by signing in again.
 	resp, _ := c.PostForm(ts.URL+"/console/password", url.Values{
 		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
 	})
 	resp.Body.Close()
+	c = login(t, ts, name, "a-long-enough-one")
 	var still bool
 	if err := pg.Pool.QueryRow(t.Context(),
 		`SELECT must_change_password FROM users WHERE id = $1`, id).Scan(&still); err != nil {

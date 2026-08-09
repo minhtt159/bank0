@@ -182,7 +182,11 @@ func (s *Server) denyAuth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) consoleLoginForm(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = template.LoginPage("").Render(r.Context(), w)
+	msg := ""
+	if r.URL.Query().Get("changed") == "1" {
+		msg = "Password changed — sign in again. All other sessions were signed out."
+	}
+	_ = template.LoginPage(msg).Render(r.Context(), w)
 }
 
 func (s *Server) consoleLoginSubmit(w http.ResponseWriter, r *http.Request) {

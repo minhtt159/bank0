@@ -54,10 +54,18 @@ func (s *Server) consoleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rotating a shared default must log out whoever else holds it.
+	// EVERY session for this account, both surfaces, including this one: the old
+	// password may be in someone else's hands, and "which of my sessions is the
+	// attacker's" is not a question an operator can answer. Sign in again.
+	if n, err := s.pg.RevokeUserSessions(r.Context(), su.UserID, ""); err != nil {
+		s.log.Warn("revoke sessions after password change", "err", err)
+	} else {
+		s.log.Info("password change revoked sessions", "user", su.Username, "sessions", n)
+	}
 	if _, err := s.pg.RevokeUserRefreshExceptFamily(r.Context(), su.UserID, uuid.Nil); err != nil {
 		s.log.Warn("revoke refresh families after password change", "err", err)
 	}
 	s.audit(r.Context(), su, "password.changed", nil, nil)
-	render("Password changed.")
+	s.clearSessionCookie(w)
+	http.Redirect(w, r, "/login?changed=1", http.StatusSeeOther)
 }

@@ -42,17 +42,16 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		s.mapDBError(w, r, err) // 28P01 -> 401, 23514 -> 422
 		return
 	}
-	// Spare the current session's family; revoke the rest. Best-effort: an unknown
-	// or missing token revokes everything (the safer default).
-	keep := uuid.Nil
-	if req.RefreshToken != "" {
-		if fam, found, ferr := s.pg.RefreshFamilyByToken(r.Context(), hashToken(req.RefreshToken)); ferr == nil && found {
-			keep = fam
-		}
+	// EVERY session, both surfaces, including the caller's: the old password may be
+	// in someone else's hands and there is no way to tell which session is theirs.
+	// The client re-authenticates with the new password.
+	if _, err := s.pg.RevokeUserRefreshExceptFamily(r.Context(), subj, uuid.Nil); err != nil {
+		// Password is already changed; log and still 204 rather than failing a
+		// change that succeeded.
+		s.log.Error("revoke families after password change", "err", err)
 	}
-	if _, err := s.pg.RevokeUserRefreshExceptFamily(r.Context(), subj, keep); err != nil {
-		// The password is already changed; log and still 204 (don't fail a succeeded change).
-		s.log.Error("revoke other families after password change", "err", err)
+	if _, err := s.pg.RevokeUserSessions(r.Context(), subj, ""); err != nil {
+		s.log.Error("revoke sessions after password change", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

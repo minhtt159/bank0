@@ -208,6 +208,15 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 	return err
 }
 
+// RevokeUserSessions drops the user's portal sessions, keeping keepTokenHash
+// (pass "" to drop all). Returns how many went.
+func (p *Postgres) RevokeUserSessions(ctx context.Context, userID uuid.UUID, keepTokenHash string) (int, error) {
+	var n int
+	err := p.Pool.QueryRow(ctx,
+		`SELECT revoke_user_sessions($1::uuid, $2::text)`, userID, nilIfZero(keepTokenHash)).Scan(&n)
+	return n, err
+}
+
 // NoteFailedLogin records one consecutive failure and locks the account at the
 // threshold. Called AFTER a denial: create_staff_session RAISEs, and a RAISE would
 // roll back a counter written inside it. Unknown username is a no-op.
