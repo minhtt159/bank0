@@ -287,4 +287,21 @@ image, and an unpinned tag defeats "what exactly is running?".
 Tagging a release means bumping `Chart.yaml`'s `version` **and** `appVersion` to
 the same `X.Y.Z` in the release commit: the chart job refuses to publish a chart
 whose versions disagree with the tag. The only credential is the ambient
-`GITHUB_TOKEN` (`packages: write`).
+`GITHUB_TOKEN`.
+
+A third job then cuts the **GitHub Release**, gated on both artifacts existing —
+announcing an image and a chart before they are pushed is the same half-release
+failure the chart job's `needs: image` prevents. Its notes are assembled from:
+
+| Part | Source |
+|---|---|
+| the "why" | `docs/releases/<tag>.md`, hand-written in the version-bump PR (optional — a missing file only warns) |
+| artifact refs + install snippet | generated, so a release is never published without them |
+| the PR list | `--generate-notes` |
+
+A tag containing a hyphen (`v1.1.0-rc.1`) is published as a **pre-release** and does
+not become `latest`. Re-running the workflow on an existing tag is a no-op rather
+than an error.
+
+There is no `CHANGELOG.md` by convention: the release notes are the changelog, and
+they are what dependency bots surface when they propose a bump.

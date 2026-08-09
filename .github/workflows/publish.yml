@@ -107,3 +107,69 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
           helm package deploy/helm/bank0 --destination /tmp/chart
           helm push /tmp/chart/bank0-*.tgz "$CHART_REGISTRY"
+
+  # The human-facing record. Last, and needs BOTH artifacts: a release that
+  # announces an image and a chart before they exist is the same half-release
+  # failure the chart job's `needs: image` prevents.
+  #
+  # Notes come from docs/releases/<tag>.md when that file exists (write the "why"
+  # by hand, in the PR that bumps the version); the artifact block and the PR list
+  # are appended automatically, so a release is never left without its refs.
+  release:
+    needs: [image, chart]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ env.IMAGE }}
+          CHART: ghcr.io/${{ github.repository_owner }}/charts/bank0
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+
+          # Reruns must not fail the workflow: the release either exists already or
+          # this is the first attempt.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists — nothing to do"
+            exit 0
+          fi
+
+          body="$(mktemp)"
+          curated="docs/releases/${tag}.md"
+          if [ -f "$curated" ]; then
+            cat "$curated" >> "$body"
+            printf '\n\n' >> "$body"
+          else
+            echo "::warning::no $curated — publishing with generated notes only"
+          fi
+
+          {
+            echo '## Artifacts'
+            echo
+            echo '| | |'
+            echo '|---|---|'
+            echo "| Image | \`${IMAGE}:${version}\` — multi-arch \`linux/amd64\` + \`linux/arm64\` |"
+            echo "| Chart | \`oci://${CHART}\` version \`${version}\` |"
+            echo
+            echo '```bash'
+            echo "helm install bank0 oci://${CHART} --version ${version} \\"
+            echo '  --set database.existingSecret=bank0-db \'
+            echo '  --set auth.existingSecret=bank0-auth'
+            echo '```'
+          } >> "$body"
+
+          # A semver pre-release tag (v1.1.0-rc.1) must not become "latest".
+          flags=(--verify-tag --title "$tag" --notes-file "$body" --generate-notes)
+          case "$tag" in
+            *-*) flags+=(--prerelease) ;;
+            *)   flags+=(--latest) ;;
+          esac
+
+          gh release create "$tag" "${flags[@]}"
