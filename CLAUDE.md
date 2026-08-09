@@ -116,14 +116,15 @@ a throwaway DB to confirm a new migration is reversible.
   do) → scope to the subject with `clientSubject(r.Context())`. Keep ops that need
   query/body params **client-only**: an op shared by both tags must be path-param
   only, else the two generated packages produce conflicting `Params` types.
-- **New DB logic:** **incubation mode is ON until the `v1.0.0` tag** (no published
-  install exists yet): fold changes into the existing 17 domain migration files
-  **in place**, keep every `-- +goose Down` reversible (`TestMigrationsReversible`
-  gates this), and reset deployed DBs on merge — goose will NOT re-run an edited
-  version on a DB that already applied it, and the Helm pre-upgrade migrate Job
-  makes that skip silent. **Pushing `v1.0.0` ends incubation**: those files freeze
-  as the baseline and every later change — schema or a one-line PL/pgSQL fix —
-  goes in a new `db/migrations/NNNN_*.sql`. Either way: add a query in `db/queries/*.sql`
+- **New DB logic:** the 17 domain migration files are **frozen** — they are the
+  `v1.0.0` baseline. Every change since the tag, schema or a one-line PL/pgSQL
+  fix, goes in a **new** `db/migrations/NNNN_*.sql` with a reversible
+  `-- +goose Down` (`TestMigrationsReversible` gates this). Never edit a frozen
+  file: goose will NOT re-run an edited version on a DB that already applied it,
+  and the Helm pre-upgrade migrate Job makes that skip silent — a green deploy
+  whose schema quietly diverges from a fresh install. (Incubation mode, which
+  allowed in-place edits, ended when `v1.0.0` was tagged and a published chart
+  became installable.) Either way: add a query in `db/queries/*.sql`
   and `task generate:sqlc`. **sqlc cannot expand set-returning functions**
   (`RETURNS TABLE`) — hand-write those with pgx in `internal/db/bank.go` or
   `auth.go` (see `ClientTransfer`, `ResolveAccountByIban`, `RotateRefreshToken`).
