@@ -2,6 +2,8 @@ image:
   repository: ghcr.io/minhtt159/bank0
   tag: ""            # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
+  # Only needed for a private registry; the GHCR package is public.
+  pullSecrets: []    # e.g. ["ghcr-pull"]
 
 database:
   # Preferred: reference an existing secret holding the DSN.
@@ -13,6 +15,11 @@ database:
 
 migrations:
   enabled: true             # run `bank0 migrate up` as a pre-upgrade hook Job
+  # Requests are mandatory on the target cluster (admission policy). goose applies
+  # DDL and waits on the server, so the Job is I/O-bound, not CPU-bound.
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
 
 service:
   port: 80
