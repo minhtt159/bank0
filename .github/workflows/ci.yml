@@ -112,10 +112,14 @@ jobs:
       - name: Proxy-contract test
         run: npm test
         working-directory: worker
-      # Typecheck + wrangler dry-run: a broken wrangler.toml or a type error would
-      # otherwise surface at deploy time.
+      # Typecheck + wrangler dry-run: a broken wrangler config or a type error would
+      # otherwise surface at deploy time. The dry-run resolves assets.directory, so
+      # it needs the PWA output to exist — an empty dir is enough here; the webapp
+      # job is what actually proves the PWA builds.
       - name: Typecheck + wrangler dry-run
-        run: npm run check
+        run: |
+          mkdir -p ../web/app/dist
+          npm run check
         working-directory: worker
 
   # Customer-PWA unit tests (pure logic: IBAN validation, etc.). Cheap and DB-free,
