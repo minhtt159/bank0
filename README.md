@@ -1,5 +1,10 @@
 # bank0
 
+[![CI](https://github.com/minhtt159/bank0/actions/workflows/ci.yml/badge.svg)](https://github.com/minhtt159/bank0/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/minhtt159/bank0?sort=semver)](https://github.com/minhtt159/bank0/releases/latest)
+[![Image](https://img.shields.io/badge/ghcr.io-bank0-blue?logo=docker&logoColor=white)](https://github.com/minhtt159/bank0/pkgs/container/bank0)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 A **core-banking backend**: a double-entry ledger where correctness is a property of
 the database, fronted by a thin Go API, an operator console, and a customer PWA. It
 holds account balances and moves money between them without ever losing a cent,
@@ -51,19 +56,26 @@ Without Docker: `task install && task generate && task migrate:up && psql "$APP_
 
 ## Deploy
 
-Self-hosted Kubernetes is the primary path — one image, one Helm chart:
+Self-hosted Kubernetes is the primary path — one image, one Helm chart, both
+published to GHCR. Nothing needs to be built locally:
 
 ```bash
-helm install bank0 deploy/helm/bank0 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.0 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
 
 creates `bank0-api` (mode=api, HPA) and `bank0-portal` (mode=portal) behind Gateway
 API/Envoy, with a pre-upgrade migrate job ([`docs/04-deployment.md`](docs/04-deployment.md)).
-The image and the chart publish to GHCR on every `main` push and on `v*` tags
-([`docs/04-deployment.md`](docs/04-deployment.md) §6); per-surface Gateway
-attachment and in-cluster PWA hosting are still open in
+
+| Artifact | Where |
+|---|---|
+| Image (multi-arch: `linux/amd64` + `linux/arm64`) | `ghcr.io/minhtt159/bank0:1.0.0` — `sha-<commit>` on every `main` push, `X.Y.Z` + `X.Y` on `v*` tags. Never `latest`. |
+| Chart | `oci://ghcr.io/minhtt159/charts/bank0` — published on `v*` tags |
+
+CI publishes; it never deploys — `helm upgrade` stays an operator command
+([`docs/04-deployment.md`](docs/04-deployment.md) §6). Per-surface Gateway attachment
+and in-cluster PWA hosting are still open in
 [`docs/specs/spec-container-helm-pivot.md`](docs/specs/spec-container-helm-pivot.md).
 
 ## Tech stack
@@ -80,3 +92,19 @@ reference docs ([`docs/02`](docs/02-data-model.md)–[`docs/12`](docs/12-rail-re
 cover the data model, ledger lifecycle, deployment, the two surfaces, the PWA, fraudbank
 integration, security, IBAN handling, and the closed-core-to-rail readiness seam. The
 product roadmap is in [`docs/specs/`](docs/specs/).
+
+## Releases
+
+Versions are semver git tags; each one publishes the image and the chart, and the
+GitHub Release carries the notes. There is no `CHANGELOG.md` by convention — the
+release notes and the PRs behind them are the record, which is also what
+dependency bots (Renovate et al.) surface when they propose a bump.
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 Minh Tran.
+
+bank0 is a portfolio/demonstration core-banking backend. It is not a licensed
+financial institution, holds no real money, and connects to no payment rail — the
+IBANs it mints are internally valid but not routable ([`docs/12`](docs/12-rail-readiness.md)
+covers what real-rail readiness would take).
