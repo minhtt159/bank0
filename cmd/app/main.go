@@ -168,7 +168,11 @@ func runMaintenanceLoop(ctx context.Context, log *slog.Logger, pg *db.Postgres, 
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			expired, cleaned, sessions, verifExpired, reconcileIssues, ran, err := pg.RunMaintenance(ctx)
+			// Bound each tick like runMaintenanceOnce does: one hung query must not
+			// stall the loop forever while pinning a pool connection.
+			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			expired, cleaned, sessions, verifExpired, reconcileIssues, ran, err := pg.RunMaintenance(tickCtx)
+			cancel()
 			if err != nil {
 				log.Warn("maintenance", "err", err)
 				continue

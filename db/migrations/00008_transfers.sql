@@ -641,8 +641,12 @@ BEGIN
     -- CREDIT account) and confirm it still holds enough to be reversed. Reversal
     -- intentionally bypasses the active-account check applied on the forward path
     -- (see the header note) — only the funds check is enforced here.
+    -- AVAILABLE, not raw balance: funds under an active hold are already promised
+    -- to a pending/held transfer. Clawing them leaves that transfer to fail on the
+    -- balance_minor >= 0 CHECK when it posts — an unmapped raw constraint trip on a
+    -- payment the customer already authorized.
     SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id FOR UPDATE;
-    IF v_cp.kind <> 'system' AND v_cp.balance_minor < v_orig.amount_minor THEN
+    IF v_cp.kind <> 'system' AND (v_cp.balance_minor - v_cp.held_minor) < v_orig.amount_minor THEN
         RAISE EXCEPTION 'cannot reverse transfer %: recipient has insufficient funds to claw back', p_transfer_id
             USING ERRCODE = 'check_violation';
     END IF;

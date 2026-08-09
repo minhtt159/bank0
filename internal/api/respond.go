@@ -215,5 +215,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 // decodeOptionalJSON decodes if a body is present; it never writes a response,
 // so it's safe for endpoints where the body (e.g. an optional reason) may be empty.
 func decodeOptionalJSON(r *http.Request, dst any) {
-	_ = json.NewDecoder(r.Body).Decode(dst)
+	// Same 1 MiB cap as decodeJSON — "the body is optional" is not "the body is
+	// unbounded"; these endpoints were the one way past the limit.
+	_ = json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxJSONBody)).Decode(dst)
 }

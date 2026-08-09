@@ -87,7 +87,8 @@ SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signe
 FROM enriched_ledger
 WHERE account_id = $1::uuid
   AND ($2::timestamptz IS NULL
-       OR (posted_at, id) < ($2::timestamptz, $3::uuid))
+       OR (posted_at, id) < ($2::timestamptz,
+                          COALESCE($3::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff')))
   AND ($4::timestamptz IS NULL OR posted_at >= $4::timestamptz)
   AND ($5::timestamptz   IS NULL OR posted_at <  $5::timestamptz)
   AND ($6::text IS NULL OR direction::text = $6::text)
@@ -356,7 +357,8 @@ LEFT JOIN users du ON du.id = da.user_id
 LEFT JOIN users cu ON cu.id = ca.user_id
 WHERE (da.user_id = $1::uuid OR ca.user_id = $1::uuid)
   AND ($2::timestamptz IS NULL
-       OR (t.requested_at, t.id) < ($2::timestamptz, $3::uuid))
+       OR (t.requested_at, t.id) < ($2::timestamptz,
+                                 COALESCE($3::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff')))
   AND ($4::transfer_status IS NULL OR t.status = $4::transfer_status)
   AND ($5::transfer_kind     IS NULL OR t.kind   = $5::transfer_kind)
   AND ($6::timestamptz    IS NULL OR t.requested_at >= $6::timestamptz)

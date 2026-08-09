@@ -55,9 +55,14 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	var limit int64 // 0 -> create_account uses the configured default (bank_settings)
 	if v := strings.TrimSpace(r.PostFormValue("limit")); v != "" {
-		if m, perr := money.ParseEuros(v); perr == nil {
-			limit = m
+		m, perr := money.ParseEuros(v)
+		if perr != nil {
+			// Silently falling back to the bank default hid the typo: the operator
+			// saw an account created with a limit they never asked for.
+			s.renderUserDetail(w, r, userID, "Invalid limit: "+perr.Error())
+			return
 		}
+		limit = m
 	}
 	normIban := iban.Normalize(r.PostFormValue("iban"))
 	if !iban.IsValid(normIban) {

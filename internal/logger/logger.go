@@ -29,5 +29,9 @@ func New(level, encoding string) *slog.Logger {
 	} else {
 		h = slog.NewTextHandler(os.Stdout, opts)
 	}
-	return slog.New(h)
+	l := slog.New(h)
+	// Also the package default, so code with no logger handy (internal/db) logs
+	// through the configured handler instead of slog's stderr fallback.
+	slog.SetDefault(l)
+	return l
 }

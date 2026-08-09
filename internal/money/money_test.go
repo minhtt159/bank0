@@ -17,8 +17,13 @@ func TestParseEuros(t *testing.T) {
 		{" 100 ", 10000},
 		{"-5", -500},
 		{"-12.34", -1234},
-		{"10.999", 1099}, // extra decimals truncated, not rounded
-		{".5", 50},       // missing whole part
+		{".5", 50}, // missing whole part
+		// Decimal comma: a euro-area operator types "1,50" for EUR 1.50. Reading it
+		// as grouping would post EUR 150.00 — a 100x wrong payment.
+		{"1,50", 150},
+		{"12,3", 1230},
+		{"1,250", 125000},     // 3 digits after the comma -> grouping, not decimals
+		{"1.234.567,89", 123456789}, // full euro-style formatting
 	}
 	for _, c := range ok {
 		got, err := ParseEuros(c.in)
@@ -31,7 +36,9 @@ func TestParseEuros(t *testing.T) {
 		}
 	}
 
-	bad := []string{"", "   ", "abc", "12.x", "€"}
+	// >2 decimals are REJECTED, never truncated: "10.999" is a typo, and silently
+	// booking EUR 10.99 hides it.
+	bad := []string{"", "   ", "abc", "12.x", "€", "10.999", "0.001"}
 	for _, in := range bad {
 		if _, err := ParseEuros(in); err == nil {
 			t.Errorf("ParseEuros(%q) expected error, got nil", in)

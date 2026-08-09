@@ -185,6 +185,14 @@ func (c Config) Validate() error {
 	// development env is allowed to run without one — AND only the api surface
 	// issues/verifies JWTs, so a portal-only deployment (cookie sessions) doesn't
 	// need a secret. mode defaults to "all".
+	// A typo'd mode must not fail open: an unrecognized value would make servesAPI
+	// false, skip the JWT check below, and then serve only the public probes —
+	// a surface that looks alive and answers nothing.
+	switch c.Server.Mode {
+	case "", "api", "portal", "all":
+	default:
+		return fmt.Errorf("server.mode (APP_SERVER_MODE) %q is not one of api, portal, all", c.Server.Mode)
+	}
 	servesAPI := c.Server.Mode == "" || c.Server.Mode == "api" || c.Server.Mode == "all"
 	if servesAPI && c.App.Env != "development" && c.Auth.JWTSecret == "" {
 		return fmt.Errorf("auth.jwt_secret (APP_AUTH_JWT_SECRET) must be set when app.env=%q and server.mode=%q serves the client API", c.App.Env, c.Server.Mode)
