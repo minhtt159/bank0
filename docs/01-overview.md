@@ -152,8 +152,8 @@ From `portal.*`, a staff member (cookie session, role-gated) provisions and supe
 
 ### Deploy it
 
-bank0 is **self-hosted**: a container image (build it from `deploy/Dockerfile`;
-registry publishing is planned) + the Kubernetes/Helm + Gateway API setup
+bank0 is **self-hosted**: a multi-arch container image (published to GHCR on every
+`main` push and `v*` tag) + the Kubernetes/Helm + Gateway API setup
 ([`04-deployment.md`](04-deployment.md)), on a Postgres 18 you provision yourself.
 Migrations run as a pre-upgrade job; readiness pings the DB; `/metrics` exposes
 Prometheus RED + pool gauges.

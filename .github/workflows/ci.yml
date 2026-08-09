@@ -94,8 +94,7 @@ jobs:
             exit 1
           fi
 
-  # Worker /api proxy-contract test (docs/specs/spec-e2e-harness.md, Tier B "cheaper
-  # intermediate"). Cheap and DB-free — runs the real worker in workerd via
+  # Worker /api proxy-contract test (Tier B, the cheaper intermediate). DB-free — runs the real worker in workerd via
   # @cloudflare/vitest-pool-workers, so it runs per-PR.
   worker:
     runs-on: ubuntu-latest

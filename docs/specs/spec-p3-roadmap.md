@@ -17,15 +17,14 @@
 >
 > | Spec | Covers | Relates to P3 § |
 > |------|--------|-----------------|
-> | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | banking-grade roadmap (server-side CoP/VOP, SCA, RFC 9457, fraud-UX backend enablers, AML gate) + guided-transfer v2 (3 options → pick 1, own-account fallback) | cross-cutting; consolidates the fraud + payment surfaces |
+> | [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md) | the **open** banking-grade recommendations (RFC 9457, Recs 16/24/26–28); the shipped ones — CoP/VOP, SCA, the AML gate, guided-transfer v2 — are retired from it | cross-cutting; consolidates the fraud + payment surfaces |
 > | [`spec-container-helm-pivot.md`](spec-container-helm-pivot.md) | deployment pivot: publish container images + the Helm chart for self-hosted k8s (admission-clean chart, GHCR, per-surface Gateways, in-cluster PWA) | infra, not a product domain |
 >
 > **Already shipped** items are no longer re-listed here — the as-built truth lives in
 > the reference docs ([`../06-client-api.md`](../06-client-api.md) /
-> [`../05-admin-ui.md`](../05-admin-ui.md)) and `db/migrations/`. For the fraud/payment
-> hardening roadmap specifically, the shipped-vs-open status (Waves 0–2, the Wave-3
-> subset, per-owner idempotency, guided-transfer v2, and what remains) is tracked at the
-> top of [`spec-banking-grade-hardening.md`](spec-banking-grade-hardening.md).
+> [`../05-admin-ui.md`](../05-admin-ui.md)) and `db/migrations/`. The hardening spec
+> holds only its open recommendations (shipped ones leave a §/Rec tombstone so
+> inbound anchors still resolve).
 >
 > The gap backlog and BFF decision are in
 > [`../09-fraudbank-integration.md`](../09-fraudbank-integration.md); the auth/MFA design in
@@ -62,10 +61,6 @@ months and/or a third-party integration / regulatory surface.
 ---
 
 ## 1. Self-registration / onboarding / KYC
-
-**Today:** `createUser` is `admin`-only; there is no public signup, no onboarding
-state, no contact verification. (`users.status` gates login; nothing models "partway
-onboarded".)
 
 **Rationale.** The **v1 is SHIPPED** (as-built in
 [`../06-client-api.md`](../06-client-api.md) §1 + `00005_onboarding.sql`): public
@@ -188,8 +183,8 @@ in a txn with its use; split migration), a `create_pot` + a scoped transfer wrap
 ### Sequencing
 
 Customer account opening is **shipped** — **server-side IBAN allocation
-(`allocate_iban`, real ISO SE IBANs) and `open_customer_account`** live in
-`00007_accounts.sql`, and pots reuse them (minus the IBAN). Do pots **before**
+(`allocate_iban`, real ISO NL IBANs) and `open_customer_account`** live in
+`00017_iban_minting.sql` and `00007_accounts.sql`, and pots reuse them (minus the IBAN). Do pots **before**
 multi-currency: pots in EUR are trivial; pots across currencies inherit §6's
 hard problems.
 
