@@ -36,10 +36,20 @@ admin:
   sessionIdleTimeout: 30m
 
 # Trust forwarded client-IP headers (CF-Connecting-IP / X-Forwarded-For) for the
-# per-IP auth rate-limit key. TRUE here because both surfaces sit behind a trusted
-# edge (Cloudflare for api, the Gateway for portal) that overwrites them; set FALSE
-# if a surface is ever exposed directly. See docs/10 (RATELIMIT-XFF-SPOOF).
+# per-IP auth rate-limit key. Set FALSE if a surface is ever reachable directly —
+# a client could then forge the header and rotate the limiter key per request.
+#
+# X-Forwarded-For is read RIGHT-to-left, trustedProxyHops entries in, because a
+# Gateway running with use_remote_address (Envoy, nginx, Traefik) APPENDS the real
+# downstream address instead of replacing the header — only the right-most entries
+# are proxy-authored. Cloudflare's CF-Connecting-IP is used as-is when present, since
+# Cloudflare replaces it outright.
+#
+# Count every proxy between the client and the pod: 1 for a single in-cluster
+# Gateway; 2 for Cloudflare -> tunnel -> Gateway if you rely on XFF there (though
+# CF-Connecting-IP makes the count moot on that path).
 trustProxyHeaders: true
+trustedProxyHops: 1
 
 # Pod- and container-level hardening applied to both deployments. The image is
 # distroless:nonroot (uid 65532) and writes nothing to disk, so a read-only root

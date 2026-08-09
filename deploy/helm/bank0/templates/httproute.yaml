@@ -43,9 +43,15 @@ spec:
         - name: {{ .Release.Name }}-portal
           port: {{ .Values.service.port }}
 {{- end }}
-{{- if and $tls .Values.gateway.httpsRedirect }}
+{{/*
+  Redirect route: only when the chart OWNS the Gateway (its :80 listener is named
+  "http" — a platform Gateway's may not be, and its TLS/redirect policy is not ours
+  to set) AND at least one surface is exposed. Without the exposed guard this
+  rendered with an EMPTY hostnames list, which matches every host on that listener.
+*/}}
+{{- if and $tls .Values.gateway.httpsRedirect .Values.gateway.create (or .Values.api.exposed .Values.portal.exposed) }}
 ---
-# HTTP -> HTTPS redirect on the :80 listener for all bank0 hosts.
+# HTTP -> HTTPS redirect on the :80 listener for the exposed bank0 hosts.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

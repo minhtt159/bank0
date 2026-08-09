@@ -130,7 +130,7 @@ stack), then visit `http://localhost:8080/` (console) and
 ```bash
 # database secret has key "dsn"; auth secret has key "jwt-secret"
 # (api pods fail closed without a JWT secret — see §1)
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.0 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.1 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
@@ -169,9 +169,24 @@ graph TD
 | **Metrics** | `/metrics` — a real Prometheus **histogram** (`bank0_http_request_duration_seconds`, labelled by method/route-template/status → `histogram_quantile` p50/p95/p99 + rate + error-rate) plus a live pgxpool gauge and the Go/process collectors (`client_golang`). Optional, off by default: a **ServiceMonitor** (`metrics.serviceMonitor.enabled`, needs the Prometheus Operator) and a **Grafana dashboard** ConfigMap auto-discovered by the kube-prometheus-stack sidecar (`metrics.dashboard.enabled`). |
 | **Logging** | `logging.level` (default `info`) and `logging.encoding` (default `json`) are set on both Deployments and the migrate Job. The image's baked `config.yaml` also defaults to `info` — only the local compose stack opts into `debug` — so an unconfigured pod never logs at debug. Raise `logging.level` to troubleshoot a live release without rebuilding the image. |
 | **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault` (values: `podSecurityContext` / `securityContext`), and a hardcoded `automountServiceAccountToken: false`. |
-| **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here, both surfaces behind a trusted edge) makes the auth rate limiter key on the real client IP (`CF-Connecting-IP` / `X-Forwarded-For`) instead of `RemoteAddr`. |
+| **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here) makes the auth rate limiter key on the real client IP instead of `RemoteAddr`: `CF-Connecting-IP` when present, else `X-Forwarded-For` read **right-to-left**, `trustedProxyHops` entries in (default 1 — count every proxy between client and pod). Right-to-left because an `use_remote_address` Gateway **appends** rather than replaces, so only the right-most entries are proxy-authored ([`10`](10-security-review.md)). |
 | **JWT secret** | The `api` deployment mounts `APP_AUTH_JWT_SECRET` (Helm `auth.existingSecret`); the `portal` deployment doesn't need one (cookie sessions), and `Config.Validate` only requires it when the served mode includes the api surface. |
 | **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP→HTTPS. |
+
+### Gateway modes
+
+The chart supports three shapes; the third is what a cluster with its own
+platform-owned Gateways wants.
+
+| Mode | Values | Renders |
+|---|---|---|
+| **Chart owns the Gateway** (default) | `gateway.create=true` | a `Gateway` (per-host HTTPS listeners, cert-manager annotation), both HTTPRoutes, and the HTTP→HTTPS redirect route |
+| **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace` | both HTTPRoutes only, parented to that Gateway. `sectionName` is the chart's own listener naming (`https-api`/`https-portal`/`http`), so the shared Gateway must use those names — otherwise use the mode below. TLS and redirect are the platform's business here. |
+| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all — just Deployments/Services. Write the HTTPRoutes yourself, which is also how you give api and portal *different* parentRefs (two platform Gateways, e.g. external + internal) until per-surface attachment lands. |
+
+The redirect route renders only in the first mode: it hardcodes `sectionName: http`,
+which a platform Gateway may not have, and an unexposed release would otherwise emit
+it with an empty `hostnames` list — matching every host on that listener.
 
 ### Gateway API objects (rendered)
 
@@ -272,4 +287,21 @@ image, and an unpinned tag defeats "what exactly is running?".
 Tagging a release means bumping `Chart.yaml`'s `version` **and** `appVersion` to
 the same `X.Y.Z` in the release commit: the chart job refuses to publish a chart
 whose versions disagree with the tag. The only credential is the ambient
-`GITHUB_TOKEN` (`packages: write`).
+`GITHUB_TOKEN`.
+
+A third job then cuts the **GitHub Release**, gated on both artifacts existing —
+announcing an image and a chart before they are pushed is the same half-release
+failure the chart job's `needs: image` prevents. Its notes are assembled from:
+
+| Part | Source |
+|---|---|
+| the "why" | `docs/releases/<tag>.md`, hand-written in the version-bump PR (optional — a missing file only warns) |
+| artifact refs + install snippet | generated, so a release is never published without them |
+| the PR list | `--generate-notes` |
+
+A tag containing a hyphen (`v1.1.0-rc.1`) is published as a **pre-release** and does
+not become `latest`. Re-running the workflow on an existing tag is a no-op rather
+than an error.
+
+There is no `CHANGELOG.md` by convention: the release notes are the changelog, and
+they are what dependency bots surface when they propose a bump.

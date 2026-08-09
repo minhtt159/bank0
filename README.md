@@ -60,7 +60,7 @@ Self-hosted Kubernetes is the primary path — one image, one Helm chart, both
 published to GHCR. Nothing needs to be built locally:
 
 ```bash
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.0 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.1 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
@@ -70,7 +70,7 @@ API/Envoy, with a pre-upgrade migrate job ([`docs/04-deployment.md`](docs/04-dep
 
 | Artifact | Where |
 |---|---|
-| Image (multi-arch: `linux/amd64` + `linux/arm64`) | `ghcr.io/minhtt159/bank0:1.0.0` — `sha-<commit>` on every `main` push, `X.Y.Z` + `X.Y` on `v*` tags. Never `latest`. |
+| Image (multi-arch: `linux/amd64` + `linux/arm64`) | `ghcr.io/minhtt159/bank0:1.0.1` — `sha-<commit>` on every `main` push, `X.Y.Z` + `X.Y` on `v*` tags. Never `latest`. |
 | Chart | `oci://ghcr.io/minhtt159/charts/bank0` — published on `v*` tags |
 
 CI publishes; it never deploys — `helm upgrade` stays an operator command
