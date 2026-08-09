@@ -169,16 +169,18 @@ publisher. What each of its jobs turned into:
 
 | Wave | What | Checkpoint (must pass before the next wave) |
 |---|---|---|
-| **W1** | **Chart admission-compliance + pull secrets** (the two ❌ P0-S + P1-S rows of §3): migrate hook Job gets `resources`, `automountServiceAccountToken: false`, and both securityContexts; add `image.pullSecrets` plumbed into all three pod specs. | `helm template` diff reviewed; rendered manifests pass the three admission policies (policy-engine dry-run locally, or a throwaway install on the cluster). Default rendering otherwise byte-identical. |
-| **W2** | **Image publish**: rewrite `deploy.yml` → GHCR multi-arch build/push (`sha-` on main, semver on tags), including the 2-line `$BUILDPLATFORM` Dockerfile tweak (§2). GCP/Cloudflare jobs and secrets deleted (the retired path is recorded in §0 — `docs/08` itself is gone). | `docker run ghcr.io/minhtt159/bank0:sha-… serve` answers `/health` on both arches; no `latest` tag exists on the package. |
 | **W3** | **Per-surface Gateway attachment**: `api.gateway`/`portal.gateway` (or per-surface `parentRef`) values — name/namespace/sectionName each — defaulting to the current single-`gateway:` block so existing installs render unchanged; document the shared-gateway mode (TLS/redirect off, listener names from the platform Gateways). | Golden `helm template` unchanged with default values; with the operator's values the api route parents the external Gateway and the portal route parents the internal one. |
-| **W4** | **Chart publish + version discipline**: tag-triggered `helm package`/`push` to GHCR OCI; `Chart.yaml` version/appVersion bump becomes part of tagging a release. | `helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version …` works from a machine that has never seen the repo. |
 | **W5** | **PWA in-cluster** (§5, decided: option A on the **internal Gateway**): `deploy/Dockerfile.web`, web Deployment/Service, PWA-host HTTPRoute (internal Gateway) with the `/api` `URLRewrite` rule; `deploy-pwa` job becomes the web-image build. `web/app/` source untouched; `worker/` untouched until fraudbank's own Worker deploy exists. | Login + a transfer completed through the PWA host (LAN) with the browser only ever talking same-origin `/api/*`; Worker still deployable as fallback until this soaks. |
 | **W6** | **First real install** (operator-driven, no code): create the `bank0-db` + JWT secrets, point the tunnel hostnames at the external Gateway and internal DNS at the internal one, `helm install` with a local values file. | `/readyz` green on both surfaces, console login, seeded transfer, `reconcile()` clean, Grafana dashboard populated. Then: update docs/04 §§0/3 + docs/07 to as-built and **retire this spec** (repo convention: no archive). |
 | **W7** *(optional)* | Cleanups per §8 answers: `/metrics` external exposure, `worker/` fate, GitOps. | — |
 
-W1–W4 are strictly ordered but each ships alone; W5 can proceed in parallel after
-W2 (it needs the registry, not the gateway work).
+**W1, W2 and W4 shipped** in [PR #89](https://github.com/minhtt159/bank0/pull/89):
+the migrate hook Job is admission-compliant (plus `image.pullSecrets` plumbing),
+and `publish.yml` pushes the multi-arch image on every `main` push and the image +
+chart on a `v*` tag. As-built: [`docs/04-deployment.md`](../04-deployment.md) §6.
+
+W3 remains blocked on Q8 (listener names); W5 needs only the registry, so it can
+start now.
 
 ## 8. Open questions — decisions needed from the operator
 
