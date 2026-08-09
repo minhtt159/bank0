@@ -41,9 +41,12 @@ jobs:
           images: ${{ env.IMAGE }}
           # flavor latest=false — see the header.
           flavor: latest=false
+          # {{version}} is unprefixed on purpose: the chart defaults image.tag to
+          # .Chart.AppVersion ("1.0.0"), so a v-prefixed-only tag set would make
+          # the documented `helm install` land in ImagePullBackOff.
           tags: |
             type=sha,prefix=sha-,format=short,enable={{is_default_branch}}
-            type=semver,pattern=v{{version}}
+            type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
       # Two arches because the operator develops on arm64 and the cluster's node

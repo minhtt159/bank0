@@ -116,9 +116,10 @@ func mkAcct(t *testing.T, pg *db.Postgres, owner uuid.UUID, fundMinor int64) uui
 		t.Fatalf("create account: %v", err)
 	}
 	if fundMinor > 0 {
-		if _, err := pg.Queries.Deposit(context.Background(), sqlc.DepositParams{
-			IdempotencyKey: uuid.NewString(), AccountID: id, AmountMinor: fundMinor, Description: "fund",
-		}); err != nil {
+		// Raw deposit() primitive: the Deposit query routes through admin_deposit(),
+		// which enforces the maker-checker threshold. Scaffolding funds above it.
+		if _, err := pg.Pool.Exec(context.Background(),
+			`SELECT deposit($1, $2, $3, 'fund')`, uuid.NewString(), id, fundMinor); err != nil {
 			t.Fatalf("fund: %v", err)
 		}
 	}

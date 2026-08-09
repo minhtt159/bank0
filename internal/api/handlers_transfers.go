@@ -367,9 +367,11 @@ func (s *Server) CancelTransfer(w http.ResponseWriter, r *http.Request, id opena
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": status})
 }
 
-// ReverseTransfer implements genadmin.ServerInterface.
+// ReverseTransfer implements genadmin.ServerInterface. Admin-only (canApprove),
+// matching the console's consoleReverse — a reversal moves money back without a
+// second pair of eyes, so operators must not reach it through the JSON surface.
 func (s *Server) ReverseTransfer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.ReverseTransferParams) {
-	if _, ok := s.requireRole(w, r, canActOnMoney); !ok {
+	if _, ok := s.requireRole(w, r, canApprove); !ok {
 		return
 	}
 	var req reasonReq

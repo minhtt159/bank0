@@ -22,7 +22,7 @@ WHERE user_id = sqlc.arg(user_id)::uuid
 ORDER BY created_at;
 
 -- name: Deposit :one
-SELECT deposit(
+SELECT admin_deposit(
     sqlc.arg(idempotency_key)::text,
     sqlc.arg(account_id)::uuid,
     sqlc.arg(amount_minor)::bigint,
@@ -30,7 +30,7 @@ SELECT deposit(
 ) AS transfer_id;
 
 -- name: Withdraw :one
-SELECT withdraw(
+SELECT admin_withdraw(
     sqlc.arg(idempotency_key)::text,
     sqlc.arg(account_id)::uuid,
     sqlc.arg(amount_minor)::bigint,
