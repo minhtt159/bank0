@@ -260,7 +260,7 @@ no path to it, so `helm upgrade` stays an operator command.
 | Trigger | Artifact |
 |---|---|
 | push to `main` | `ghcr.io/minhtt159/bank0:sha-<shortsha>` — the "deploy whatever main is" handle (`helm upgrade … --set image.tag=sha-…`) |
-| push tag `vX.Y.Z` | the same image as `:vX.Y.Z` + `:X.Y`, **and** the chart at `oci://ghcr.io/minhtt159/charts/bank0` |
+| push tag `vX.Y.Z` | the same image as `:X.Y.Z` + `:X.Y` (unprefixed — the chart defaults `image.tag` to `.Chart.AppVersion`), **and** the chart at `oci://ghcr.io/minhtt159/charts/bank0` |
 
 Both images are multi-arch (`linux/amd64` + `linux/arm64`): the Dockerfile's build
 stage pins `--platform=$BUILDPLATFORM` and cross-compiles with `GOARCH`, so the

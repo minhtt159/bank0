@@ -4,7 +4,7 @@ name: Publish
 # tunnel and CI has no path to it; the operator runs `helm upgrade` themselves.
 #
 #   push to main  -> image ghcr.io/minhtt159/bank0:sha-<shortsha>
-#   push tag v*   -> image :vX.Y.Z + :X.Y  and  chart oci://ghcr.io/minhtt159/charts/bank0
+#   push tag v*   -> image :X.Y.Z + :X.Y  and  chart oci://ghcr.io/minhtt159/charts/bank0
 #
 # Never `latest`: the target cluster's admission control rejects an unpinned tag,
 # and it defeats "what exactly is running?".
