@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
 import { clearAuth } from "../store/auth";
+import { stashNotice } from "../lib/onboarding";
 import { ErrorBanner } from "../lib/feedback";
 
 const MIN_LEN = 12; // matches ChangePasswordRequest.new_password minLength in the spec
@@ -12,7 +13,6 @@ export function ChangePassword() {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [err, setErr] = useState("");
-  const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const tooShort = next.length > 0 && next.length < MIN_LEN;
@@ -26,10 +26,12 @@ export function ChangePassword() {
     setErr("");
     try {
       await api.changePassword(current, next);
-      // Every session went with the old password, including this one — drop the
-      // local tokens so the app stops trying to use them.
+      // Every session went with the old password, this one included, so there is
+      // nothing left to render behind Protected — hand the message to /login.
+      stashNotice("Password changed. Every device was signed out — sign in with your new password.");
       clearAuth();
-      setOk(true);
+      route("/login", true);
+      return;
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -38,18 +40,6 @@ export function ChangePassword() {
     } finally {
       setBusy(false);
     }
-  }
-
-  if (ok) {
-    return (
-      <>
-        <h1>Password changed</h1>
-        <div class="card">
-          <p>Your password has been updated. Every device, including this one, was signed out — sign in again with the new password.</p>
-        </div>
-        <button class="block" onClick={() => route("/profile")}>Back to profile</button>
-      </>
-    );
   }
 
   return (

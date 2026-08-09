@@ -10,6 +10,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -39,6 +40,37 @@ type portalSession struct {
 }
 
 // loginPortal performs the operator console login (form POST -> 303 + Set-Cookie).
+// adminPassword is what the seeded bootstrap admin is rotated TO. The seeded
+// admin/admin is flagged must_change_password (00018), so the console holds it on
+// the password screen and the admin JSON API answers 403 until it is rotated —
+// exactly what a real first install does. loginAdmin performs that rotation once.
+const adminPassword = "e2e-rotated-admin-pw"
+
+var rotateAdminOnce sync.Once
+
+// loginAdmin returns a portal session for the bootstrap admin, rotating the seeded
+// password on first use. Every portal test goes through here so none of them
+// depends on a credential the product refuses to let you keep.
+func loginAdmin(t *testing.T, base string) *portalSession {
+	t.Helper()
+	rotateAdminOnce.Do(func() {
+		first := loginPortal(t, base, "admin", "admin")
+		resp, err := first.client.PostForm(base+"/console/password", url.Values{
+			"current_password": {"admin"},
+			"new_password":     {adminPassword},
+			"confirm_password": {adminPassword},
+		})
+		if err != nil {
+			t.Fatalf("rotate seeded admin: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("rotate seeded admin = %d, want 303 (body=%.200s)", resp.StatusCode, readBody(t, resp))
+		}
+	})
+	return loginPortal(t, base, "admin", adminPassword)
+}
+
 func loginPortal(t *testing.T, base, username, password string) *portalSession {
 	t.Helper()
 	c := noRedirectJar()

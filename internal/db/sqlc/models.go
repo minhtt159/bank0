@@ -1082,20 +1082,23 @@ type Transfer struct {
 }
 
 type User struct {
-	ID               uuid.UUID        `json:"id"`
-	Username         string           `json:"username"`
-	PasswordHash     string           `json:"password_hash"`
-	FullName         string           `json:"full_name"`
-	Email            *string          `json:"email"`
-	PhoneNumber      *string          `json:"phone_number"`
-	Role             UserRole         `json:"role"`
-	Status           UserStatus       `json:"status"`
-	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
-	EmailVerifiedAt  *time.Time       `json:"email_verified_at"`
-	PhoneVerifiedAt  *time.Time       `json:"phone_verified_at"`
-	InvitesRemaining int32            `json:"invites_remaining"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at"`
+	ID                  uuid.UUID        `json:"id"`
+	Username            string           `json:"username"`
+	PasswordHash        string           `json:"password_hash"`
+	FullName            string           `json:"full_name"`
+	Email               *string          `json:"email"`
+	PhoneNumber         *string          `json:"phone_number"`
+	Role                UserRole         `json:"role"`
+	Status              UserStatus       `json:"status"`
+	OnboardingStatus    OnboardingStatus `json:"onboarding_status"`
+	EmailVerifiedAt     *time.Time       `json:"email_verified_at"`
+	PhoneVerifiedAt     *time.Time       `json:"phone_verified_at"`
+	InvitesRemaining    int32            `json:"invites_remaining"`
+	CreatedAt           time.Time        `json:"created_at"`
+	UpdatedAt           time.Time        `json:"updated_at"`
+	MustChangePassword  bool             `json:"must_change_password"`
+	FailedLoginAttempts int16            `json:"failed_login_attempts"`
+	LoginLockedUntil    *time.Time       `json:"login_locked_until"`
 }
 
 type VerificationChallenge struct {

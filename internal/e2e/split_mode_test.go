@@ -169,7 +169,7 @@ func TestSplitMode_CrossAuthRejected(t *testing.T) {
 	}
 
 	// A portal cookie session.
-	op := loginPortal(t, e.portal.baseURL, "admin", "admin")
+	op := loginAdmin(t, e.portal.baseURL)
 	u, _ := urlParse(e.portal.baseURL)
 	cookies := op.client.Jar.Cookies(u)
 	if len(cookies) == 0 {
@@ -203,7 +203,7 @@ func TestSplitMode_PendingTransfersIsAdminOnly(t *testing.T) {
 	e := requireHarness(t)
 
 	// Portal: authenticated operator -> the admin pending-transfers JSON array.
-	op := loginPortal(t, e.portal.baseURL, "admin", "admin")
+	op := loginAdmin(t, e.portal.baseURL)
 	resp := op.get("/transfers/pending")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

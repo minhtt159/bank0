@@ -100,7 +100,7 @@ func TestCrossSurface_MoneyFlow(t *testing.T) {
 	e := requireHarness(t)
 
 	// --- operator on the PORTAL provisions both sides --------------------------
-	op := loginPortal(t, e.portal.baseURL, "admin", "admin")
+	op := loginAdmin(t, e.portal.baseURL)
 	payerName, payerUserID, payerAcct := provisionCustomer(t, op, openingMinor)
 	payeeName, _, payeeAcct := provisionCustomer(t, op, 0)
 
