@@ -1,6 +1,8 @@
 package template
 
 import (
+	"time"
+
 	"github.com/minhtt159/bank0/internal/money"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
@@ -49,10 +51,23 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 		if canManageUsers {
 			<section class="block">
 				<h3>Security</h3>
+				<p class="muted">
+					Password set { u.PasswordChangedAt.Format("2006-01-02") }
+					if u.MustChangePassword {
+						· <strong>change required</strong>
+					}
+					if u.LoginLockedUntil != nil && u.LoginLockedUntil.After(time.Now()) {
+						· <strong>locked until { u.LoginLockedUntil.Format("15:04") }</strong>
+					}
+				</p>
 				<form hx-post={ "/console/users/" + u.ID.String() + "/revoke-sessions" } hx-target="#rail">
 					<button class="btn danger sm" type="submit" hx-disabled-elt="this" hx-confirm="Revoke all of this user's refresh tokens? They will be signed out of the app everywhere and must log in again.">Revoke app sessions</button>
 				</form>
 				<p class="muted">Invalidates every active refresh token (forces re-login on the customer app).</p>
+				<form hx-post={ "/console/users/" + u.ID.String() + "/require-password-change" } hx-target="#rail">
+					<button class="btn danger sm" type="submit" hx-disabled-elt="this" hx-confirm="Force this user to set a new password? They are signed out of every session immediately and cannot use the app or console until they do.">Require password change</button>
+				</form>
+				<p class="muted">For a credential you believe is compromised — the standard's rotation trigger.</p>
 			</section>
 		}
 		<section class="block">

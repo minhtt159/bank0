@@ -72,6 +72,7 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/users/{id}/accounts", s.consoleCreateAccount).Methods(http.MethodPost)
 	r.HandleFunc("/console/users/{id}/invites", s.consoleSetInvites).Methods(http.MethodPost)
 	r.HandleFunc("/console/users/{id}/revoke-sessions", s.consoleRevokeSessions).Methods(http.MethodPost)
+	r.HandleFunc("/console/users/{id}/require-password-change", s.consoleRequirePasswordChange).Methods(http.MethodPost)
 
 	// Account statement (drill-down, paginated) + money/admin actions
 	r.HandleFunc("/console/accounts/{id}/statement", s.consoleStatement).Methods(http.MethodGet)

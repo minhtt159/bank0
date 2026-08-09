@@ -46,8 +46,14 @@ forced rotation drives predictable variations, and a calendar is not evidence.
 OWASP ASVS 5.0 6.2.10 and the UK NCSC say the same.
 
 `must_change_password` is the mechanism the standard *does* ask for: rotation on an
-event, not on a schedule. Today the only event that sets it is the seeded bootstrap
-credential (§4.6a in [`05-admin-ui.md`](05-admin-ui.md)).
+event, not on a schedule. Two events set it — the seeded bootstrap credential, and an
+admin pressing **Require password change** on a user (§4.6a in
+[`05-admin-ui.md`](05-admin-ui.md)), which also revokes that account's sessions.
+
+`users.password_changed_at` records when the current password was set (backfilled to
+`created_at`, so it always answers "how old is this credential"). It exists to make
+credential age *visible* to an operator who can act on it — not to expire anything on
+a timer.
 
 PCI DSS 4.0 §8.3.9 is the one framework still requiring 90-day rotation, and it is
 inapplicable twice over: it covers cardholder-data environments (bank0 holds no PAN),

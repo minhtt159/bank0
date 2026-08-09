@@ -208,6 +208,12 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 	return err
 }
 
+// RequirePasswordChange flags a user for forced rotation (admin action).
+func (p *Postgres) RequirePasswordChange(ctx context.Context, userID uuid.UUID) error {
+	_, err := p.Pool.Exec(ctx, `SELECT require_password_change($1::uuid)`, userID)
+	return err
+}
+
 // RevokeUserSessions drops the user's portal sessions, keeping keepTokenHash
 // (pass "" to drop all). Returns how many went.
 func (p *Postgres) RevokeUserSessions(ctx context.Context, userID uuid.UUID, keepTokenHash string) (int, error) {

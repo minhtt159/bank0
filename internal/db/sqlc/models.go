@@ -1099,6 +1099,7 @@ type User struct {
 	MustChangePassword  bool             `json:"must_change_password"`
 	FailedLoginAttempts int16            `json:"failed_login_attempts"`
 	LoginLockedUntil    *time.Time       `json:"login_locked_until"`
+	PasswordChangedAt   time.Time        `json:"password_changed_at"`
 }
 
 type VerificationChallenge struct {

@@ -47,22 +47,26 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (uuid.UU
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, invites_remaining, created_at, updated_at
+SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, invites_remaining, created_at, updated_at,
+       password_changed_at, must_change_password, login_locked_until
 FROM users WHERE id = $1::uuid
 `
 
 type GetUserByIDRow struct {
-	ID               uuid.UUID        `json:"id"`
-	Username         string           `json:"username"`
-	FullName         string           `json:"full_name"`
-	Email            *string          `json:"email"`
-	PhoneNumber      *string          `json:"phone_number"`
-	Role             UserRole         `json:"role"`
-	Status           UserStatus       `json:"status"`
-	OnboardingStatus OnboardingStatus `json:"onboarding_status"`
-	InvitesRemaining int32            `json:"invites_remaining"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at"`
+	ID                 uuid.UUID        `json:"id"`
+	Username           string           `json:"username"`
+	FullName           string           `json:"full_name"`
+	Email              *string          `json:"email"`
+	PhoneNumber        *string          `json:"phone_number"`
+	Role               UserRole         `json:"role"`
+	Status             UserStatus       `json:"status"`
+	OnboardingStatus   OnboardingStatus `json:"onboarding_status"`
+	InvitesRemaining   int32            `json:"invites_remaining"`
+	CreatedAt          time.Time        `json:"created_at"`
+	UpdatedAt          time.Time        `json:"updated_at"`
+	PasswordChangedAt  time.Time        `json:"password_changed_at"`
+	MustChangePassword bool             `json:"must_change_password"`
+	LoginLockedUntil   *time.Time       `json:"login_locked_until"`
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
@@ -80,6 +84,9 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.InvitesRemaining,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
+		&i.MustChangePassword,
+		&i.LoginLockedUntil,
 	)
 	return i, err
 }

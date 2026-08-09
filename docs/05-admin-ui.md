@@ -219,6 +219,12 @@ nagged. While the flag is set, the console redirects every other screen (and the
 JSON API answers `403 password_change_required`) until it is cleared. On a fresh
 install the first login lands on this screen and cannot leave it.
 
+**Forcing another user to rotate.** A user's rail (admin-only) has **Require
+password change**: it sets the flag *and* drops every session that account holds, on
+both surfaces. Flagging alone would only inconvenience the legitimate user — whoever
+holds the old password keeps their session otherwise. The rail also shows when the
+current password was set, and whether the account is currently locked out.
+
 ### 4.7 Disputes
 
 A **Disputes** nav screen renders the triage queue (newest first) and drives the

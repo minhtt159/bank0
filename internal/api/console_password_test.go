@@ -2,7 +2,7 @@ package api
 
 import (
 	"net/http"
-	"net/url"
+	url2 "net/url"
 	"strings"
 	"testing"
 
@@ -26,7 +26,7 @@ func TestConsoleOperatorCanRotateOwnPassword(t *testing.T) {
 	}
 
 	// Policy is the DB's: too short is refused and the password does not change.
-	r, err := c.PostForm(ts.URL+"/console/password", url.Values{
+	r, err := c.PostForm(ts.URL+"/console/password", url2.Values{
 		"current_password": {"pw"}, "new_password": {"short"}, "confirm_password": {"short"},
 	})
 	if err != nil {
@@ -37,7 +37,7 @@ func TestConsoleOperatorCanRotateOwnPassword(t *testing.T) {
 	}
 
 	// Mismatched confirmation is caught before the DB is touched.
-	r, _ = c.PostForm(ts.URL+"/console/password", url.Values{
+	r, _ = c.PostForm(ts.URL+"/console/password", url2.Values{
 		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"different-one-here"},
 	})
 	if b := body(t, r); !strings.Contains(b, "do not match") {
@@ -45,7 +45,7 @@ func TestConsoleOperatorCanRotateOwnPassword(t *testing.T) {
 	}
 
 	// The real rotation succeeds and signs the caller out (303 -> /login).
-	r, _ = c.PostForm(ts.URL+"/console/password", url.Values{
+	r, _ = c.PostForm(ts.URL+"/console/password", url2.Values{
 		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
 	})
 	if r.StatusCode != 303 || !strings.HasPrefix(r.Header.Get("Location"), "/login") {
@@ -57,7 +57,7 @@ func TestConsoleOperatorCanRotateOwnPassword(t *testing.T) {
 		t.Errorf("rotating session after change = %d, want 303 (revoked)", rr.StatusCode)
 	}
 	old := newClient()
-	resp, _ := old.PostForm(ts.URL+"/login", url.Values{"username": {name}, "password": {"pw"}})
+	resp, _ := old.PostForm(ts.URL+"/login", url2.Values{"username": {name}, "password": {"pw"}})
 	if resp.StatusCode == 303 {
 		t.Error("the old password must stop working after rotation")
 	}
@@ -81,7 +81,7 @@ func TestPasswordChangeRevokesOtherPortalSessions(t *testing.T) {
 		t.Fatalf("second session should start valid; got %d", r.StatusCode)
 	}
 
-	resp, _ := rotating.PostForm(ts.URL+"/console/password", url.Values{
+	resp, _ := rotating.PostForm(ts.URL+"/console/password", url2.Values{
 		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
 	})
 	resp.Body.Close()
@@ -142,7 +142,7 @@ func TestConsoleBlocksUntilSeededPasswordRotated(t *testing.T) {
 
 	// Rotating clears the flag (change_password does it, not the handler); the
 	// session is revoked with it, so the console is reached by signing in again.
-	resp, _ := c.PostForm(ts.URL+"/console/password", url.Values{
+	resp, _ := c.PostForm(ts.URL+"/console/password", url2.Values{
 		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
 	})
 	resp.Body.Close()
@@ -168,4 +168,53 @@ func firstLine(s string) string {
 		return s[:200]
 	}
 	return s
+}
+
+// Admin-triggered forced rotation: the "evidence of compromise" trigger NIST asks
+// for, as opposed to a calendar. Flagging must also sign the account out, or it
+// only inconveniences the legitimate user while the attacker keeps their session.
+func TestAdminCanRequirePasswordChange(t *testing.T) {
+	ts, pg := newTestServer(t)
+	targetID, targetName := mkUser(t, pg, sqlc.UserRoleOperator)
+	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
+	_, opName := mkUser(t, pg, sqlc.UserRoleOperator)
+
+	victim := login(t, ts, targetName, "pw") // the suspect session
+	admin := login(t, ts, adminName, "pw")
+	operator := login(t, ts, opName, "pw")
+
+	url := ts.URL + "/console/users/" + targetID.String() + "/require-password-change"
+
+	// Operators cannot force it — this is a compromise response, admin-only.
+	if sc := sessPost(t, operator, url, ""); sc != 403 {
+		t.Errorf("operator require-change = %d, want 403", sc)
+	}
+	if sc := sessPost(t, admin, url, ""); sc != 200 {
+		t.Fatalf("admin require-change = %d, want 200", sc)
+	}
+
+	// The suspect session is gone, not merely flagged.
+	r := get(t, victim, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"})
+	if r.StatusCode != 303 {
+		t.Errorf("flagged user's session = %d, want 303 (revoked)", r.StatusCode)
+	}
+	r.Body.Close()
+
+	// Signing back in lands on the password screen and goes nowhere else.
+	again := login(t, ts, targetName, "pw")
+	r = get(t, again, ts.URL+"/console/dashboard", map[string]string{"Accept": "text/html"})
+	if r.StatusCode != 303 || r.Header.Get("Location") != "/console/password" {
+		t.Errorf("after re-login = %d -> %q, want 303 -> /console/password", r.StatusCode, r.Header.Get("Location"))
+	}
+	r.Body.Close()
+
+	// Rotating clears it.
+	resp, _ := again.PostForm(ts.URL+"/console/password", url2.Values{
+		"current_password": {"pw"}, "new_password": {"a-long-enough-one"}, "confirm_password": {"a-long-enough-one"},
+	})
+	resp.Body.Close()
+	if r := get(t, login(t, ts, targetName, "a-long-enough-one"), ts.URL+"/console/dashboard",
+		map[string]string{"Accept": "text/html"}); r.StatusCode != 200 {
+		t.Errorf("console after rotation = %d, want 200", r.StatusCode)
+	}
 }

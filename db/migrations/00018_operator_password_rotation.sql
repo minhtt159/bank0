@@ -12,6 +12,10 @@ ALTER TABLE users ADD COLUMN must_change_password  BOOLEAN  NOT NULL DEFAULT FAL
 -- is the outer layer; distributed stuffing walks past it. docs/10.
 ALTER TABLE users ADD COLUMN failed_login_attempts SMALLINT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN login_locked_until    TIMESTAMPTZ;
+-- When the CURRENT password was set. Backfilled to created_at so it always answers
+-- "how old is this credential" — NULL would have meant two different things.
+ALTER TABLE users ADD COLUMN password_changed_at   TIMESTAMPTZ NOT NULL DEFAULT now();
+UPDATE users SET password_changed_at = created_at;
 
 -- Only if it STILL holds the seeded password — crypt() re-derives using the stored
 -- hash as salt. An operator who already rotated by hand is not nagged.
@@ -72,7 +76,8 @@ BEGIN
 
     UPDATE users
        SET password_hash        = crypt(p_new, gen_salt('bf', 10)),
-           must_change_password = FALSE
+           must_change_password = FALSE,
+           password_changed_at  = now()
      WHERE id = p_user_id;
 END;
 $$ LANGUAGE plpgsql;
@@ -215,6 +220,23 @@ BEGIN
        AND (p_keep IS NULL OR id <> p_keep);
     GET DIAGNOSTICS v_n = ROW_COUNT;
     RETURN v_n;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+
+-- require_password_change: an admin flags an account for forced rotation — the
+-- "evidence of compromise" path NIST asks for, as opposed to a calendar. Sessions
+-- are dropped by the caller, since knowing the old password is what a compromised
+-- account's attacker has.
+CREATE OR REPLACE FUNCTION require_password_change(p_user_id UUID) RETURNS VOID AS $$
+BEGIN
+    UPDATE users SET must_change_password = TRUE WHERE id = p_user_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'user % not found', p_user_id;
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -386,6 +408,7 @@ $$ LANGUAGE plpgsql;
 
 DROP FUNCTION IF EXISTS note_failed_login(CITEXT);
 DROP FUNCTION IF EXISTS revoke_user_sessions(UUID, TEXT);
+DROP FUNCTION IF EXISTS require_password_change(UUID);
 
 -- +goose StatementBegin
 
@@ -547,6 +570,7 @@ $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
 DROP FUNCTION IF EXISTS assert_password_policy(TEXT);
+ALTER TABLE users DROP COLUMN password_changed_at;
 ALTER TABLE users DROP COLUMN login_locked_until;
 ALTER TABLE users DROP COLUMN failed_login_attempts;
 ALTER TABLE users DROP COLUMN must_change_password;
