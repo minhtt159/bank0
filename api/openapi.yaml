@@ -248,14 +248,14 @@ paths:
     post:
       operationId: changePassword
       tags: [client]
-      summary: Change the authenticated customer's password (revokes other sessions)
+      summary: Change the authenticated customer's password (revokes ALL sessions)
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/ChangePasswordRequest" }
       responses:
-        "204": { description: password changed; other sessions revoked }
+        "204": { description: "password changed; EVERY session for this user is revoked, including the caller's — re-authenticate" }
         "401": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
 
@@ -1537,13 +1537,14 @@ components:
       required: [current_password, new_password]
       properties:
         current_password: { type: string }
-        new_password:     { type: string, minLength: 12, maxLength: 256 }
-        refresh_token:
+        new_password:
           type: string
+          minLength: 12
+          maxLength: 72
           description: >-
-            Opaque refresh token of the session performing the change; its family
-            is spared from revocation. Optional: if omitted, ALL families are
-            revoked and the caller must re-login elsewhere.
+            Max is 72 BYTES, not characters: bcrypt hashes only the first 72 bytes,
+            so a longer value would be silently truncated. Multi-byte characters
+            count for more than one.
     TransferSuggestion:
       type: object
       properties:

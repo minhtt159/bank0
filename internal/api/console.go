@@ -10,6 +10,11 @@ import (
 // Only mounted in "portal"/"all" modes, behind requireSession. Layout follows
 // docs/05 §3: nav -> #main-panel, drill-down/forms -> #rail.
 func (s *Server) registerConsole(r *mux.Router) {
+	// The operator's own password. Registered first and exempt from the
+	// must-change gate below — it is the one screen that gate lets through.
+	r.HandleFunc("/console/password", s.consolePasswordForm).Methods(http.MethodGet)
+	r.HandleFunc("/console/password", s.consoleChangePassword).Methods(http.MethodPost)
+
 	// Shell + main-panel screens (panels: search box + results container)
 	r.HandleFunc("/", s.consoleHome).Methods(http.MethodGet)
 	r.HandleFunc("/console/dashboard", s.consoleDashboard).Methods(http.MethodGet)
@@ -67,6 +72,7 @@ func (s *Server) registerConsole(r *mux.Router) {
 	r.HandleFunc("/console/users/{id}/accounts", s.consoleCreateAccount).Methods(http.MethodPost)
 	r.HandleFunc("/console/users/{id}/invites", s.consoleSetInvites).Methods(http.MethodPost)
 	r.HandleFunc("/console/users/{id}/revoke-sessions", s.consoleRevokeSessions).Methods(http.MethodPost)
+	r.HandleFunc("/console/users/{id}/require-password-change", s.consoleRequirePasswordChange).Methods(http.MethodPost)
 
 	// Account statement (drill-down, paginated) + money/admin actions
 	r.HandleFunc("/console/accounts/{id}/statement", s.consoleStatement).Methods(http.MethodGet)

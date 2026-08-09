@@ -9,7 +9,8 @@ SELECT create_user(
 ) AS id;
 
 -- name: GetUserByID :one
-SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, invites_remaining, created_at, updated_at
+SELECT id, username, full_name, email, phone_number, role, status, onboarding_status, invites_remaining, created_at, updated_at,
+       password_changed_at, must_change_password, login_locked_until
 FROM users WHERE id = sqlc.arg(id)::uuid;
 
 -- name: SetInvitesRemaining :exec

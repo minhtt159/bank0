@@ -306,3 +306,41 @@ func TestVerificationCooldownAndExpiry(t *testing.T) {
 		t.Errorf("expired-challenge SQLSTATE = %q, want 28000", sqlstate(err))
 	}
 }
+
+// BCRYPT-72: bcrypt hashes only the first 72 bytes, so without a max length a
+// longer passphrase silently keeps its prefix and anyone knowing that prefix
+// authenticates. assert_password_policy refuses it at BOTH entry points.
+func TestPasswordPolicyRejectsOver72Bytes(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+
+	at72 := strings.Repeat("a", 72)
+	over := strings.Repeat("a", 73)
+
+	// The boundary itself is allowed — 72 is exactly what bcrypt consumes.
+	if _, err := pg.Pool.Exec(ctx, `SELECT assert_password_policy($1)`, at72); err != nil {
+		t.Errorf("72 bytes must be allowed: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `SELECT assert_password_policy($1)`, over); err == nil {
+		t.Error("73 bytes must be refused")
+	} else if got := sqlstate(err); got != "23514" {
+		t.Errorf("over-length SQLSTATE = %q, want 23514", got)
+	}
+
+	// BYTES, not characters: 24 three-byte runes are 72 bytes (ok), 25 are 75 (not).
+	if _, err := pg.Pool.Exec(ctx, `SELECT assert_password_policy($1)`, strings.Repeat("€", 24)); err != nil {
+		t.Errorf("24 x 3-byte runes = 72 bytes, must be allowed: %v", err)
+	}
+	if _, err := pg.Pool.Exec(ctx, `SELECT assert_password_policy($1)`, strings.Repeat("€", 25)); err == nil {
+		t.Error("25 x 3-byte runes = 75 bytes, must be refused (length() would have said 25)")
+	}
+
+	// change_password enforces it, so a truncating password can never be stored.
+	u := mkCustomer(t, pg)
+	if _, err := pg.Pool.Exec(ctx, `UPDATE users SET password_hash = crypt('current-password-ok', gen_salt('bf', 10)) WHERE id = $1`, u); err != nil {
+		t.Fatalf("seed password: %v", err)
+	}
+	if err := pg.ChangePassword(ctx, u, "current-password-ok", over); err == nil {
+		t.Error("change_password must refuse an over-length password")
+	}
+}

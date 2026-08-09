@@ -60,17 +60,18 @@ func TestHTTPChangePassword(t *testing.T) {
 		t.Errorf("wrong current = %d, want 401", code)
 	}
 
-	// happy path: change pw, spare A's family via its refresh token
+	// happy path
 	if code := postPassword(t, ts, sessA.Token,
-		`{"current_password":"pw","new_password":"`+newPw+`","refresh_token":"`+sessA.RefreshToken+`"}`); code != 204 {
+		`{"current_password":"pw","new_password":"`+newPw+`"}`); code != 204 {
 		t.Fatalf("change pw = %d, want 204", code)
 	}
-	// B (other family) revoked; A (spared) still rotates
+	// EVERY family dies, the caller's included: the old password may be in someone
+	// else's hands and there is no telling which session is theirs.
 	if _, code := doRefresh(t, ts, sessB.RefreshToken); code != 401 {
 		t.Errorf("other-session refresh = %d, want 401 (revoked)", code)
 	}
-	if _, code := doRefresh(t, ts, sessA.RefreshToken); code != 200 {
-		t.Errorf("current-session refresh = %d, want 200 (spared)", code)
+	if _, code := doRefresh(t, ts, sessA.RefreshToken); code != 401 {
+		t.Errorf("caller's own refresh = %d, want 401 (revoked too)", code)
 	}
 	// old password no longer logs in; the new one does
 	if code := postLogin(t, ts, name, "pw"); code != 401 {
@@ -78,18 +79,5 @@ func TestHTTPChangePassword(t *testing.T) {
 	}
 	if code := postLogin(t, ts, name, newPw); code != 200 {
 		t.Errorf("new pw login = %d, want 200", code)
-	}
-}
-
-// Omitting refresh_token revokes ALL families, including the caller's own.
-func TestHTTPChangePasswordNoRefreshTokenRevokesAll(t *testing.T) {
-	ts, pg := newTestServer(t)
-	_, name := mkUser(t, pg, sqlc.UserRoleCustomer)
-	sess := clientLogin(t, ts, name, "pw")
-	if code := postPassword(t, ts, sess.Token, `{"current_password":"pw","new_password":"another-strong-pw-9"}`); code != 204 {
-		t.Fatalf("change = %d, want 204", code)
-	}
-	if _, code := doRefresh(t, ts, sess.RefreshToken); code != 401 {
-		t.Errorf("own refresh after no-token change = %d, want 401 (all revoked)", code)
 	}
 }

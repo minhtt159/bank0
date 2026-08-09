@@ -176,6 +176,35 @@ func (s *Server) consoleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	s.renderUserDetail(w, r, id, "Details saved.")
 }
 
+// consoleRequirePasswordChange flags a user for forced rotation and signs them out
+// of both surfaces. Admin-only: it is a compromise response, not routine admin.
+func (s *Server) consoleRequirePasswordChange(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireRole(w, r, canApprove)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		return
+	}
+	if err := s.pg.RequirePasswordChange(r.Context(), id); err != nil {
+		s.renderUserDetail(w, r, id, "Could not require a password change: "+s.dbFlash(r, err))
+		return
+	}
+	// The old password is what an attacker would be holding, so the live sessions go
+	// with it — otherwise the flag only inconveniences the legitimate user.
+	if _, err := s.pg.RevokeUserSessions(r.Context(), id, ""); err != nil {
+		s.log.Warn("revoke sessions on forced rotation", "err", err)
+	}
+	if _, err := s.pg.RevokeUserRefreshExceptFamily(r.Context(), id, uuid.Nil); err != nil {
+		s.log.Warn("revoke refresh on forced rotation", "err", err)
+	}
+	s.audit(r.Context(), actor, "password.change_required", &id, nil)
+	refresh(w)
+	s.renderUserDetail(w, r, id, "Password change required — the user was signed out of every session.")
+}
+
 // consoleRevokeSessions force-revokes every active refresh token for a user
 // (docs/06 "log out everywhere" / operator force-revoke). Admin only.
 func (s *Server) consoleRevokeSessions(w http.ResponseWriter, r *http.Request) {

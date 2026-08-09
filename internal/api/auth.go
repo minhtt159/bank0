@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/minhtt159/bank0/internal/db"
 	template "github.com/minhtt159/bank0/web/template"
 )
@@ -129,8 +131,49 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), userCtxKey, su)
+		if !s.passwordRotationOK(w, r.WithContext(ctx), su) {
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// passwordRotationOK holds a flagged staff member on the password screen (00018).
+// The seeded password is published in this repo, so this is what makes "change it
+// immediately" binding. docs/05 §4.6a.
+func (s *Server) passwordRotationOK(w http.ResponseWriter, r *http.Request, su db.SessionUser) bool {
+	switch r.URL.Path {
+	case "/console/password", "/logout":
+		return true
+	}
+	must, err := s.pg.MustChangePassword(r.Context(), su.UserID)
+	if err != nil {
+		s.log.Error("must-change-password lookup", "err", err)
+		// Fail CLOSED, except for the one error that means the schema predates this
+		// feature (binary rolled ahead of its migration): there the column is absent
+		// for EVERY request, and denying would brick the console instead of guarding
+		// it. Any other error is a hard stop — the console needs the DB anyway, so
+		// there is nothing to keep working.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42703" { // undefined_column
+			return true
+		}
+		must = true // treat as flagged: hold them on the password screen
+	}
+	if !must {
+		return true
+	}
+	switch { // same content negotiation as denyAuth
+	case r.Header.Get("HX-Request") == "true":
+		w.Header().Set("HX-Redirect", "/console/password")
+		w.WriteHeader(http.StatusOK)
+	case strings.Contains(r.Header.Get("Accept"), "text/html"):
+		http.Redirect(w, r, "/console/password", http.StatusSeeOther)
+	default:
+		writeError(w, http.StatusForbidden, "password_change_required",
+			"this account must change its password before using the portal (see /console/password)")
+	}
+	return false
 }
 
 func (s *Server) denyAuth(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +192,11 @@ func (s *Server) denyAuth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) consoleLoginForm(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = template.LoginPage("").Render(r.Context(), w)
+	msg := ""
+	if r.URL.Query().Get("changed") == "1" {
+		msg = "Password changed — sign in again. All other sessions were signed out."
+	}
+	_ = template.LoginPage(msg).Render(r.Context(), w)
 }
 
 func (s *Server) consoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +210,7 @@ func (s *Server) consoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	su, err := s.pg.CreateStaffSession(r.Context(), username, password, hashToken(token),
 		s.idleSeconds(), r.UserAgent(), s.clientIP(r))
 	if errors.Is(err, db.ErrLoginDenied) {
+		s.pg.NoteFailedLogin(r.Context(), username)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = template.LoginPage("Invalid credentials, or this account can't access the console.").Render(r.Context(), w)

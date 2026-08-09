@@ -130,7 +130,7 @@ stack), then visit `http://localhost:8080/` (console) and
 ```bash
 # database secret has key "dsn"; auth secret has key "jwt-secret"
 # (api pods fail closed without a JWT secret — see §1)
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.1 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
@@ -170,6 +170,7 @@ graph TD
 | **Logging** | `logging.level` (default `info`) and `logging.encoding` (default `json`) are set on both Deployments and the migrate Job. The image's baked `config.yaml` also defaults to `info` — only the local compose stack opts into `debug` — so an unconfigured pod never logs at debug. Raise `logging.level` to troubleshoot a live release without rebuilding the image. |
 | **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault` (values: `podSecurityContext` / `securityContext`), and a hardcoded `automountServiceAccountToken: false`. |
 | **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here) makes the auth rate limiter key on the real client IP instead of `RemoteAddr`: `CF-Connecting-IP` when present, else `X-Forwarded-For` read **right-to-left**, `trustedProxyHops` entries in (default 1 — count every proxy between client and pod). Right-to-left because an `use_remote_address` Gateway **appends** rather than replaces, so only the right-most entries are proxy-authored ([`10`](10-security-review.md)). |
+| **First login** | The seeded `admin` account (from `00016`) is flagged `must_change_password`, so the console holds it on `/console/password` until it is rotated and the admin JSON API answers `403` meanwhile ([`05`](05-admin-ui.md) §4.6a). The flag is set only while the account still holds the seeded password. |
 | **JWT secret** | The `api` deployment mounts `APP_AUTH_JWT_SECRET` (Helm `auth.existingSecret`); the `portal` deployment doesn't need one (cookie sessions), and `Config.Validate` only requires it when the served mode includes the api surface. |
 | **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP→HTTPS. |
 
@@ -183,6 +184,13 @@ platform-owned Gateways wants.
 | **Chart owns the Gateway** (default) | `gateway.create=true` | a `Gateway` (per-host HTTPS listeners, cert-manager annotation), both HTTPRoutes, and the HTTP→HTTPS redirect route |
 | **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace` | both HTTPRoutes only, parented to that Gateway. `sectionName` is the chart's own listener naming (`https-api`/`https-portal`/`http`), so the shared Gateway must use those names — otherwise use the mode below. TLS and redirect are the platform's business here. |
 | **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all — just Deployments/Services. Write the HTTPRoutes yourself, which is also how you give api and portal *different* parentRefs (two platform Gateways, e.g. external + internal) until per-surface attachment lands. |
+
+**Two releases in one cluster:** the chart's object names are release-scoped
+(`{{ .Release.Name }}-api`), but if you write your own HTTPRoutes for a staging and a
+production namespace, give them names — or discovery labels — that differ across
+namespaces. Anything that indexes routes cluster-wide by name alone (Gatus's endpoint
+registry, for one) rejects the duplicate and can take the whole watcher down, not just
+the colliding entry.
 
 The redirect route renders only in the first mode: it hardcodes `sectionName: http`,
 which a platform Gateway may not have, and an unexposed release would otherwise emit

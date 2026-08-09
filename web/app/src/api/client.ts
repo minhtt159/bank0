@@ -237,15 +237,11 @@ export const api = {
   // Profile self-service. updateMe is a partial PATCH (absent field = unchanged).
   updateMe: (body: { full_name?: string; email?: string; phone_number?: string }) =>
     req<User>("PATCH", "/me", { body }),
-  // changePassword passes the current refresh token so THIS session is spared from
-  // the revoke-other-families sweep the server runs on success. Returns 204.
+  // A successful change revokes EVERY session for the account, this one included —
+  // the caller must sign in again. Returns 204.
   changePassword: (currentPassword: string, newPassword: string) =>
     req<void>("POST", "/me/password", {
-      body: {
-        current_password: currentPassword,
-        new_password: newPassword,
-        refresh_token: refreshToken.value || undefined,
-      },
+      body: { current_password: currentPassword, new_password: newPassword },
     }),
 
   // Active sessions/devices. Presenting X-Refresh-Token flags the current family.

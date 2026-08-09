@@ -52,9 +52,13 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request, params genclie
 		writeError(w, http.StatusUnprocessableEntity, "invalid_input", "invitation code required")
 		return
 	}
-	// Fast-fail; the policy itself lives in register_user (>= 12, like change_password).
+	// Fast-fail; assert_password_policy() is the authority.
 	if len(req.Password) < 12 {
 		writeError(w, http.StatusUnprocessableEntity, "weak_password", "password must be at least 12 characters")
+		return
+	}
+	if len(req.Password) > 72 { // bcrypt truncation
+		writeError(w, http.StatusUnprocessableEntity, "weak_password", "password must be at most 72 bytes")
 		return
 	}
 	if req.Email == "" && req.PhoneNumber == "" {

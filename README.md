@@ -50,7 +50,8 @@ seed (`db/seed.sql`, idempotent) loads 98 customers / 242 accounts (valid NL IBA
 741 transfers, with pending/canceled/reversed lifecycle coverage and a randomized
 10-user / 30-account guided-transfer "mule" pool; `task seed:demo` loads a larger
 randomized set, and `task dev:reset` rebuilds the stack from a clean DB and seeds it in
-one step. **Change the admin password before exposing the portal.**
+one step. The seeded `admin` account is forced to change its password at first
+login (`/console/password`) — the console will not let it do anything else first.
 
 Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
 
@@ -60,7 +61,7 @@ Self-hosted Kubernetes is the primary path — one image, one Helm chart, both
 published to GHCR. Nothing needs to be built locally:
 
 ```bash
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.1 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
@@ -70,7 +71,7 @@ API/Envoy, with a pre-upgrade migrate job ([`docs/04-deployment.md`](docs/04-dep
 
 | Artifact | Where |
 |---|---|
-| Image (multi-arch: `linux/amd64` + `linux/arm64`) | `ghcr.io/minhtt159/bank0:1.0.1` — `sha-<commit>` on every `main` push, `X.Y.Z` + `X.Y` on `v*` tags. Never `latest`. |
+| Image (multi-arch: `linux/amd64` + `linux/arm64`) | `ghcr.io/minhtt159/bank0:1.0.2` — `sha-<commit>` on every `main` push, `X.Y.Z` + `X.Y` on `v*` tags. Never `latest`. |
 | Chart | `oci://ghcr.io/minhtt159/charts/bank0` — published on `v*` tags |
 
 CI publishes; it never deploys — `helm upgrade` stays an operator command

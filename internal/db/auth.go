@@ -208,6 +208,46 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 	return err
 }
 
+// RequirePasswordChange flags a user for forced rotation (admin action).
+func (p *Postgres) RequirePasswordChange(ctx context.Context, userID uuid.UUID) error {
+	_, err := p.Pool.Exec(ctx, `SELECT require_password_change($1::uuid)`, userID)
+	return err
+}
+
+// RevokeUserSessions drops the user's portal sessions, keeping keepTokenHash
+// (pass "" to drop all). Returns how many went.
+func (p *Postgres) RevokeUserSessions(ctx context.Context, userID uuid.UUID, keepTokenHash string) (int, error) {
+	var n int
+	err := p.Pool.QueryRow(ctx,
+		`SELECT revoke_user_sessions($1::uuid, $2::text)`, userID, nilIfZero(keepTokenHash)).Scan(&n)
+	return n, err
+}
+
+// NoteFailedLogin records one consecutive failure and locks the account at the
+// threshold. Called AFTER a denial: create_staff_session RAISEs, and a RAISE would
+// roll back a counter written inside it. Unknown username is a no-op.
+func (p *Postgres) NoteFailedLogin(ctx context.Context, username string) {
+	// WithoutCancel + logged: a client that hangs up on a failed login must still
+	// be counted, or the lockout is trivially defeated.
+	if _, err := p.Pool.Exec(context.WithoutCancel(ctx),
+		`SELECT note_failed_login($1::citext)`, username); err != nil {
+		slog.Error("note failed login", "err", err)
+	}
+}
+
+// MustChangePassword reports whether this user is barred from doing anything else
+// until they rotate their password — set on the seeded bootstrap admin (00018) and
+// cleared by change_password() itself.
+func (p *Postgres) MustChangePassword(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var must bool
+	err := p.Pool.QueryRow(ctx,
+		`SELECT must_change_password FROM users WHERE id = $1`, userID).Scan(&must)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return must, err
+}
+
 // RevokeUserRefreshExceptFamily revokes every live refresh family for the user
 // except keepFamily (pass uuid.Nil to revoke all). Returns the count revoked.
 func (p *Postgres) RevokeUserRefreshExceptFamily(ctx context.Context, userID, keepFamily uuid.UUID) (int, error) {

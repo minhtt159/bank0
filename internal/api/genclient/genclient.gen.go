@@ -710,10 +710,9 @@ type Beneficiary struct {
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
-	NewPassword     string `json:"new_password"`
 
-	// RefreshToken Opaque refresh token of the session performing the change; its family is spared from revocation. Optional: if omitted, ALL families are revoked and the caller must re-login elsewhere.
-	RefreshToken *string `json:"refresh_token,omitempty"`
+	// NewPassword Max is 72 BYTES, not characters: bcrypt hashes only the first 72 bytes, so a longer value would be silently truncated. Multi-byte characters count for more than one.
+	NewPassword string `json:"new_password"`
 }
 
 // CreateInvitationResponse defines model for CreateInvitationResponse.
@@ -1593,7 +1592,7 @@ type ServerInterface interface {
 	// Mint a single-use invitation code (spends one unit of the caller's lifetime budget)
 	// (POST /me/invitations)
 	CreateInvitation(w http.ResponseWriter, r *http.Request)
-	// Change the authenticated customer's password (revokes other sessions)
+	// Change the authenticated customer's password (revokes ALL sessions)
 	// (POST /me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
 	// List the caller's active sessions (refresh-token families = devices)

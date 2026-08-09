@@ -246,6 +246,10 @@ func requireHarness(t *testing.T) *env {
 	if harness == nil {
 		t.Skip("set TEST_DATABASE_DSN to run the Tier A cross-surface e2e suite")
 	}
+	// The seeded admin cannot be used as-is any more (must_change_password), and
+	// rotating it kills the old password on BOTH surfaces — so every test, portal or
+	// api, must see the rotation before it logs in.
+	ensureAdminRotated(t, harness.portal.baseURL)
 	return harness
 }
 
