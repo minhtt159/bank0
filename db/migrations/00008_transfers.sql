@@ -357,6 +357,15 @@ BEGIN
         RAISE EXCEPTION 'cannot post transfer in state %', v_t.status USING ERRCODE = 'check_violation';
     END IF;
 
+    -- Lock both accounts in id order, like request_transfer. Without this the only
+    -- locks taken are the balance UPDATEs the ledger trigger fires, in ledger-row
+    -- order (debit then credit) — the opposite of reverse_transfer's order, so a
+    -- concurrent post and reversal over the same pair could deadlock (40P01, which
+    -- maps to a 500 nobody can act on).
+    PERFORM 1 FROM accounts
+     WHERE id IN (v_t.debit_account_id, v_t.credit_account_id)
+     ORDER BY id FOR UPDATE;
+
     INSERT INTO ledger_entries (transfer_id, account_id, direction, amount_minor, currency, balance_after)
     VALUES (p_transfer_id, v_t.debit_account_id,  'debit',  v_t.amount_minor, v_t.currency, 0),
            (p_transfer_id, v_t.credit_account_id, 'credit', v_t.amount_minor, v_t.currency, 0);
@@ -645,7 +654,12 @@ BEGIN
     -- to a pending/held transfer. Clawing them leaves that transfer to fail on the
     -- balance_minor >= 0 CHECK when it posts — an unmapped raw constraint trip on a
     -- payment the customer already authorized.
-    SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id FOR UPDATE;
+    -- Both accounts, in id order (see post_transfer): a reversal writes both sides,
+    -- so locking only the credit side left the pair lockable in either order.
+    PERFORM 1 FROM accounts
+     WHERE id IN (v_orig.debit_account_id, v_orig.credit_account_id)
+     ORDER BY id FOR UPDATE;
+    SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id;
     IF v_cp.kind <> 'system' AND (v_cp.balance_minor - v_cp.held_minor) < v_orig.amount_minor THEN
         RAISE EXCEPTION 'cannot reverse transfer %: recipient has insufficient funds to claw back', p_transfer_id
             USING ERRCODE = 'check_violation';

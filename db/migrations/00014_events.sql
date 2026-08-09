@@ -11,12 +11,17 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE events (
     id                  UUID PRIMARY KEY DEFAULT uuidv7(),      -- UUIDv7: time-ordered keyset tiebreak
-    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- RESTRICT, not CASCADE: a cascading DELETE still fires the row trigger below,
+    -- which blocks it — so "the user cascade removes them" was never true. The feed
+    -- is evidence; a user with events is not deletable, and that is the intent.
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     type                event_type NOT NULL,
     title               TEXT NOT NULL DEFAULT '',
     body                TEXT NOT NULL DEFAULT '',
-    related_transfer_id UUID REFERENCES transfers(id) ON DELETE SET NULL,
-    related_account_id  UUID REFERENCES accounts(id)  ON DELETE SET NULL,
+    -- SET NULL would be an UPDATE, which the immutability trigger also blocks.
+    -- Neither transfers nor accounts are ever deleted, so RESTRICT states reality.
+    related_transfer_id UUID REFERENCES transfers(id) ON DELETE RESTRICT,
+    related_account_id  UUID REFERENCES accounts(id)  ON DELETE RESTRICT,
     data                JSONB NOT NULL DEFAULT '{}',
     read_at             TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -31,14 +36,12 @@ CREATE INDEX idx_events_user_unread  ON events (user_id) WHERE read_at IS NULL;
 -- (NULL transfer) are exempt.
 CREATE UNIQUE INDEX uq_events_money_once ON events (user_id, type, related_transfer_id)
     WHERE type IN ('transfer.posted', 'payment.incoming', 'transfer.held');
--- Idempotent DEVICE emission: one device.new per refresh-token family.
-CREATE UNIQUE INDEX uq_events_device_family ON events ((data->>'family_id'))
-    WHERE type = 'device.new';
 
 -- +goose StatementBegin
 
 -- events_block_mutation: the feed is a record of things that happened. Only
--- read_at may ever change; deletes are blocked (user-cascade is the sole removal).
+-- read_at may ever change; deletes are blocked outright (the FKs are RESTRICT, so
+-- nothing cascades into this table either).
 -- Mirrors ledger_block_mutation (00008).
 CREATE OR REPLACE FUNCTION events_block_mutation() RETURNS TRIGGER AS $$
 BEGIN

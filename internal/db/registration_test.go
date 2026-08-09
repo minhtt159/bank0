@@ -246,10 +246,12 @@ func TestVerifyContactWrongCodeLockoutAndUnknownToken(t *testing.T) {
 		t.Errorf("unknown-token SQLSTATE = %q, want P0001", sqlstate(err))
 	}
 
-	// 5 wrong codes -> 28000 each; the 6th attempt (even with the right code) -> 23514.
+	// 5 wrong codes -> 28P01 each (wrong code has its OWN SQLSTATE, distinct from
+	// the expired/consumed 28000 — the attempt counter keys on it); the 6th
+	// attempt (even with the right code) -> 23514.
 	for i := 0; i < 5; i++ {
-		if _, err := pg.VerifyContact(ctx, sha256hex(token), sha256hex("000000")); sqlstate(err) != "28000" {
-			t.Fatalf("wrong code #%d SQLSTATE = %q, want 28000", i+1, sqlstate(err))
+		if _, err := pg.VerifyContact(ctx, sha256hex(token), sha256hex("000000")); sqlstate(err) != "28P01" {
+			t.Fatalf("wrong code #%d SQLSTATE = %q, want 28P01", i+1, sqlstate(err))
 		}
 	}
 	if _, err := pg.VerifyContact(ctx, sha256hex(token), sha256hex(code)); sqlstate(err) != "23514" {

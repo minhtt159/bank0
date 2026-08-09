@@ -159,8 +159,9 @@ BEGIN
             jsonb_build_object('family_id', v_family,
                                'user_agent', COALESCE(p_user_agent, ''),
                                'ip', COALESCE(p_ip, ''),
-                               'device_label', COALESCE(p_device_label, '')))
-    ON CONFLICT ((data->>'family_id')) WHERE type = 'device.new' DO NOTHING;
+                               'device_label', COALESCE(p_device_label, '')));
+    -- No ON CONFLICT: v_family is minted fresh above, so the dedup could never
+    -- fire (its partial unique index went with it).
 
     RETURN v_family;
 END;
