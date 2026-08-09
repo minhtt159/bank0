@@ -87,6 +87,9 @@ Set the JWT key via `APP_AUTH_JWT_SECRET` (Helm: `auth.existingSecret` or
 **fails closed** when `app.env != development`: `Config.Validate()` returns an error
 and `cmd/app/main.go` logs `invalid configuration` and exits non-zero. Only in
 `development` does it fall back to an insecure dev value with a startup warning.
+The check runs on the **serve** path only — `migrate` and `maintenance` serve no
+surface, so the pre-upgrade migrate Job runs on `app.env=production` with the DSN
+alone and no JWT secret.
 
 > **`all`-mode note:** when one container serves both surfaces (local dev), the
 > client and admin route sets overlap. Shared reads resolve to the client (JWT)
