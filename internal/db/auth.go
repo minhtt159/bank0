@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -170,7 +171,14 @@ func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash stri
 		// back), so revoke the family here in a separate, committing statement.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "28000" {
-			_, _ = p.Pool.Exec(ctx, `SELECT revoke_refresh_family($1::text)`, oldHash)
+			// WithoutCancel: this is the theft response. If the client hangs up (or
+			// the request deadline fires) between the RAISE and this statement, the
+			// compromised family must still be revoked. A failure here is invisible
+			// otherwise, so it is logged rather than dropped.
+			if _, rerr := p.Pool.Exec(context.WithoutCancel(ctx),
+				`SELECT revoke_refresh_family($1::text)`, oldHash); rerr != nil {
+				slog.Error("refresh-token reuse detected but revoking the family failed", "err", rerr)
+			}
 		}
 		return uuid.Nil, "", "", err
 	}

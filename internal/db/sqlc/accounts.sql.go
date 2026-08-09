@@ -41,7 +41,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (u
 }
 
 const deposit = `-- name: Deposit :one
-SELECT deposit(
+SELECT admin_deposit(
     $1::text,
     $2::uuid,
     $3::bigint,
@@ -211,7 +211,7 @@ func (q *Queries) UpdateTransferLimit(ctx context.Context, arg UpdateTransferLim
 }
 
 const withdraw = `-- name: Withdraw :one
-SELECT withdraw(
+SELECT admin_withdraw(
     $1::text,
     $2::uuid,
     $3::bigint,

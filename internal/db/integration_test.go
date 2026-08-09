@@ -26,6 +26,14 @@ import (
 var testDSN = os.Getenv("TEST_DATABASE_DSN")
 
 func TestMain(m *testing.M) {
+	// In CI the DSN is always set, so an unset one means the wiring broke (a renamed
+	// env, a dropped service block) — and every test below would SKIP while the job
+	// still reported green. Three gate jobs turning into silent no-ops is exactly the
+	// failure this must not have.
+	if testDSN == "" && os.Getenv("CI") == "true" {
+		fmt.Fprintln(os.Stderr, "TEST_DATABASE_DSN is unset in CI: integration tests would skip silently")
+		os.Exit(1)
+	}
 	if testDSN != "" {
 		if err := migrate.Up(testDSN); err != nil {
 			fmt.Fprintln(os.Stderr, "migrate test db:", err)
@@ -82,11 +90,13 @@ func mkAccount(t *testing.T, pg *Postgres, owner uuid.UUID) uuid.UUID {
 	return id
 }
 
+// fund uses the raw deposit() primitive, not the Deposit query — that one now
+// routes through admin_deposit(), which enforces the maker-checker threshold.
+// Scaffolding must not be bound by operator policy.
 func fund(t *testing.T, pg *Postgres, acct uuid.UUID, minor int64) {
 	t.Helper()
-	if _, err := pg.Queries.Deposit(context.Background(), sqlc.DepositParams{
-		IdempotencyKey: uuid.NewString(), AccountID: acct, AmountMinor: minor, Description: "test fund",
-	}); err != nil {
+	if _, err := pg.Pool.Exec(context.Background(),
+		`SELECT deposit($1, $2, $3, 'test fund')`, uuid.NewString(), acct, minor); err != nil {
 		t.Fatalf("fund: %v", err)
 	}
 }

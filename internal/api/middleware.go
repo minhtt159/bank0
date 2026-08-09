@@ -15,8 +15,7 @@ import (
 type reqCtxKey int
 
 const (
-	reqIDKey reqCtxKey = iota
-	reqLoggerKey
+	reqLoggerKey reqCtxKey = iota
 )
 
 type statusRecorder struct {
@@ -43,8 +42,9 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Request-Id", reqID)
 		l := s.log.With("request_id", reqID)
-		ctx := context.WithValue(r.Context(), reqIDKey, reqID)
-		ctx = context.WithValue(ctx, reqLoggerKey, l)
+		// The id travels in the X-Request-Id header and inside the derived logger;
+		// nothing ever read it back out of the context.
+		ctx := context.WithValue(r.Context(), reqLoggerKey, l)
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(rec, r)

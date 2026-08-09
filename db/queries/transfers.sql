@@ -25,7 +25,8 @@ LEFT JOIN users du ON du.id = da.user_id
 LEFT JOIN users cu ON cu.id = ca.user_id
 WHERE (da.user_id = sqlc.arg(subject)::uuid OR ca.user_id = sqlc.arg(subject)::uuid)
   AND (sqlc.narg(cursor)::timestamptz IS NULL
-       OR (t.requested_at, t.id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+       OR (t.requested_at, t.id) < (sqlc.narg(cursor)::timestamptz,
+                                 COALESCE(sqlc.narg(cursor_id)::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff')))
   AND (sqlc.narg(status)::transfer_status IS NULL OR t.status = sqlc.narg(status)::transfer_status)
   AND (sqlc.narg(kind)::transfer_kind     IS NULL OR t.kind   = sqlc.narg(kind)::transfer_kind)
   AND (sqlc.narg(from_ts)::timestamptz    IS NULL OR t.requested_at >= sqlc.narg(from_ts)::timestamptz)
@@ -92,7 +93,8 @@ SELECT id, transfer_id, account_id, account_iban, direction, amount_minor, signe
 FROM enriched_ledger
 WHERE account_id = sqlc.arg(account_id)::uuid
   AND (sqlc.narg(cursor)::timestamptz IS NULL
-       OR (posted_at, id) < (sqlc.narg(cursor)::timestamptz, sqlc.narg(cursor_id)::uuid))
+       OR (posted_at, id) < (sqlc.narg(cursor)::timestamptz,
+                          COALESCE(sqlc.narg(cursor_id)::uuid, 'ffffffff-ffff-ffff-ffff-ffffffffffff')))
   AND (sqlc.narg(from_ts)::timestamptz IS NULL OR posted_at >= sqlc.narg(from_ts)::timestamptz)
   AND (sqlc.narg(to_ts)::timestamptz   IS NULL OR posted_at <  sqlc.narg(to_ts)::timestamptz)
   AND (sqlc.narg(direction)::text IS NULL OR direction::text = sqlc.narg(direction)::text)

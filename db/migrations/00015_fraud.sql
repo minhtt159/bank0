@@ -108,11 +108,13 @@ $$ LANGUAGE plpgsql STABLE;
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE warning_acks (
     id                UUID PRIMARY KEY DEFAULT uuidv7(),
-    user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- RESTRICT: the immutability trigger blocks the cascade DELETE anyway, and
+    -- liability evidence outlives the account by design.
+    user_id           UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     category          TEXT NOT NULL,                 -- cop_no_match | cop_close_match | cop_unable | guided_steer | high_value | risk_warning | other
     reason_code       TEXT NOT NULL DEFAULT '',      -- machine token echoed from the warning (e.g. NO_MATCH)
     acknowledged      BOOLEAN NOT NULL DEFAULT TRUE, -- FALSE = warning shown, customer backed out
-    debit_account_id  UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    debit_account_id  UUID REFERENCES accounts(id) ON DELETE RESTRICT,
     counterparty_iban TEXT NOT NULL DEFAULT '',
     amount_minor      BIGINT,
     device            TEXT NOT NULL DEFAULT '',      -- client-supplied device/platform label
@@ -154,8 +156,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- warning_acks_block_mutation: evidence is written once. No UPDATE, no DELETE
--- (user-cascade is the sole removal path).
+-- warning_acks_block_mutation: evidence is written once. No UPDATE, no DELETE —
+-- and the FKs are RESTRICT, so nothing cascades in either.
 CREATE OR REPLACE FUNCTION warning_acks_block_mutation() RETURNS TRIGGER AS $$
 BEGIN
     RAISE EXCEPTION 'warning_acks is append-only (% blocked)', TG_OP

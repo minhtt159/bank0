@@ -61,7 +61,9 @@ helm install bank0 deploy/helm/bank0 \
 
 creates `bank0-api` (mode=api, HPA) and `bank0-portal` (mode=portal) behind Gateway
 API/Envoy, with a pre-upgrade migrate job ([`docs/04-deployment.md`](docs/04-deployment.md)).
-Image publishing and the remaining chart work are planned in
+The image and the chart publish to GHCR on every `main` push and on `v*` tags
+([`docs/04-deployment.md`](docs/04-deployment.md) §6); per-surface Gateway
+attachment and in-cluster PWA hosting are still open in
 [`docs/specs/spec-container-helm-pivot.md`](docs/specs/spec-container-helm-pivot.md).
 
 ## Tech stack

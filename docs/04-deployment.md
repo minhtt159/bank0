@@ -5,7 +5,8 @@
 >
 > **This is the deployment path** — self-hosted Postgres 18 + Kubernetes/Helm +
 > Gateway API. It is the only one; there is no managed/serverless variant. The
-> remaining work to get there (image publishing, chart hardening, PWA hosting) is
+> image and chart now publish to GHCR (§6); what remains — per-surface Gateway
+> attachment and PWA hosting — is
 > [`specs/spec-container-helm-pivot.md`](specs/spec-container-helm-pivot.md).
 
 ---
@@ -87,6 +88,9 @@ Set the JWT key via `APP_AUTH_JWT_SECRET` (Helm: `auth.existingSecret` or
 **fails closed** when `app.env != development`: `Config.Validate()` returns an error
 and `cmd/app/main.go` logs `invalid configuration` and exits non-zero. Only in
 `development` does it fall back to an insecure dev value with a startup warning.
+The check runs on the **serve** path only — `migrate` and `maintenance` serve no
+surface, so the pre-upgrade migrate Job runs on `app.env=production` with the DSN
+alone and no JWT secret.
 
 > **`all`-mode note:** when one container serves both surfaces (local dev), the
 > client and admin route sets overlap. Shared reads resolve to the client (JWT)
@@ -126,10 +130,15 @@ stack), then visit `http://localhost:8080/` (console) and
 ```bash
 # database secret has key "dsn"; auth secret has key "jwt-secret"
 # (api pods fail closed without a JWT secret — see §1)
-helm install bank0 deploy/helm/bank0 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.0 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
+
+Both the chart and the image are published to GHCR by
+[`publish.yml`](../.github/workflows/publish.yml) (§6). Swap the OCI reference for
+a local path (`helm install bank0 deploy/helm/bank0 …`) to install the working
+tree instead.
 
 What the chart creates:
 
@@ -240,3 +249,27 @@ source, regenerate and commit:
 | `api/openapi.yaml` | `task generate:oapi` |
 | `web/template/*.templ` | `task generate:templ` |
 | any of the above | or just `task generate` |
+
+---
+
+## 6. Publishing artifacts (`publish.yml`)
+
+CI publishes; it never deploys. The cluster sits behind a tunnel and Actions has
+no path to it, so `helm upgrade` stays an operator command.
+
+| Trigger | Artifact |
+|---|---|
+| push to `main` | `ghcr.io/minhtt159/bank0:sha-<shortsha>` — the "deploy whatever main is" handle (`helm upgrade … --set image.tag=sha-…`) |
+| push tag `vX.Y.Z` | the same image as `:X.Y.Z` + `:X.Y` (unprefixed — the chart defaults `image.tag` to `.Chart.AppVersion`), **and** the chart at `oci://ghcr.io/minhtt159/charts/bank0` |
+
+Both images are multi-arch (`linux/amd64` + `linux/arm64`): the Dockerfile's build
+stage pins `--platform=$BUILDPLATFORM` and cross-compiles with `GOARCH`, so the
+second arch costs a `go build`, not a QEMU-emulated toolchain.
+
+There is **no `latest` tag** — the cluster's admission control rejects an unpinned
+image, and an unpinned tag defeats "what exactly is running?".
+
+Tagging a release means bumping `Chart.yaml`'s `version` **and** `appVersion` to
+the same `X.Y.Z` in the release commit: the chart job refuses to publish a chart
+whose versions disagree with the tag. The only credential is the ambient
+`GITHUB_TOKEN` (`packages: write`).

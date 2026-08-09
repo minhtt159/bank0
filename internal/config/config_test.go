@@ -23,6 +23,10 @@ func TestConfigValidate(t *testing.T) {
 		{"production portal without secret is allowed", "production", "portal", "", false},
 		// empty mode defaults to "all", which serves the api surface.
 		{"production empty-mode without secret fails closed", "production", "", "", true},
+		// A typo'd mode must not fail OPEN by making servesAPI false and skipping
+		// the JWT check — it is rejected outright, secret or not.
+		{"unknown mode is rejected", "production", "portl", "s3cret", true},
+		{"unknown mode is rejected in dev too", "development", "apii", "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

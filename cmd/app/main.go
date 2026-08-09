@@ -36,11 +36,6 @@ func main() {
 	}
 	log := logger.New(cfg.Logging.Level, cfg.Logging.Encoding)
 
-	if err := cfg.Validate(); err != nil {
-		log.Error("invalid configuration", "err", err)
-		os.Exit(1)
-	}
-
 	cmd := "serve"
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
@@ -48,6 +43,12 @@ func main() {
 
 	switch cmd {
 	case "serve":
+		// Serve-path only: JWT fail-closed guards a served surface. migrate /
+		// maintenance serve nothing — the Helm Job runs env=production, DSN only.
+		if err := cfg.Validate(); err != nil {
+			log.Error("invalid configuration", "err", err)
+			os.Exit(1)
+		}
 		serve(cfg, log)
 	case "migrate":
 		runMigrate(cfg, log)
@@ -167,7 +168,11 @@ func runMaintenanceLoop(ctx context.Context, log *slog.Logger, pg *db.Postgres, 
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			expired, cleaned, sessions, verifExpired, reconcileIssues, ran, err := pg.RunMaintenance(ctx)
+			// Bound each tick like runMaintenanceOnce does: one hung query must not
+			// stall the loop forever while pinning a pool connection.
+			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			expired, cleaned, sessions, verifExpired, reconcileIssues, ran, err := pg.RunMaintenance(tickCtx)
+			cancel()
 			if err != nil {
 				log.Warn("maintenance", "err", err)
 				continue

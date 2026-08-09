@@ -98,10 +98,10 @@ func (p *Postgres) VerifyContact(ctx context.Context, tokenHash, codeHash string
 	return r, err
 }
 
-// isWrongVerificationCode matches ONLY verify_contact's wrong-code raise (28000
-// with its exact message) — not the expired/consumed 28000, which must not
-// count as an attempt.
+// isWrongVerificationCode matches ONLY verify_contact's wrong-code raise (28P01)
+// — not the expired/consumed 28000, which must not count as an attempt. Matching
+// on the SQLSTATE, not the message: the lockout must not depend on wording.
 func isWrongVerificationCode(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "28000" && pgErr.Message == "invalid verification code"
+	return errors.As(err, &pgErr) && pgErr.Code == "28P01"
 }

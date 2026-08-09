@@ -149,9 +149,9 @@ func (s *Server) adminMoneyMove(w http.ResponseWriter, r *http.Request, defaultD
 	})
 }
 
-// Deposit implements genadmin.ServerInterface. The requires_approval flag is a
-// hint only; routing above-threshold money to the approvals queue happens in the
-// console credit/withdraw flow.
+// Deposit implements genadmin.ServerInterface. The threshold is enforced in the
+// DB by admin_deposit(), which refuses an above-threshold post (409) — staging it
+// for 4-eyes is request_money_with_approval, driven from the console.
 func (s *Server) Deposit(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params genadmin.DepositParams) {
 	s.adminMoneyMove(w, r, "Deposit", func(req amountReq) (uuid.UUID, error) {
 		return s.pg.Queries.Deposit(r.Context(), sqlc.DepositParams{

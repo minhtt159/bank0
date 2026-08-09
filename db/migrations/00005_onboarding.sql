@@ -148,12 +148,14 @@ BEGIN
     IF p_idempotency_key IS NULL OR p_idempotency_key = '' THEN
         RAISE EXCEPTION 'idempotency key is required' USING ERRCODE = 'check_violation';
     END IF;
-    -- The invite code is part of the fingerprint: a replay of the same key with a
-    -- DIFFERENT code is a parameter mismatch (-> 23514), not a silent success.
+    -- The invite code AND the password are part of the fingerprint: a replay of the
+    -- same key with ANY different parameter is a mismatch (-> 23514), not a silent
+    -- success. Without the password, a client retrying with a corrected one would
+    -- get back the original account, still holding the typo'd password.
     v_hash := encode(digest(
         COALESCE(p_username::text,'') || '|' || COALESCE(p_email::text,'') || '|' ||
         COALESCE(p_phone_number,'')   || '|' || COALESCE(p_full_name,'')   || '|' ||
-        COALESCE(p_invite_code,''), 'sha256'), 'hex');
+        COALESCE(p_invite_code,'')    || '|' || COALESCE(p_password,''), 'sha256'), 'hex');
 
     -- Pre-auth: there is no authenticated principal yet. Registration claims live in
     -- a DEDICATED sentinel namespace, 0…01 — distinct from the all-zero UUID, which
@@ -316,7 +318,11 @@ BEGIN
     END IF;
 
     IF v_c.code_hash <> p_code_hash THEN
-        RAISE EXCEPTION 'invalid verification code' USING ERRCODE = '28000'; -- -> 401
+        -- 28P01 (invalid_password), NOT the 28000 above: the API counts failed
+        -- attempts and locks out after max_attempts, and it must tell a WRONG code
+        -- from an expired/consumed one. Distinguishing them by message text made
+        -- the lockout hostage to a copy edit. Both still map to 401.
+        RAISE EXCEPTION 'invalid verification code' USING ERRCODE = '28P01';
     END IF;
 
     -- success
@@ -341,7 +347,7 @@ $$ LANGUAGE plpgsql;
 
 -- record_failed_verification: persist one failed attempt against a pending
 -- challenge. Called by the API in a separate statement after verify_contact
--- raises 'invalid verification code' (28000), because that RAISE rolled back
+-- raises the wrong-code error (28P01), because that RAISE rolled back
 -- anything verify_contact itself wrote. Best-effort: unknown/consumed token is a
 -- no-op (returns NULL).
 CREATE OR REPLACE FUNCTION record_failed_verification(p_token_hash TEXT)

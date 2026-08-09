@@ -61,28 +61,23 @@ environment-specific names or files belong in this repo:
 the migrate Job. A `.dockerignore` exists, and generated code is committed, so the
 build needs no toolchain beyond Go.
 
-Two build-time notes, not image defects:
-
-1. **Multi-arch:** the Dockerfile builds whatever platform invokes it. For a
-   two-arch manifest without QEMU-slow compiles, the build stage should become
-   `FROM --platform=$BUILDPLATFORM golang:1.26` + `GOOS=linux GOARCH=$TARGETARCH`
-   on the `go build` line (Go cross-compiles for free with CGO off). ~2-line
-   change, done in W2 (§7).
-2. **Tag hygiene:** never publish `:latest` — the target cluster's admission control rejects it anyway (§4).
+One build-time note, not an image defect: **tag hygiene** — never publish
+`:latest`; the target cluster's admission control rejects it anyway (§4).
+(Multi-arch cross-compilation shipped in W2.)
 
 ## 3. Gap analysis — the chart ([`deploy/helm/bank0/`](../../deploy/helm/bank0/))
 
 What a self-hosted deploy needs vs. what `helm template` renders today. ✅ = fine
 as-is, ❌ = gap (with priority/effort in the repo's `P0–P2` / `S/M/L` scale).
+The admission-compliance rows (migrate Job `resources` / automount /
+securityContexts), `imagePullSecrets`, and chart publishing shipped in W1/W4 and
+are retired from this table — as-built is [`../04-deployment.md`](../04-deployment.md) §§3,6.
 
 | Concern | Today | Verdict |
 |---|---|---|
 | **No `:latest`** (admission) | `bank0.image` helper renders `repo:{{ tag \| default .Chart.AppVersion }}` → `ghcr.io/minhtt159/bank0:1.0.0`. Never `latest`. | ✅ |
 | **Resource requests** (admission) — Deployments | Both api and portal set `resources.requests` + `limits` from values. | ✅ |
-| **Resource requests** (admission) — **migrate hook Job** | [`migrate-job.yaml`](../../deploy/helm/bank0/templates/migrate-job.yaml) sets **no `resources`**. the resource-requests policy **rejects the hook pod → every `helm install`/`upgrade` on the target cluster fails before anything else runs.** | ❌ **P0, S** |
 | **SA token automount** (admission) — Deployments | Both pods set `automountServiceAccountToken: false`. | ✅ |
-| **SA token automount** (admission) — **migrate hook Job** | Not set on the Job pod → the SA-token-automount policy rejects it (same blast radius as above). While in there: the Job pod also lacks the `podSecurityContext`/`securityContext` both Deployments apply — same image, no reason to run the hook softer. | ❌ **P0, S** |
-| **Image pull secrets** | No `imagePullSecrets` plumbing anywhere (helper, deployments, Job). Blocks a **private** GHCR package entirely; harmless if the package is public (§8 Q2). | ❌ **P1, S** |
 | **Probes** | Liveness → `/health` (DB-blind), readiness → `/readyz` (DB-aware, 1s deadline), both Deployments, with the rationale in comments. Exactly right. | ✅ |
 | **Secrets** | `existingSecret` pattern for both DSN and JWT; chart-created Secret only as a dev convenience. Correct — how the operator materializes the secrets (kubectl / sealed-secrets / SOPS) is their business (§8 Q5); the chart must **not** grow ExternalSecrets/CSI support speculatively. | ✅ |
 | **Migrations** | `pre-install,pre-upgrade` hook Job, weight −5, `before-hook-creation,hook-succeeded` delete policy, `backoffLimit: 3` — DB-before-app preserved by Helm ordering, replacing the CI `migrate` job of the deferred path. | ✅ (modulo the two admission fixes above) |
@@ -92,7 +87,6 @@ as-is, ❌ = gap (with priority/effort in the repo's `P0–P2` / `S/M/L` scale).
 | **`/metrics` exposure** | docs/04 says "restrict at the network layer" — implicitly Cloudflare's WAF. Attached to the external Gateway through the tunnel, `/metrics` on `api.*` is on the public internet. Cheap fix: an HTTPRoute rule matching `/metrics` (and nothing else) that never leaves the Gateway on external routes; or accept it (it leaks RED metrics, not data). | ❌ **P2, S** — decide (§8 Q7) |
 | **Sizing defaults** | api HPA 3–10 + portal ×2 is prod-ish; fine as chart defaults. The operator overrides at install time (`-f` a local values file) — do **not** commit an environment values file unless the operator wants it in-repo. | ✅ |
 | **HPA** | CPU-based `autoscaling/v2`, needs metrics-server — present in any real cluster; `autoscaling.enabled=false` falls back to `replicaCount`. | ✅ |
-| **Chart/app versioning** | `Chart.yaml` is `version: 1.0.0` / `appVersion: "1.0.0"` (bumped for the release) but nothing publishes it. Fine while the chart is copy-installed from the repo; publishing (§6/W4) needs a bump-on-release discipline. | ❌ **P1, S** (publish half) |
 | **PWA** | Not in the chart at all — it lived on the (deferred) Worker. | ❌ **P1, M** — §5 |
 
 ## 4. Image strategy
@@ -169,16 +163,18 @@ publisher. What each of its jobs turned into:
 
 | Wave | What | Checkpoint (must pass before the next wave) |
 |---|---|---|
-| **W1** | **Chart admission-compliance + pull secrets** (the two ❌ P0-S + P1-S rows of §3): migrate hook Job gets `resources`, `automountServiceAccountToken: false`, and both securityContexts; add `image.pullSecrets` plumbed into all three pod specs. | `helm template` diff reviewed; rendered manifests pass the three admission policies (policy-engine dry-run locally, or a throwaway install on the cluster). Default rendering otherwise byte-identical. |
-| **W2** | **Image publish**: rewrite `deploy.yml` → GHCR multi-arch build/push (`sha-` on main, semver on tags), including the 2-line `$BUILDPLATFORM` Dockerfile tweak (§2). GCP/Cloudflare jobs and secrets deleted (the retired path is recorded in §0 — `docs/08` itself is gone). | `docker run ghcr.io/minhtt159/bank0:sha-… serve` answers `/health` on both arches; no `latest` tag exists on the package. |
 | **W3** | **Per-surface Gateway attachment**: `api.gateway`/`portal.gateway` (or per-surface `parentRef`) values — name/namespace/sectionName each — defaulting to the current single-`gateway:` block so existing installs render unchanged; document the shared-gateway mode (TLS/redirect off, listener names from the platform Gateways). | Golden `helm template` unchanged with default values; with the operator's values the api route parents the external Gateway and the portal route parents the internal one. |
-| **W4** | **Chart publish + version discipline**: tag-triggered `helm package`/`push` to GHCR OCI; `Chart.yaml` version/appVersion bump becomes part of tagging a release. | `helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version …` works from a machine that has never seen the repo. |
 | **W5** | **PWA in-cluster** (§5, decided: option A on the **internal Gateway**): `deploy/Dockerfile.web`, web Deployment/Service, PWA-host HTTPRoute (internal Gateway) with the `/api` `URLRewrite` rule; `deploy-pwa` job becomes the web-image build. `web/app/` source untouched; `worker/` untouched until fraudbank's own Worker deploy exists. | Login + a transfer completed through the PWA host (LAN) with the browser only ever talking same-origin `/api/*`; Worker still deployable as fallback until this soaks. |
 | **W6** | **First real install** (operator-driven, no code): create the `bank0-db` + JWT secrets, point the tunnel hostnames at the external Gateway and internal DNS at the internal one, `helm install` with a local values file. | `/readyz` green on both surfaces, console login, seeded transfer, `reconcile()` clean, Grafana dashboard populated. Then: update docs/04 §§0/3 + docs/07 to as-built and **retire this spec** (repo convention: no archive). |
 | **W7** *(optional)* | Cleanups per §8 answers: `/metrics` external exposure, `worker/` fate, GitOps. | — |
 
-W1–W4 are strictly ordered but each ships alone; W5 can proceed in parallel after
-W2 (it needs the registry, not the gateway work).
+**W1, W2 and W4 shipped** in [PR #89](https://github.com/minhtt159/bank0/pull/89):
+the migrate hook Job is admission-compliant (plus `image.pullSecrets` plumbing),
+and `publish.yml` pushes the multi-arch image on every `main` push and the image +
+chart on a `v*` tag. As-built: [`docs/04-deployment.md`](../04-deployment.md) §6.
+
+W3 remains blocked on Q8 (listener names); W5 needs only the registry, so it can
+start now.
 
 ## 8. Open questions — decisions needed from the operator
 

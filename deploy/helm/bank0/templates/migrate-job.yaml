@@ -21,13 +21,27 @@ spec:
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: Never
+      # Same hardening as the two Deployments — same image, no reason to run the
+      # hook softer, and admission control rejects the pod (failing every
+      # install/upgrade before anything else runs) without these.
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.image.pullSecrets }}
+      {{- include "bank0.imagePullSecrets" . | nindent 6 }}
+      {{- end }}
       containers:
         - name: migrate
           image: {{ include "bank0.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["migrate", "up"]
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           env:
             - { name: APP_LOGGING_ENCODING, value: {{ .Values.logging.encoding | quote }} }
             - { name: APP_LOGGING_LEVEL, value: {{ .Values.logging.level | quote }} }
+            - { name: APP_APP_ENV, value: "production" }
             {{- include "bank0.dsnEnv" . | nindent 12 }}
 {{- end }}

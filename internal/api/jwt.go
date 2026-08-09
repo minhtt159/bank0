@@ -93,7 +93,11 @@ func (s *Server) issueMFAToken(userID uuid.UUID, role, username string) (string,
 	return tok.SignedString(s.jwtSecret)
 }
 
-func (s *Server) parseMFAToken(raw string) (*clientClaims, error) {
+// parseWithAudience validates a token the one way this server ever validates one:
+// HS256 with our secret, our issuer, an expiry, and the expected audience. The
+// audience is the ONLY difference between a client access token and a pending-login
+// MFA token, and it is what stops one being replayed as the other.
+func (s *Server) parseWithAudience(raw, aud string) (*clientClaims, error) {
 	claims := &clientClaims{}
 	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -102,7 +106,7 @@ func (s *Server) parseMFAToken(raw string) (*clientClaims, error) {
 		return s.jwtSecret, nil
 	},
 		jwt.WithIssuer(s.cfg.Auth.JWTIssuer),
-		jwt.WithAudience(mfaTokenAudience),
+		jwt.WithAudience(aud),
 		jwt.WithExpirationRequired(),
 		jwt.WithValidMethods([]string{"HS256"}),
 	)
@@ -110,6 +114,10 @@ func (s *Server) parseMFAToken(raw string) (*clientClaims, error) {
 		return nil, err
 	}
 	return claims, nil
+}
+
+func (s *Server) parseMFAToken(raw string) (*clientClaims, error) {
+	return s.parseWithAudience(raw, mfaTokenAudience)
 }
 
 // clientClaimsFrom returns the full parsed claims for a client-surface request
@@ -120,22 +128,7 @@ func clientClaimsFrom(ctx context.Context) (*clientClaims, bool) {
 }
 
 func (s *Server) parseJWT(raw string) (*clientClaims, error) {
-	claims := &clientClaims{}
-	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.jwtSecret, nil
-	},
-		jwt.WithIssuer(s.cfg.Auth.JWTIssuer),
-		jwt.WithAudience(s.cfg.Auth.JWTAudience),
-		jwt.WithExpirationRequired(),
-		jwt.WithValidMethods([]string{"HS256"}),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return claims, nil
+	return s.parseWithAudience(raw, s.cfg.Auth.JWTAudience)
 }
 
 // requireJWT guards the client API surface. Missing/invalid bearer => 401.

@@ -68,6 +68,19 @@ func TestSecurityAdminMutationsRequireRole(t *testing.T) {
 	if sc := sessPostH(t, admin, depositURL, `{"amount_minor":100}`, idem()); sc != 200 {
 		t.Errorf("admin deposit = %d, want 200", sc)
 	}
+
+	// REVERSAL-IS-ADMIN-ONLY: a reversal moves money back with no second pair of
+	// eyes, so it is gated canApprove (admin) like the console's consoleReverse —
+	// an operator with a valid session must not reach it through the JSON surface.
+	_, opName := mkUser(t, pg, sqlc.UserRoleOperator)
+	operator := login(t, ts, opName, "pw")
+	reverseURL := ts.URL + "/transfers/" + tid + "/reverse"
+	if sc := sessPostH(t, operator, reverseURL, `{"reason":"nope"}`, idem()); sc != 403 {
+		t.Errorf("operator reverse = %d, want 403", sc)
+	}
+	if sc := sessPostH(t, admin, reverseURL, `{"reason":"ok"}`, idem()); sc != 200 {
+		t.Errorf("admin reverse = %d, want 200", sc)
+	}
 }
 
 // JWT must be unforgeable: a tampered signature, a token signed with the wrong

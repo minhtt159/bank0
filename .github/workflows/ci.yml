@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # publish.yml calls this before it ships anything, so a tag can never publish
+  # code that hasn't been through the same gates a PR goes through.
+  workflow_call:
 
 # Pinned generator versions — keep in lockstep with CLAUDE.md. If these drift,
 # the generate-drift gate below will fail with a churned generated file.
@@ -91,8 +94,7 @@ jobs:
             exit 1
           fi
 
-  # Worker /api proxy-contract test (docs/specs/spec-e2e-harness.md, Tier B "cheaper
-  # intermediate"). Cheap and DB-free — runs the real worker in workerd via
+  # Worker /api proxy-contract test (Tier B, the cheaper intermediate). DB-free — runs the real worker in workerd via
   # @cloudflare/vitest-pool-workers, so it runs per-PR.
   worker:
     runs-on: ubuntu-latest
@@ -109,6 +111,15 @@ jobs:
         working-directory: worker
       - name: Proxy-contract test
         run: npm test
+        working-directory: worker
+      # Typecheck + wrangler dry-run: a broken wrangler config or a type error would
+      # otherwise surface at deploy time. The dry-run resolves assets.directory, so
+      # it needs the PWA output to exist — an empty dir is enough here; the webapp
+      # job is what actually proves the PWA builds.
+      - name: Typecheck + wrangler dry-run
+        run: |
+          mkdir -p ../web/app/dist
+          npm run check
         working-directory: worker
 
   # Customer-PWA unit tests (pure logic: IBAN validation, etc.). Cheap and DB-free,
@@ -128,6 +139,12 @@ jobs:
         working-directory: web/app
       - name: Unit tests
         run: npm test
+        working-directory: web/app
+      # The dev server (e2e-browser) transpiles without typechecking, so a TS error
+      # or a prod-only build break (PWA plugin, chunking) merged green and first
+      # failed at deploy. `npm run build` is tsc --noEmit + vite build.
+      - name: Production build
+        run: npm run build
         working-directory: web/app
 
   # Tier A end-to-end: the REAL two-binary split topology (portal + api processes)
@@ -202,35 +219,35 @@ jobs:
 
   # Every migration must be reversible (CLAUDE.md): up -> reset(down all) -> up on
   # a throwaway PG18.
-  migrations:
+
+  # The chart is the delivery artifact and its templates change often (admission
+  # compliance, env wiring). Without this it was first exercised by the operator's
+  # own `helm upgrade` — `helm package` at tag time never renders templates.
+  chart:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: admin
-          POSTGRES_PASSWORD: admin
-          POSTGRES_DB: bank0_mig
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U admin -d bank0_mig"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DSN: postgres://admin:admin@localhost:5432/bank0_mig?sslmode=disable
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install goose
-        run: go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
-      - name: up -> reset -> up
+      - uses: azure/setup-helm@v5
+      - name: Lint
+        run: helm lint deploy/helm/bank0 --set database.existingSecret=x --set auth.existingSecret=y
+      - name: Render (default values)
+        run: helm template deploy/helm/bank0 --set database.existingSecret=x --set auth.existingSecret=y > /tmp/render.yaml
+      - name: Every pod spec is admission-ready
+        # The migrate hook Job shipped without resources/automount/securityContext
+        # once; the cluster's policies reject that, so every install would fail.
         run: |
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          goose -dir db/migrations postgres "$DSN" up
-          goose -dir db/migrations postgres "$DSN" reset
-          goose -dir db/migrations postgres "$DSN" up
+          python3 - <<'EOF'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/render.yaml')) if d]
+          pods = [(d['kind'], d['metadata']['name'], d['spec']['template']['spec'])
+                  for d in docs if d['kind'] in ('Deployment', 'Job')]
+          assert pods, 'no pod-bearing manifests rendered'
+          for kind, name, spec in pods:
+              assert spec.get('automountServiceAccountToken') is False, f'{kind}/{name}: SA token automount not disabled'
+              assert spec.get('securityContext'), f'{kind}/{name}: no pod securityContext'
+              for c in spec['containers']:
+                  assert c.get('resources', {}).get('requests'), f'{kind}/{name}/{c["name"]}: no resource requests'
+                  assert c.get('securityContext'), f'{kind}/{name}/{c["name"]}: no container securityContext'
+                  assert ':latest' not in c['image'], f'{kind}/{name}/{c["name"]}: unpinned image tag'
+          print(f'{len(pods)} pod specs OK')
+          EOF

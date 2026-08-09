@@ -357,6 +357,15 @@ BEGIN
         RAISE EXCEPTION 'cannot post transfer in state %', v_t.status USING ERRCODE = 'check_violation';
     END IF;
 
+    -- Lock both accounts in id order, like request_transfer. Without this the only
+    -- locks taken are the balance UPDATEs the ledger trigger fires, in ledger-row
+    -- order (debit then credit) — the opposite of reverse_transfer's order, so a
+    -- concurrent post and reversal over the same pair could deadlock (40P01, which
+    -- maps to a 500 nobody can act on).
+    PERFORM 1 FROM accounts
+     WHERE id IN (v_t.debit_account_id, v_t.credit_account_id)
+     ORDER BY id FOR UPDATE;
+
     INSERT INTO ledger_entries (transfer_id, account_id, direction, amount_minor, currency, balance_after)
     VALUES (p_transfer_id, v_t.debit_account_id,  'debit',  v_t.amount_minor, v_t.currency, 0),
            (p_transfer_id, v_t.credit_account_id, 'credit', v_t.amount_minor, v_t.currency, 0);
@@ -641,8 +650,17 @@ BEGIN
     -- CREDIT account) and confirm it still holds enough to be reversed. Reversal
     -- intentionally bypasses the active-account check applied on the forward path
     -- (see the header note) — only the funds check is enforced here.
-    SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id FOR UPDATE;
-    IF v_cp.kind <> 'system' AND v_cp.balance_minor < v_orig.amount_minor THEN
+    -- AVAILABLE, not raw balance: funds under an active hold are already promised
+    -- to a pending/held transfer. Clawing them leaves that transfer to fail on the
+    -- balance_minor >= 0 CHECK when it posts — an unmapped raw constraint trip on a
+    -- payment the customer already authorized.
+    -- Both accounts, in id order (see post_transfer): a reversal writes both sides,
+    -- so locking only the credit side left the pair lockable in either order.
+    PERFORM 1 FROM accounts
+     WHERE id IN (v_orig.debit_account_id, v_orig.credit_account_id)
+     ORDER BY id FOR UPDATE;
+    SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id;
+    IF v_cp.kind <> 'system' AND (v_cp.balance_minor - v_cp.held_minor) < v_orig.amount_minor THEN
         RAISE EXCEPTION 'cannot reverse transfer %: recipient has insufficient funds to claw back', p_transfer_id
             USING ERRCODE = 'check_violation';
     END IF;
@@ -686,6 +704,30 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- admin_deposit / admin_withdraw: the ADMIN-facing money moves. Same effect as
+-- deposit()/withdraw(), but they enforce the maker-checker threshold in the DB
+-- (rule 1) so NO admin surface can post above-threshold money without 4-eyes —
+-- the console routed correctly but the admin JSON handlers posted any amount, and
+-- the console's read-then-post was a TOCTOU besides. Above-threshold callers must
+-- use request_money_with_approval (00009); approve_request releases through
+-- post_transfer, never through here.
+--
+-- deposit()/withdraw() stay unpoliced primitives on purpose: the seeds fund
+-- accounts with amounts far above any sane threshold.
+CREATE OR REPLACE FUNCTION admin_deposit(
+    p_idempotency_key TEXT,
+    p_account_id      UUID,
+    p_amount_minor    BIGINT,
+    p_description     TEXT DEFAULT 'Deposit'
+) RETURNS UUID AS $$
+BEGIN
+    IF (SELECT required FROM requires_approval(p_amount_minor)) THEN
+        RAISE EXCEPTION 'cannot post % without approval: above the maker-checker threshold', p_amount_minor;
+    END IF;
+    RETURN deposit(p_idempotency_key, p_account_id, p_amount_minor, p_description);
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION withdraw(
     p_idempotency_key TEXT,
     p_account_id      UUID,
@@ -699,6 +741,21 @@ BEGIN
     SELECT t.transfer_id INTO v_id
     FROM transfer(p_idempotency_key, p_account_id, v_ext, p_amount_minor, p_description, 'withdrawal') t;
     RETURN v_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- See admin_deposit above — same threshold guard, money-out direction.
+CREATE OR REPLACE FUNCTION admin_withdraw(
+    p_idempotency_key TEXT,
+    p_account_id      UUID,
+    p_amount_minor    BIGINT,
+    p_description     TEXT DEFAULT 'Withdrawal'
+) RETURNS UUID AS $$
+BEGIN
+    IF (SELECT required FROM requires_approval(p_amount_minor)) THEN
+        RAISE EXCEPTION 'cannot post % without approval: above the maker-checker threshold', p_amount_minor;
+    END IF;
+    RETURN withdraw(p_idempotency_key, p_account_id, p_amount_minor, p_description);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -755,6 +812,16 @@ BEGIN
     WHERE t.id = p_transfer_id;
     IF v_owner IS NULL OR v_owner <> p_caller_subject THEN
         RAISE EXCEPTION 'transfer % not found', p_transfer_id;
+    END IF;
+    -- 4-eyes: a maker-checker withdrawal (request_money_with_approval, 00009)
+    -- DEBITS the customer's own account, so ownership alone would let the customer
+    -- post it before any approver acts — defeating the approval entirely. Same for
+    -- a screening_hold. Only approve_request may release these.
+    IF EXISTS (SELECT 1 FROM admin_actions
+                WHERE target_id = p_transfer_id
+                  AND action IN ('approval_request', 'screening_hold')
+                  AND approved_by IS NULL) THEN
+        RAISE EXCEPTION 'cannot post a transfer awaiting approval';   -- P0001 -> 409
     END IF;
     RETURN post_transfer(p_transfer_id);
 END;
@@ -814,6 +881,8 @@ DROP FUNCTION IF EXISTS client_cancel_transfer(UUID, UUID, TEXT);
 DROP FUNCTION IF EXISTS client_post_transfer(UUID, UUID);
 DROP FUNCTION IF EXISTS client_transfer(UUID, TEXT, UUID, UUID, BIGINT, TEXT, VARCHAR);
 DROP FUNCTION IF EXISTS assert_caller_owns(UUID, UUID);
+DROP FUNCTION IF EXISTS admin_withdraw(TEXT, UUID, BIGINT, TEXT);
+DROP FUNCTION IF EXISTS admin_deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS withdraw(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS deposit(TEXT, UUID, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS reverse_transfer(UUID, TEXT, TEXT);

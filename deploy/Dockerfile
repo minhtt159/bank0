@@ -1,10 +1,20 @@
 # ---- build ----
-FROM golang:1.26 AS build
+# --platform=$BUILDPLATFORM keeps the compiler on the runner's native arch and
+# cross-compiles via GOARCH — CGO is off, so Go does this for free and a two-arch
+# manifest costs a second `go build`, not a QEMU-emulated toolchain.
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/bank0 ./cmd/app
+ARG TARGETARCH
+# Cache mounts survive across builds on one builder (local dev, a persistent CI
+# builder); on ephemeral runners the registry layer cache does the same job.
+# -trimpath strips the build host's paths; -s -w drops the symbol/DWARF tables.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /out/bank0 ./cmd/app
 
 # ---- run ----
 # :nonroot runs as uid 65532, so the image is non-root by default — before the

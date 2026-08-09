@@ -152,3 +152,44 @@ func ledgerRowCount(t *testing.T, pg *Postgres) int64 {
 	}
 	return n
 }
+
+// REVERSE-CLAWBACK-VS-HOLD: the funds check must read AVAILABLE balance, not raw
+// balance_minor. Money under an active hold is already promised to a pending
+// transfer; clawing it back leaves that transfer to fail on the balance_minor >= 0
+// CHECK when it posts — a raw constraint trip on a payment the customer already
+// authorized. The reversal must be refused up front instead.
+func TestReverseClawbackRejectedWhenRecipientFundsAreHeld(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	a := mkAccount(t, pg, mkCustomer(t, pg))
+	b := mkAccount(t, pg, mkCustomer(t, pg))
+	c := mkAccount(t, pg, mkCustomer(t, pg))
+	fund(t, pg, a, 10_000)
+
+	res, err := testTransfer(ctx, pg, uuid.NewString(), a, b, 4_000, "to claw back", sqlc.TransferKindTransfer)
+	if err != nil {
+		t.Fatalf("transfer a->b: %v", err)
+	}
+
+	// b authorizes an onward payment that is still PENDING: the funds are held, so
+	// b's raw balance is untouched (4000) but only 200 is actually available.
+	pend, err := testRequestTransfer(ctx, pg, uuid.NewString(), b, c, 3_800, "authorized, not yet posted", sqlc.TransferKindTransfer)
+	if err != nil {
+		t.Fatalf("request_transfer b->c: %v", err)
+	}
+	if lb, avail := balance(t, pg, b); lb != 4_000 || avail != 200 {
+		t.Fatalf("recipient balance/available = %d/%d, want 4000/200", lb, avail)
+	}
+
+	if _, err := reverseTransfer(t, pg, res.TransferID); err == nil {
+		t.Fatal("reversal clawed back funds already held for a pending transfer")
+	} else if got := sqlstate(err); got != "23514" {
+		t.Errorf("SQLSTATE = %q, want 23514 (check_violation)", got)
+	}
+
+	// The authorized payment still posts cleanly — the whole point of refusing.
+	if _, err := pg.Pool.Exec(ctx, `SELECT post_transfer($1)`, pend.TransferID); err != nil {
+		t.Fatalf("the held transfer must still post: %v", err)
+	}
+	reconcileClean(t, pg)
+}

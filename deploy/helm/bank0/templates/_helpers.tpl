@@ -2,6 +2,15 @@
 {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
 {{- end -}}
 
+{{/* Pull secrets for a private GHCR package. Guard the call with an if — an
+     empty list must render nothing at all. Call with root context. */}}
+{{- define "bank0.imagePullSecrets" -}}
+imagePullSecrets:
+{{- range .Values.image.pullSecrets }}
+  - name: {{ . }}
+{{- end }}
+{{- end -}}
+
 {{- define "bank0.dsnSecretName" -}}
 {{- if .Values.database.existingSecret }}{{ .Values.database.existingSecret }}{{- else }}{{ .Release.Name }}-db{{- end -}}
 {{- end -}}
