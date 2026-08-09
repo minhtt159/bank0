@@ -196,6 +196,7 @@ func (s *Server) consoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	su, err := s.pg.CreateStaffSession(r.Context(), username, password, hashToken(token),
 		s.idleSeconds(), r.UserAgent(), s.clientIP(r))
 	if errors.Is(err, db.ErrLoginDenied) {
+		s.pg.NoteFailedLogin(r.Context(), username)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = template.LoginPage("Invalid credentials, or this account can't access the console.").Render(r.Context(), w)

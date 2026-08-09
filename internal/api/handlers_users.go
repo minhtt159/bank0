@@ -163,6 +163,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
+		s.pg.NoteFailedLogin(r.Context(), req.Username)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 		return
 	}

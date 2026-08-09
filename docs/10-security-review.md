@@ -57,21 +57,44 @@ Sources: [NIST SP 800-63B Rev 4](https://pages.nist.gov/800-63-4/sp800-63b.html)
 [OWASP ASVS 5.0 V6](https://github.com/OWASP/ASVS/blob/master/5.0/en/0x15-V6-Authentication.md) ·
 [NCSC on password expiry](https://www.ncsc.gov.uk/blog-post/problems-forcing-regular-password-expiry)
 
+## Login throttling: two layers
+
+| Layer | Keyed on | Where |
+|---|---|---|
+| Sliding window | client IP | Go middleware, all public `/auth/*` |
+| **Consecutive-failure lockout** | **account** | `note_failed_login()` + the two login functions |
+
+The per-IP window alone does not satisfy NIST SP 800-63B Rev 4 §3.2.2, which
+requires limiting consecutive failures *per account* — distributed credential
+stuffing spreads across IPs and never trips a per-IP counter.
+
+**10 consecutive failures locks the account for 15 minutes**, then the counter
+resets, so each further lock costs another full run. A successful login clears both.
+The window expires on its own; there is no admin unlock, because a time-boxed lock
+cannot strand the only administrator.
+
+A locked account answers **exactly** like a wrong password (28P01 / no rows), so the
+lock is not an enumeration oracle. An unknown username is a no-op — nothing to grow,
+nothing to probe.
+
+`note_failed_login` is called by Go *after* a denial, never inside the login
+functions: `create_staff_session` RAISEs to deny, and a PL/pgSQL RAISE rolls back
+that function's own writes, so a counter incremented inside it would vanish with the
+error. Same pattern as `revoke_refresh_family`. It also runs on
+`context.WithoutCancel` — a client that hangs up mid-login must still be counted, or
+the lockout is trivially defeated.
+
 ### Open, in priority order
 
-1. **Per-account failed-attempt throttling.** NIST §3.2.2 requires limiting
-   consecutive failures *per account*; the current limiter is per-IP, which
-   distributed credential stuffing walks straight past. (MFA verify already has a
-   per-account lockout — logins do not.)
-2. **Breached-password check** on set/change (NIST SHALL, ASVS 6.2.12). The
+1. **Breached-password check** on set/change (NIST SHALL, ASVS 6.2.12). The
    Pwned Passwords range API sends only the first 5 hex chars of the SHA-1, so the
    password never leaves the cluster; it belongs in the Go handler, not in
    `change_password` — PL/pgSQL has no egress and a DB transaction must not block on
    a third party. Needs an egress allowlist, and should fail open.
-3. **TOTP on portal login.** The customer surface already has TOTP; the portal is
+2. **TOTP on portal login.** The customer surface already has TOTP; the portal is
    single-factor today, which is also what forces the higher minimum length under
    Rev 4.
-4. **bcrypt cost 10 → 12.** OWASP's floor is exactly 10; rehash on next login.
+3. **bcrypt cost 10 → 12.** OWASP's floor is exactly 10; rehash on next login.
 
 ## Known limitations
 

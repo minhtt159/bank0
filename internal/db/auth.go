@@ -208,6 +208,18 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 	return err
 }
 
+// NoteFailedLogin records one consecutive failure and locks the account at the
+// threshold. Called AFTER a denial: create_staff_session RAISEs, and a RAISE would
+// roll back a counter written inside it. Unknown username is a no-op.
+func (p *Postgres) NoteFailedLogin(ctx context.Context, username string) {
+	// WithoutCancel + logged: a client that hangs up on a failed login must still
+	// be counted, or the lockout is trivially defeated.
+	if _, err := p.Pool.Exec(context.WithoutCancel(ctx),
+		`SELECT note_failed_login($1::citext)`, username); err != nil {
+		slog.Error("note failed login", "err", err)
+	}
+}
+
 // MustChangePassword reports whether this user is barred from doing anything else
 // until they rotate their password — set on the seeded bootstrap admin (00018) and
 // cleared by change_password() itself.

@@ -7,7 +7,11 @@
 -- First migration after the v1.0.0 freeze.
 
 -- +goose Up
-ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN must_change_password  BOOLEAN  NOT NULL DEFAULT FALSE;
+-- Per-account login throttling (NIST SP 800-63B Rev 4 §3.2.2). The per-IP limiter
+-- is the outer layer; distributed stuffing walks past it. docs/10.
+ALTER TABLE users ADD COLUMN failed_login_attempts SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN login_locked_until    TIMESTAMPTZ;
 
 -- Only if it STILL holds the seeded password — crypt() re-derives using the stored
 -- hash as salt. An operator who already rotated by hand is not nagged.
@@ -195,7 +199,172 @@ $$ LANGUAGE plpgsql;
 
 -- +goose StatementEnd
 
+-- +goose StatementBegin
+
+-- note_failed_login: one consecutive-failure step for an EXISTING user. Called by
+-- Go AFTER a denial, never from inside the login functions — create_staff_session
+-- RAISEs on denial and a RAISE rolls back its own writes, so the counter would
+-- vanish with it (same pattern as revoke_refresh_family).
+--
+-- Unknown username is a no-op: no rows to grow, and nothing an attacker can probe.
+-- At the threshold the account locks for a fixed window and the counter resets, so
+-- each further lock costs another full run of attempts.
+CREATE OR REPLACE FUNCTION note_failed_login(p_username CITEXT) RETURNS VOID AS $$
+DECLARE
+    c_max_attempts CONSTANT SMALLINT  := 10;
+    c_lock_window  CONSTANT INTERVAL  := INTERVAL '15 minutes';
+BEGIN
+    UPDATE users
+       SET failed_login_attempts = failed_login_attempts + 1
+     WHERE username = p_username;
+
+    UPDATE users
+       SET login_locked_until    = now() + c_lock_window,
+           failed_login_attempts = 0
+     WHERE username = p_username
+       AND failed_login_attempts >= c_max_attempts;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+
+-- check_user_credentials (00003) + the lockout. plpgsql now, because success has to
+-- clear the counter. A locked account returns no rows — same answer as a wrong
+-- password, so lockout is not an enumeration oracle.
+CREATE OR REPLACE FUNCTION check_user_credentials(
+    p_username CITEXT,
+    p_password TEXT
+) RETURNS TABLE(user_id UUID, role user_role, username CITEXT) AS $$
+DECLARE v_id UUID; v_role user_role; v_uname CITEXT;
+BEGIN
+    SELECT u.id, u.role, u.username INTO v_id, v_role, v_uname
+    FROM users u
+    WHERE u.username = p_username
+      AND u.status = 'active'
+      AND (u.login_locked_until IS NULL OR u.login_locked_until <= now())
+      AND u.password_hash = crypt(p_password, u.password_hash);
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    UPDATE users
+       SET failed_login_attempts = 0, login_locked_until = NULL
+     WHERE id = v_id AND (failed_login_attempts <> 0 OR login_locked_until IS NOT NULL);
+
+    RETURN QUERY SELECT v_id, v_role, v_uname;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+
+-- create_staff_session (00004) + the lockout. The lock is checked with the password
+-- so a locked account cannot be told apart from a wrong one (both 28P01).
+CREATE OR REPLACE FUNCTION create_staff_session(
+    p_username     CITEXT,
+    p_password     TEXT,
+    p_token_hash   TEXT,
+    p_idle_seconds INT,
+    p_user_agent   TEXT DEFAULT NULL,
+    p_ip           TEXT DEFAULT NULL
+) RETURNS TABLE(user_id UUID, username CITEXT, role user_role) AS $$
+DECLARE
+    v_id     UUID;
+    v_role   user_role;
+    v_status user_status;
+BEGIN
+    SELECT u.id, u.role, u.status
+      INTO v_id, v_role, v_status
+      FROM users u
+     WHERE u.username = p_username
+       AND (u.login_locked_until IS NULL OR u.login_locked_until <= now())
+       AND u.password_hash = crypt(p_password, u.password_hash);
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invalid credentials' USING ERRCODE = '28P01';
+    END IF;
+    IF v_status <> 'active' THEN
+        RAISE EXCEPTION 'account not active' USING ERRCODE = '28000';
+    END IF;
+    IF v_role NOT IN ('operator', 'admin', 'auditor') THEN
+        RAISE EXCEPTION 'not authorized for console' USING ERRCODE = '42501';
+    END IF;
+
+    UPDATE users
+       SET failed_login_attempts = 0, login_locked_until = NULL
+     WHERE id = v_id AND (failed_login_attempts <> 0 OR login_locked_until IS NOT NULL);
+
+    INSERT INTO sessions (id, user_id, expires_at, user_agent, ip)
+    VALUES (p_token_hash, v_id, now() + make_interval(secs => p_idle_seconds), p_user_agent, p_ip);
+
+    RETURN QUERY SELECT v_id, p_username, v_role;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
 -- +goose Down
+-- +goose StatementBegin
+
+CREATE OR REPLACE FUNCTION check_user_credentials(
+    p_username CITEXT,
+    p_password TEXT
+) RETURNS TABLE(user_id UUID, role user_role, username CITEXT) AS $$
+    SELECT u.id, u.role, u.username
+    FROM users u
+    WHERE u.username = p_username
+      AND u.status = 'active'
+      AND u.password_hash = crypt(p_password, u.password_hash);
+$$ LANGUAGE sql;
+
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+
+CREATE OR REPLACE FUNCTION create_staff_session(
+    p_username     CITEXT,
+    p_password     TEXT,
+    p_token_hash   TEXT,
+    p_idle_seconds INT,
+    p_user_agent   TEXT DEFAULT NULL,
+    p_ip           TEXT DEFAULT NULL
+) RETURNS TABLE(user_id UUID, username CITEXT, role user_role) AS $$
+DECLARE
+    v_id     UUID;
+    v_role   user_role;
+    v_status user_status;
+BEGIN
+    SELECT u.id, u.role, u.status
+      INTO v_id, v_role, v_status
+      FROM users u
+     WHERE u.username = p_username
+       AND u.password_hash = crypt(p_password, u.password_hash);
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invalid credentials' USING ERRCODE = '28P01';
+    END IF;
+    IF v_status <> 'active' THEN
+        RAISE EXCEPTION 'account not active' USING ERRCODE = '28000';
+    END IF;
+    IF v_role NOT IN ('operator', 'admin', 'auditor') THEN
+        RAISE EXCEPTION 'not authorized for console' USING ERRCODE = '42501';
+    END IF;
+
+    INSERT INTO sessions (id, user_id, expires_at, user_agent, ip)
+    VALUES (p_token_hash, v_id, now() + make_interval(secs => p_idle_seconds), p_user_agent, p_ip);
+
+    RETURN QUERY SELECT v_id, p_username, v_role;
+END;
+$$ LANGUAGE plpgsql;
+
+-- +goose StatementEnd
+
+DROP FUNCTION IF EXISTS note_failed_login(CITEXT);
+
 -- +goose StatementBegin
 
 CREATE OR REPLACE FUNCTION register_user(
@@ -356,4 +525,6 @@ $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
 DROP FUNCTION IF EXISTS assert_password_policy(TEXT);
+ALTER TABLE users DROP COLUMN login_locked_until;
+ALTER TABLE users DROP COLUMN failed_login_attempts;
 ALTER TABLE users DROP COLUMN must_change_password;

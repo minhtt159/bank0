@@ -584,3 +584,62 @@ func credsValid(t *testing.T, pg *Postgres, username, password string) bool {
 	}
 	return true
 }
+
+// LOGIN-THROTTLE-PER-ACCOUNT (NIST SP 800-63B Rev 4 §3.2.2): the per-IP limiter
+// does not stop distributed stuffing, so failures are counted per account and the
+// account locks. A locked account answers exactly like a wrong password, so the
+// lockout is not an enumeration oracle.
+func TestPerAccountLoginLockout(t *testing.T) {
+	pg := newTestPG(t)
+	ctx := context.Background()
+	name, id := mkStaff(t, pg, "admin", "correct-horse-battery")
+
+	// Under the threshold, the right password still works.
+	for i := 0; i < 9; i++ {
+		pg.NoteFailedLogin(ctx, name)
+	}
+	if _, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery",
+		"tok"+uniqHex(16), 60, "ua", "ip"); err != nil {
+		t.Fatalf("9 failures must not lock: %v", err)
+	}
+	// ...and success cleared the counter.
+	var n int16
+	if err := pg.Pool.QueryRow(ctx, `SELECT failed_login_attempts FROM users WHERE id = $1`, id).Scan(&n); err != nil {
+		t.Fatalf("read counter: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("successful login must reset the counter; got %d", n)
+	}
+
+	// Ten consecutive failures lock it, and the CORRECT password is then refused.
+	for i := 0; i < 10; i++ {
+		pg.NoteFailedLogin(ctx, name)
+	}
+	_, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery", "tok"+uniqHex(16), 60, "ua", "ip")
+	if err == nil {
+		t.Fatal("account must be locked after 10 consecutive failures")
+	}
+	if !errors.Is(err, ErrLoginDenied) {
+		t.Errorf("locked account must look exactly like bad credentials; got %v", err)
+	}
+
+	// The client surface is locked out too — same account, other door.
+	if _, _, _, ok, err := pg.Login(ctx, name, "correct-horse-battery"); err != nil {
+		t.Fatalf("client login: %v", err)
+	} else if ok {
+		t.Error("client login must also honour the lock")
+	}
+
+	// The window expiring restores access without an admin touching anything.
+	if _, err := pg.Pool.Exec(ctx,
+		`UPDATE users SET login_locked_until = now() - INTERVAL '1 second' WHERE id = $1`, id); err != nil {
+		t.Fatalf("expire lock: %v", err)
+	}
+	if _, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery",
+		"tok"+uniqHex(16), 60, "ua", "ip"); err != nil {
+		t.Errorf("expired lock must let the account back in: %v", err)
+	}
+
+	// An unknown username is a no-op, not a new row or an error.
+	pg.NoteFailedLogin(ctx, "no-such-user-"+uniqHex(8))
+}
