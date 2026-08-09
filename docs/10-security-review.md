@@ -25,6 +25,54 @@
 | **DB errors don't leak** | `mapDBError` returns curated, stable messages for raw constraint trips (unique violation, generic `23514`, restrict violation, auth) rather than echoing Postgres text. It still surfaces developer-authored business `RAISE`s (`P0001`, crafted `insufficient`/idempotency messages) since those are meaningful and caller-scoped. An **unmapped** error returns a generic `500 internal` to the client while the raw error + SQLSTATE are logged server-side (`s.mapDBError` → `s.logFor`, correlated by `request_id`), so it stays debuggable without leaking. |
 | **Parameterized queries** | All DB access is parameterized via sqlc / PL/pgSQL functions; free text (`dispute.reason`, beneficiary search, IBAN) is stored/compared as a bound value, never concatenated. |
 
+## Password policy (and why there is no expiry)
+
+Rules live in one place, `assert_password_policy()` (00018), called by both
+`change_password` and `register_user`:
+
+| Rule | Value | Why |
+|---|---|---|
+| Minimum length | 12 chars | NIST SP 800-63B Rev 4 §3.1.1.2 sets 15 for a **single-factor** password and permits ≥ 8 when the password is only ever one factor of MFA. 12 is our middle ground; see the open item below. |
+| Maximum length | **72 bytes** | bcrypt hashes only the first 72 bytes. Without this cap a longer passphrase is silently truncated and anyone knowing its first 72 bytes authenticates. Verified against pgcrypto: 72 `a`s and 72 `a`s + a different tail produce the same hash. Bytes, not characters — 25 three-byte runes already exceed it. |
+| Must differ from current | yes | Cheap, and the only reuse control worth having without expiry. |
+| Composition rules | **none** | NIST SHALL NOT impose character-class rules (Rev 4 §3.1.1.2); OWASP ASVS 5.0 6.2.5 agrees. |
+| Password history | **none** | Not in NIST Rev 4, absent from ASVS 5.0 V6. Only PCI DSS 8.3.7 wants it, and PCI scopes to cardholder-data environments — bank0 stores no card data. |
+| Periodic expiry | **none** | See below. |
+
+**No periodic expiry, deliberately.** NIST SP 800-63B **Rev 4** (final, 2025-07-31)
+§3.1.1.2: verifiers *SHALL NOT* require periodic password changes, and *SHALL* force
+a change on evidence of compromise. Rev 4 hardened this from Rev 3's "SHOULD NOT" —
+forced rotation drives predictable variations, and a calendar is not evidence.
+OWASP ASVS 5.0 6.2.10 and the UK NCSC say the same.
+
+`must_change_password` is the mechanism the standard *does* ask for: rotation on an
+event, not on a schedule. Today the only event that sets it is the seeded bootstrap
+credential (§4.6a in [`05-admin-ui.md`](05-admin-ui.md)).
+
+PCI DSS 4.0 §8.3.9 is the one framework still requiring 90-day rotation, and it is
+inapplicable twice over: it covers cardholder-data environments (bank0 holds no PAN),
+and it exempts accounts protected by MFA regardless.
+
+Sources: [NIST SP 800-63B Rev 4](https://pages.nist.gov/800-63-4/sp800-63b.html) ·
+[OWASP ASVS 5.0 V6](https://github.com/OWASP/ASVS/blob/master/5.0/en/0x15-V6-Authentication.md) ·
+[NCSC on password expiry](https://www.ncsc.gov.uk/blog-post/problems-forcing-regular-password-expiry)
+
+### Open, in priority order
+
+1. **Per-account failed-attempt throttling.** NIST §3.2.2 requires limiting
+   consecutive failures *per account*; the current limiter is per-IP, which
+   distributed credential stuffing walks straight past. (MFA verify already has a
+   per-account lockout — logins do not.)
+2. **Breached-password check** on set/change (NIST SHALL, ASVS 6.2.12). The
+   Pwned Passwords range API sends only the first 5 hex chars of the SHA-1, so the
+   password never leaves the cluster; it belongs in the Go handler, not in
+   `change_password` — PL/pgSQL has no egress and a DB transaction must not block on
+   a third party. Needs an egress allowlist, and should fail open.
+3. **TOTP on portal login.** The customer surface already has TOTP; the portal is
+   single-factor today, which is also what forces the higher minimum length under
+   Rev 4.
+4. **bcrypt cost 10 → 12.** OWASP's floor is exactly 10; rehash on next login.
+
 ## Known limitations
 
 - **Multi-replica rate limiting.** The in-app limiter is per-instance (in-memory).

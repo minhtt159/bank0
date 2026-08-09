@@ -9,13 +9,9 @@ import (
 	"github.com/minhtt159/bank0/web/template"
 )
 
-// The operator-facing half of password rotation. POST /me/password is the CLIENT
-// surface (JWT + clientSubject), and the admin JSON surface refuses password writes
-// on purpose — so before this screen existed, the seeded admin/admin bootstrap
-// account (00016) had no supported way to rotate: psql was the only path.
-//
-// change_password() stays the sole authority (>= 12 chars, must differ, verifies the
-// current one) and clears must_change_password itself.
+// The operator's own password. /me/password is client-surface and admin JSON refuses
+// password writes, so this is the only staff rotation path. change_password() keeps
+// the policy; this only adds the confirm-field check. docs/05 §4.6a.
 
 func (s *Server) consolePasswordForm(w http.ResponseWriter, r *http.Request) {
 	su, ok := userFromContext(r.Context())
@@ -48,8 +44,7 @@ func (s *Server) consoleChangePassword(w http.ResponseWriter, r *http.Request) {
 		_ = template.PasswordScreen(su.Username, must, flash).Render(r.Context(), w)
 	}
 
-	// Confirmation is a UI concern, so it is checked here; everything that is policy
-	// (length, must-differ, current-password verification) belongs to the DB.
+	// Confirm-field is UI; policy is the DB's.
 	if strings.TrimSpace(next) != strings.TrimSpace(confirm) {
 		render("The new password and its confirmation do not match.")
 		return
@@ -59,8 +54,7 @@ func (s *Server) consoleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Other sessions die with the old password — the point of rotating a shared
-	// bootstrap credential is that anyone else holding it is logged out.
+	// Rotating a shared default must log out whoever else holds it.
 	if _, err := s.pg.RevokeUserRefreshExceptFamily(r.Context(), su.UserID, uuid.Nil); err != nil {
 		s.log.Warn("revoke refresh families after password change", "err", err)
 	}

@@ -136,14 +136,9 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 	})
 }
 
-// passwordRotationOK blocks a staff member who must rotate their password (the
-// seeded bootstrap admin, 00018) from reaching anything except the password screen
-// and sign-out. Without this, "change the seeded admin/admin immediately" was a
-// comment in a migration and nothing more — and the seeded password is published in
-// the repository, so a deployment that forgets is wide open.
-//
-// Portal only, and never for the /metrics-style probes (they are registered outside
-// requireSession). A JSON caller gets 403 with a pointer rather than a redirect.
+// passwordRotationOK holds a flagged staff member on the password screen (00018).
+// The seeded password is published in this repo, so this is what makes "change it
+// immediately" binding. docs/05 §4.6a.
 func (s *Server) passwordRotationOK(w http.ResponseWriter, r *http.Request, su db.SessionUser) bool {
 	switch r.URL.Path {
 	case "/console/password", "/logout":
@@ -151,8 +146,7 @@ func (s *Server) passwordRotationOK(w http.ResponseWriter, r *http.Request, su d
 	}
 	must, err := s.pg.MustChangePassword(r.Context(), su.UserID)
 	if err != nil {
-		// Fail open on a lookup error: locking every operator out of the console
-		// because one SELECT failed is worse than the window this closes.
+		// Fail OPEN: one failed SELECT must not lock every operator out.
 		s.log.Error("must-change-password lookup", "err", err)
 		return true
 	}

@@ -8,10 +8,8 @@ package template
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// PasswordScreen is the operator's own change-password screen. When mustChange is
-// set (the seeded bootstrap admin, 00018) the console redirects every other screen
-// here until it is cleared, so "change the seeded password immediately" is enforced
-// rather than merely documented.
+// PasswordScreen: staff change their own password. mustChange = the console holds
+// them here until they do (00018).
 func PasswordScreen(username string, mustChange bool, flash string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -63,7 +61,7 @@ func PasswordScreen(username string, mustChange bool, flash string) templ.Compon
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(flash)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/password.templ`, Line: 18, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/password.templ`, Line: 16, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {

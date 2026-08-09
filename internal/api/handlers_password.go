@@ -27,9 +27,15 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	// Cheap policy pre-check for a friendly message; change_password() is the authority.
+	// Friendly pre-check; assert_password_policy() is the authority.
 	if len(req.NewPassword) < 12 {
 		writeError(w, http.StatusUnprocessableEntity, "weak_password", "new password must be at least 12 characters")
+		return
+	}
+	// bcrypt truncates at 72 bytes — a longer passphrase would silently keep only
+	// its prefix.
+	if len(req.NewPassword) > 72 {
+		writeError(w, http.StatusUnprocessableEntity, "weak_password", "new password must be at most 72 bytes")
 		return
 	}
 	if err := s.pg.ChangePassword(r.Context(), subj, req.CurrentPassword, req.NewPassword); err != nil {
