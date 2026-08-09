@@ -200,6 +200,25 @@ Runs `reconcile()` on demand, lists any failing invariant with the offending
 account/transfer and the drift amount. In a healthy system this is an empty,
 green page — and that emptiness is the product.
 
+### 4.6a Your own password (`/console/password`)
+
+Every staff member changes their own password here. It is the **only** operator-facing
+password write: `POST /me/password` is the client (JWT) surface, and the admin JSON API
+refuses password writes by design, so before this screen the seeded bootstrap admin
+could only be rotated with `psql`.
+
+`change_password()` remains the authority — it verifies the current password, enforces
+≥ 12 chars and must-differ, and clears `must_change_password` itself. Rotating also
+signs out the account's other sessions, which is the point when the credential being
+replaced was a shared default.
+
+**Forced rotation.** `00016` seeds a bootstrap `admin` whose password is published in
+this repository. `00018` flags that row `must_change_password` — but only while it
+still holds the seeded password, so an operator who already rotated by hand is not
+nagged. While the flag is set, the console redirects every other screen (and the admin
+JSON API answers `403 password_change_required`) until it is cleared. On a fresh
+install the first login lands on this screen and cannot leave it.
+
 ### 4.7 Disputes
 
 A **Disputes** nav screen renders the triage queue (newest first) and drives the

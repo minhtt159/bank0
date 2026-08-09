@@ -129,8 +129,47 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), userCtxKey, su)
+		if !s.passwordRotationOK(w, r.WithContext(ctx), su) {
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// passwordRotationOK blocks a staff member who must rotate their password (the
+// seeded bootstrap admin, 00018) from reaching anything except the password screen
+// and sign-out. Without this, "change the seeded admin/admin immediately" was a
+// comment in a migration and nothing more — and the seeded password is published in
+// the repository, so a deployment that forgets is wide open.
+//
+// Portal only, and never for the /metrics-style probes (they are registered outside
+// requireSession). A JSON caller gets 403 with a pointer rather than a redirect.
+func (s *Server) passwordRotationOK(w http.ResponseWriter, r *http.Request, su db.SessionUser) bool {
+	switch r.URL.Path {
+	case "/console/password", "/logout":
+		return true
+	}
+	must, err := s.pg.MustChangePassword(r.Context(), su.UserID)
+	if err != nil {
+		// Fail open on a lookup error: locking every operator out of the console
+		// because one SELECT failed is worse than the window this closes.
+		s.log.Error("must-change-password lookup", "err", err)
+		return true
+	}
+	if !must {
+		return true
+	}
+	switch { // same content negotiation as denyAuth
+	case r.Header.Get("HX-Request") == "true":
+		w.Header().Set("HX-Redirect", "/console/password")
+		w.WriteHeader(http.StatusOK)
+	case strings.Contains(r.Header.Get("Accept"), "text/html"):
+		http.Redirect(w, r, "/console/password", http.StatusSeeOther)
+	default:
+		writeError(w, http.StatusForbidden, "password_change_required",
+			"this account must change its password before using the portal (see /console/password)")
+	}
+	return false
 }
 
 func (s *Server) denyAuth(w http.ResponseWriter, r *http.Request) {

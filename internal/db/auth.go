@@ -208,6 +208,19 @@ func (p *Postgres) ChangePassword(ctx context.Context, userID uuid.UUID, current
 	return err
 }
 
+// MustChangePassword reports whether this user is barred from doing anything else
+// until they rotate their password — set on the seeded bootstrap admin (00018) and
+// cleared by change_password() itself.
+func (p *Postgres) MustChangePassword(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var must bool
+	err := p.Pool.QueryRow(ctx,
+		`SELECT must_change_password FROM users WHERE id = $1`, userID).Scan(&must)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return must, err
+}
+
 // RevokeUserRefreshExceptFamily revokes every live refresh family for the user
 // except keepFamily (pass uuid.Nil to revoke all). Returns the count revoked.
 func (p *Postgres) RevokeUserRefreshExceptFamily(ctx context.Context, userID, keepFamily uuid.UUID) (int, error) {

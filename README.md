@@ -50,7 +50,8 @@ seed (`db/seed.sql`, idempotent) loads 98 customers / 242 accounts (valid NL IBA
 741 transfers, with pending/canceled/reversed lifecycle coverage and a randomized
 10-user / 30-account guided-transfer "mule" pool; `task seed:demo` loads a larger
 randomized set, and `task dev:reset` rebuilds the stack from a clean DB and seeds it in
-one step. **Change the admin password before exposing the portal.**
+one step. The seeded `admin` account is forced to change its password at first
+login (`/console/password`) — the console will not let it do anything else first.
 
 Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
 
