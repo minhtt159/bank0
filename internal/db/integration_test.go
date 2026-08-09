@@ -26,6 +26,14 @@ import (
 var testDSN = os.Getenv("TEST_DATABASE_DSN")
 
 func TestMain(m *testing.M) {
+	// In CI the DSN is always set, so an unset one means the wiring broke (a renamed
+	// env, a dropped service block) — and every test below would SKIP while the job
+	// still reported green. Three gate jobs turning into silent no-ops is exactly the
+	// failure this must not have.
+	if testDSN == "" && os.Getenv("CI") == "true" {
+		fmt.Fprintln(os.Stderr, "TEST_DATABASE_DSN is unset in CI: integration tests would skip silently")
+		os.Exit(1)
+	}
 	if testDSN != "" {
 		if err := migrate.Up(testDSN); err != nil {
 			fmt.Fprintln(os.Stderr, "migrate test db:", err)

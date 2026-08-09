@@ -19,7 +19,14 @@ env:
   CHART_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
+  # The gate. ci.yml is workflow_call-able for exactly this: a tag push does not
+  # trigger CI on its own (it only runs on branches + PRs), so without this a
+  # release could ship code no job ever ran.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   image:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,6 +73,9 @@ jobs:
   # GHCR speaks OCI, so publishing the chart needs no chart-releaser/gh-pages
   # machinery. Tags only: a chart version is a release, not a main push.
   chart:
+    # needs: image — a chart pinning an appVersion whose image failed to build is
+    # half a release, and the half that is broken installs first.
+    needs: image
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

@@ -31,6 +31,11 @@ import (
 var testDSN = os.Getenv("TEST_DATABASE_DSN")
 
 func TestMain(m *testing.M) {
+	// See internal/db's TestMain: an unset DSN in CI means the wiring broke, and
+	// every test here would SKIP while the job still went green.
+	if testDSN == "" && os.Getenv("CI") == "true" {
+		panic("TEST_DATABASE_DSN is unset in CI: integration tests would skip silently")
+	}
 	if testDSN != "" {
 		// `go test ./...` runs internal/db and internal/api in parallel, and both
 		// packages mutate the global gate tables (warning_rules, watchlist_entries).
