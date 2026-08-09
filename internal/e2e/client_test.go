@@ -48,14 +48,15 @@ const adminPassword = "e2e-rotated-admin-pw"
 
 var rotateAdminOnce sync.Once
 
-// loginAdmin returns a portal session for the bootstrap admin, rotating the seeded
-// password on first use. Every portal test goes through here so none of them
-// depends on a credential the product refuses to let you keep.
-func loginAdmin(t *testing.T, base string) *portalSession {
+// ensureAdminRotated performs the first-install rotation exactly once per harness.
+// requireHarness calls it, so BOTH surfaces see the same credential: the seeded
+// admin/admin is flagged must_change_password (00018), and after rotation the old
+// password is dead on the client API too.
+func ensureAdminRotated(t *testing.T, portalBase string) {
 	t.Helper()
 	rotateAdminOnce.Do(func() {
-		first := loginPortal(t, base, "admin", "admin")
-		resp, err := first.client.PostForm(base+"/console/password", url.Values{
+		first := loginPortal(t, portalBase, "admin", "admin")
+		resp, err := first.client.PostForm(portalBase+"/console/password", url.Values{
 			"current_password": {"admin"},
 			"new_password":     {adminPassword},
 			"confirm_password": {adminPassword},
@@ -68,6 +69,12 @@ func loginAdmin(t *testing.T, base string) *portalSession {
 			t.Fatalf("rotate seeded admin = %d, want 303 (body=%.200s)", resp.StatusCode, readBody(t, resp))
 		}
 	})
+}
+
+// loginAdmin returns a portal session for the bootstrap admin, post-rotation.
+func loginAdmin(t *testing.T, base string) *portalSession {
+	t.Helper()
+	ensureAdminRotated(t, base)
 	return loginPortal(t, base, "admin", adminPassword)
 }
 

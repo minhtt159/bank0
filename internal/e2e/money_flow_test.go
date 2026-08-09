@@ -23,8 +23,8 @@ import (
 // the property this scenario proves.
 
 const (
-	custPassword = "password" // shared test password for provisioned customers
-	openingMinor = 50_000      // €500 opening balance (well under the maker-checker threshold)
+	custPassword  = "password" // shared test password for provisioned customers
+	openingMinor  = 50_000     // €500 opening balance (well under the maker-checker threshold)
 	transferMinor = 12_345     // €123.45 customer-initiated transfer
 )
 

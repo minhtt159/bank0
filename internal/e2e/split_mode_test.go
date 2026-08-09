@@ -152,7 +152,7 @@ func TestSplitMode_CrossAuthRejected(t *testing.T) {
 
 	// A real, valid customer JWT from the api binary (admin/admin is staff, but a
 	// JWT is a JWT — what matters is the portal won't accept ANY bearer).
-	cust := loginAPI(t, e.api.baseURL, "admin", "admin")
+	cust := loginAPI(t, e.api.baseURL, "admin", adminPassword)
 	bearer := map[string]string{"Authorization": "Bearer " + cust.token}
 
 	// Client JWT against the admin JSON surface on the PORTAL binary: the portal
@@ -222,7 +222,7 @@ func TestSplitMode_PendingTransfersIsAdminOnly(t *testing.T) {
 	}
 	// API: with a valid bearer, "pending" is not a UUID, so the client route rejects
 	// it (400 from the generated UUID param binding) — still never the admin list.
-	cust := loginAPI(t, e.api.baseURL, "admin", "admin")
+	cust := loginAPI(t, e.api.baseURL, "admin", adminPassword)
 	code, _ := rawGet(t, e.api.baseURL, "/transfers/pending",
 		map[string]string{"Authorization": "Bearer " + cust.token})
 	if code == http.StatusOK {
