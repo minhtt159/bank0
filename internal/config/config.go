@@ -87,6 +87,15 @@ type ServerConfig struct {
 	// to defeat the limiter. Set TRUE only when fronted by a trusted edge
 	// (Cloudflare) that overwrites these headers. See docs/10.
 	TrustProxyHeaders bool `mapstructure:"trust_proxy_headers"`
+	// TrustedProxyHops is how many proxies sit in front when TrustProxyHeaders is
+	// true. X-Forwarded-For is read from the RIGHT: the last entry is written by
+	// the nearest proxy and is the only one a client cannot forge. Reading the
+	// left-most entry is correct ONLY behind an edge that REPLACES the header
+	// (Cloudflare); a plain Envoy/nginx/Traefik hop running with
+	// use_remote_address APPENDS, so the left-most entry is whatever the client
+	// sent. Default 1 = the single proxy in front. Mirrors Envoy's
+	// xff_num_trusted_hops.
+	TrustedProxyHops int `mapstructure:"trusted_proxy_hops"`
 	// RequestTimeout bounds how long a single request may run before its context
 	// is canceled (releasing the in-flight DB query + its pool connection). 0 or
 	// negative disables it. Default 15s.
@@ -132,6 +141,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("server.cors_origins", []string{}) // opt-in; empty = no CORS headers
 	v.SetDefault("server.rate_limit_per_min", 60)   // /auth/* per IP; 0 disables
 	v.SetDefault("server.trust_proxy_headers", false) // key rate limits on RemoteAddr unless behind a trusted edge
+	v.SetDefault("server.trusted_proxy_hops", 1)      // proxies in front; XFF is read right-to-left
 	v.SetDefault("server.request_timeout", "15s")     // per-request deadline; 0 disables
 
 	v.SetDefault("admin.session_idle_timeout", "30m")

@@ -47,18 +47,33 @@ func (s *Server) idleSeconds() int {
 
 // clientIP returns the client IP used for the per-IP rate-limit key (and audit).
 // Forwarded headers are trusted ONLY when cfg.Server.TrustProxyHeaders is set —
-// i.e. the app is fronted by an edge (Cloudflare) that overwrites them. Otherwise
-// a caller could spoof X-Forwarded-For to get a fresh limiter bucket per request
-// and defeat the credential-brute-force backstop, so we key on RemoteAddr. When
-// trusted, Cloudflare's single edge-set CF-Connecting-IP is preferred over the
-// client-controllable multi-hop X-Forwarded-For. See docs/10.
+// otherwise a caller could spoof X-Forwarded-For to get a fresh limiter bucket per
+// request and defeat the credential-brute-force backstop, so we key on RemoteAddr.
+//
+// When trusted, CF-Connecting-IP wins: Cloudflare REPLACES it, so it is a single
+// edge-authored value. X-Forwarded-For is read from the RIGHT instead —
+// `trusted_proxy_hops` entries in — because a proxy running with use_remote_address
+// (Envoy, nginx, Traefik) APPENDS the real downstream address rather than replacing
+// the header. The left-most entry is therefore whatever the client sent: reading it
+// let an attacker rotate the limiter key per request even with trust enabled. See
+// docs/10 (RATELIMIT-XFF-SPOOF).
 func (s *Server) clientIP(r *http.Request) string {
 	if s.cfg.Server.TrustProxyHeaders {
 		if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" {
 			return cf
 		}
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			return strings.TrimSpace(strings.Split(xff, ",")[0])
+			parts := strings.Split(xff, ",")
+			hops := s.cfg.Server.TrustedProxyHops
+			if hops < 1 {
+				hops = 1
+			}
+			if hops > len(parts) {
+				hops = len(parts) // fewer hops than configured: take the left-most we have
+			}
+			if ip := strings.TrimSpace(parts[len(parts)-hops]); ip != "" {
+				return ip
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

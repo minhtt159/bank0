@@ -183,20 +183,63 @@ func TestClientIP(t *testing.T) {
 		t.Errorf("untrusted: must use RemoteAddr, not the spoofable XFF; got %q", ip)
 	}
 
-	// Trusted edge: prefer Cloudflare's CF-Connecting-IP, else the first XFF hop.
+	// Trusted edge: Cloudflare REPLACES CF-Connecting-IP, so it wins outright.
 	st := &Server{}
 	st.cfg.Server.TrustProxyHeaders = true
+	st.cfg.Server.TrustedProxyHops = 1
 	rc := httptest.NewRequest("GET", "/", nil)
 	rc.Header.Set("CF-Connecting-IP", "203.0.113.7")
 	rc.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
 	if ip := st.clientIP(rc); ip != "203.0.113.7" {
 		t.Errorf("trusted: CF-Connecting-IP should win; got %q", ip)
 	}
+
+	// RATELIMIT-XFF-SPOOF: XFF is read from the RIGHT. A Gateway running with
+	// use_remote_address (Envoy, nginx, Traefik) APPENDS the true downstream address,
+	// so "1.2.3.4" here is whatever the CLIENT sent and "5.6.7.8" is the proxy's.
+	// Taking the left-most entry let an attacker rotate the limiter key per request
+	// even with trust enabled — that is a fail-OPEN limiter.
 	rx := httptest.NewRequest("GET", "/", nil)
 	rx.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
 	rx.RemoteAddr = "9.9.9.9:1234"
-	if ip := st.clientIP(rx); ip != "1.2.3.4" {
-		t.Errorf("trusted: first XFF hop when no CF header; got %q", ip)
+	if ip := st.clientIP(rx); ip != "5.6.7.8" {
+		t.Errorf("trusted: must take the proxy-authored right-most hop; got %q", ip)
+	}
+
+	// A forged header with a single entry cannot promote itself past the real hop.
+	rf := httptest.NewRequest("GET", "/", nil)
+	rf.Header.Set("X-Forwarded-For", "evil, 5.6.7.8")
+	if ip := st.clientIP(rf); ip != "5.6.7.8" {
+		t.Errorf("forged leading entry must be ignored; got %q", ip)
+	}
+
+	// Two proxies in front: index two entries from the right.
+	s2 := &Server{}
+	s2.cfg.Server.TrustProxyHeaders = true
+	s2.cfg.Server.TrustedProxyHops = 2
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.Header.Set("X-Forwarded-For", "spoofed, 203.0.113.9, 10.0.0.1")
+	if ip := s2.clientIP(r2); ip != "203.0.113.9" {
+		t.Errorf("hops=2 should skip the nearest proxy; got %q", ip)
+	}
+
+	// Fewer entries than configured hops: take the left-most present rather than
+	// indexing out of range.
+	r3 := httptest.NewRequest("GET", "/", nil)
+	r3.Header.Set("X-Forwarded-For", "203.0.113.9")
+	r3.RemoteAddr = "9.9.9.9:1234"
+	if ip := s2.clientIP(r3); ip != "203.0.113.9" {
+		t.Errorf("short chain must not panic or fall through; got %q", ip)
+	}
+
+	// hops unset (zero value) behaves as 1 — config default, but never trust the
+	// zero value to be the default in a struct built by hand.
+	s0 := &Server{}
+	s0.cfg.Server.TrustProxyHeaders = true
+	r0 := httptest.NewRequest("GET", "/", nil)
+	r0.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	if ip := s0.clientIP(r0); ip != "5.6.7.8" {
+		t.Errorf("hops=0 must behave as 1; got %q", ip)
 	}
 }
 

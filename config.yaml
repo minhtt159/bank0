@@ -21,6 +21,11 @@ server:
   default_page_limit: 25
   mode: all                 # api | portal | all  (override per deployment)
   openapi_spec_path: api/openapi.yaml
+  # Trust forwarded client-IP headers? Only behind a proxy you control. XFF is then
+  # read right-to-left, trusted_proxy_hops entries in (1 = the nearest proxy wrote
+  # the last entry). See docs/10.
+  trust_proxy_headers: false
+  trusted_proxy_hops: 1
   auto_migrate: false       # true for local compose; false in K8s (use migrate Job)
 
 admin:
