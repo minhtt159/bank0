@@ -115,7 +115,9 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("app.env", "development")
 	v.SetDefault("app.debug", true)
 
-	v.SetDefault("logging.level", "debug")
+	// Production-safe default: an unconfigured deployment must not log at debug.
+	// The local compose stack opts back into debug via APP_LOGGING_LEVEL.
+	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.encoding", "console")
 
 	v.SetDefault("database.max_open_conns", 10)

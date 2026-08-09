@@ -5,7 +5,8 @@ app:
   debug: true
 
 logging:
-  level: debug       # debug | info | warn | error
+  # Production-safe default; the local compose stack sets APP_LOGGING_LEVEL=debug.
+  level: info        # debug | info | warn | error
   encoding: console  # console | json
 
 database:

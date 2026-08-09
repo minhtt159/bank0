@@ -49,7 +49,7 @@ db/migrations/*.sql         goose migrations — 17 domain files (foundation, ib
                             transfers, maker_checker, maintenance, beneficiaries,
                             guided_scenarios, disputes, events, fraud, system_seed,
                             iban_minting; schema + ALL PL/pgSQL)
-db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.gen.go
+db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.sql.go
 internal/db/bank.go         hand-written pgx for set-returning fns sqlc can't expand
 internal/db/auth.go         sessions + refresh-token DB calls (hand-written pgx)
 internal/api/handlers_*.go  thin HTTP handlers (client + admin)
@@ -101,7 +101,8 @@ export TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmo
 go test -count=1 ./internal/db/ ./internal/api/
 ```
 
-CI runs `postgres:18` in every job.
+CI runs `postgres:18` in every job that touches a DB (`test`, `e2e-go`,
+`migrations`; `e2e-browser` boots its own via the Playwright global setup).
 
 If Docker Hub is rate-limited in your environment, pull PG18 from the GCR mirror:
 `docker run -d --name pg18 -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=bank0_test -p 5544:5432 mirror.gcr.io/library/postgres:18-alpine`,
@@ -125,7 +126,7 @@ a throwaway DB to confirm a new migration is reversible.
   goes in a new `db/migrations/NNNN_*.sql`. Either way: add a query in `db/queries/*.sql`
   and `task generate:sqlc`. **sqlc cannot expand set-returning functions**
   (`RETURNS TABLE`) — hand-write those with pgx in `internal/db/bank.go` or
-  `auth.go` (see `Transfer`, `ResolveAccountByIban`, `RotateRefreshToken`).
+  `auth.go` (see `ClientTransfer`, `ResolveAccountByIban`, `RotateRefreshToken`).
 - **Raising inside a function that must persist a side effect:** a PL/pgSQL `RAISE`
   rolls back that function's own writes. If you need a write to survive the error
   (e.g. refresh-token reuse revoking the family), do the write in a **separate

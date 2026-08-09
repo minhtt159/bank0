@@ -13,7 +13,9 @@ k6 run -e BASE_URL=http://localhost:8090 -e USER=alice -e PASS=password load/tra
 
 Test the **deployed shape** — the compiled binary in `mode=api` behind realistic
 resources, Cloudflare in front — not `mode=all` and not `httptest`. Reset to a known
-seeded state before each stage (`task seed:demo`).
+state before each stage: `task dev:reset` (drop + migrate + seed, recommended) or
+`task seed` on a fresh DB. Not `task seed:demo` — it is **additive** and generates
+fresh random data each run, so repeated runs don't reproduce the same state.
 
 ## The correctness oracle
 
@@ -51,5 +53,8 @@ variants of the same script:
   lowest-id-first `FOR UPDATE` is also covered by `internal/db/concurrency_test.go`).
 - **Pool sizing**: `max_open_conns` (default 10) × replicas must stay well under Postgres
   `max_connections`; with `FOR UPDATE` serialization, more app conns than the DB can run
-  just deepens lock queues. Watch pool-acquire waits and confirm `conn_timeout` yields a
-  clean 503, not a pile-up.
+  just deepens lock queues. Watch pool-acquire waits — `conn_timeout` only bounds the
+  **dial** of a new connection; under pool exhaustion a request waits for an acquire
+  until the per-request deadline (`server.request_timeout`, default 15s) cancels it
+  and it surfaces as a **500** via `mapDBError`. Confirm exhaustion yields those
+  bounded 500s (and `/readyz` flipping 503), not an unbounded pile-up.

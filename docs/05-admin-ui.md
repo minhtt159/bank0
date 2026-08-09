@@ -62,6 +62,7 @@ gated action — there is no route→role middleware; the portal subrouter carri
 │ • Transfers         │                                              │
 │ • Reconciliation    │   right rail: detail / actions               │
 │ • Approvals (N)     │                                              │
+│ • Limit requests    │                                              │
 │ • Disputes          │                                              │
 │ • Warning rules     │                                              │
 │ • Watchlist         │                                              │
@@ -84,46 +85,58 @@ The "is the bank healthy?" glance:
 - **Reconciliation badge** — green if `reconcile()` returns 0 rows, red with the
   failing checks otherwise. This is the single most important widget; it proves
   I1–I3 hold right now.
-- **Money-in-the-bank** — `−SUM(balance of system accounts)` = total customer
-  money; `external_clearing` balance = net flows across the boundary.
-- **Operational counters** — pending transfers, active holds (count + reserved
-  total), failed/expired today, reversals today.
-- **Pending-approvals** count (maker-checker queue) with a jump link.
-- **Awaiting screening** — count of payments parked `under_review` after an AML
-  watchlist hit (`CountPendingScreenings`, best-effort tile), the operator's cue to
-  work the screening queue (§4.4a).
+- **Customer money** — `SUM(accounts.balance_minor) WHERE kind='customer'`: every
+  euro the bank owes its customers, in one number.
+- **Operational counters** — the other three cards (`DashboardStats`): pending
+  transfers, active holds (count + reserved total), and **Awaiting screening** —
+  payments parked `under_review` after an AML watchlist hit
+  (`CountPendingScreenings`, best-effort tile), the operator's cue to work the
+  screening queue (§4.4a).
+- The maker-checker queue depth is **not** a dashboard card — it rides the
+  **Approvals** nav item's badge count.
 
 ```mermaid
 graph TD
     D[Dashboard] --> R[Reconcile badge ✅/❌]
     D --> M[Customer money total]
-    D --> Q[Pending: 12  Holds: €3,200  Failed today: 3]
-    D --> A[Approvals waiting: 2 →]
+    D --> Q[Pending: 12  Holds: 4 · €3,200]
+    D --> A[Awaiting screening: 2]
 ```
 
 ### 4.2 Accounts (list → detail)
 
-- **List**: search bar (IBAN / owner / username — the search-feature TODO),
-  cursor-paginated, columns: owner, IBAN, status chip, **available** and
-  **ledger balance** side by side, default-account star.
-- **Detail (right rail)**:
-  - Header: owner, IBAN, status, currency.
-  - **Available vs Ledger balance** explained inline:
-    `available €90.00 = ledger €100.00 − holds €10.00`. Demystifies the lifecycle.
-  - **Statement**: `ledger_entries` newest-first with `balance_after` as a real
-    running balance, each row linking to its transfer. Cursor pagination on
-    `(posted_at, id)`.
-  - **Active holds** list with expiry countdown.
-  - **Actions** (role-gated, each a confirm modal):
-    `Credit` (deposit), `Withdraw`, `Freeze/Unfreeze`, `Set default`,
-    `Adjust transfer limit`, `Close`.
+- **List**: search bar (IBAN / owner), cursor-paginated, columns: Owner, IBAN,
+  status chip, **Ledger** and **Available** side by side.
+- **Detail — the owner's user rail.** There is no standalone account detail:
+  clicking a row opens the *owner's* user detail in the right rail
+  (`hx-get /console/users/{id}`), which lists that user's accounts as cards. Each
+  card shows the IBAN, a **★** for the default account, the status pill, and
+  Ledger / Available / Limit side by side.
+  - **Actions** on the card (role-gated, `hx-confirm` browser confirms):
+    `Add credit` (deposit), `Withdraw`, `Freeze`/`Unfreeze`, `Set default`,
+    and `Adjust transfer limit`. (`SetAccountStatus` also accepts `closed`, but no
+    console control posts it — closing is not an operator button today.)
+  - **Statement** (`Statement →` on the card) renders in the **main panel**, not
+    the rail: `ledger_entries` newest-first with `balance_after` as a real running
+    balance, cursor-paginated on `(posted_at, id)`, each row drilling into its
+    transfer detail in the rail. Its header carries the IBAN, status, and
+    Ledger / Available / Transfer-limit cards.
+  - Active holds are shown on the **transfer** detail (the hold's amount, status and
+    expiry), not as a per-account holds list.
 
 ### 4.3 Transfers
 
-- **Pending queue** (the operational heart): every `status='pending'` transfer
-  with age and hold expiry, plus inline `Post` / `Cancel`. Double-click safe — the
-  button sends an `Idempotency-Key` and disables on submit.
-- **History**: cursor-paginated, filterable by status/kind/account/amount/date.
+- **One list, not two.** The nav's Transfers item (`/console/pending`, the name is
+  historical) renders the **full transfer history**, newest first: requested-at,
+  from/to, kind, status, amount, description. `status='pending'` rows carry inline
+  `Post` / `Cancel` buttons; every other status is read-only. The buttons are
+  `hx-confirm`-gated and `hx-disabled-elt` on submit — but unlike credit/withdraw/
+  reverse they send **no** `Idempotency-Key`; `post_transfer`/`cancel_transfer` are
+  idempotent on the transfer's own status instead.
+- **Search/paging**: one free-text `?q` box (IBAN or description, `SearchTransfers`)
+  plus a `(requested_at, id)` keyset cursor. The richer status/kind/account/amount/
+  date filters live on the **client** API's `GET /transfers`
+  ([`06-client-api.md`](06-client-api.md) §1), not in the console.
 - **Transfer detail**: both ledger legs, the hold, the idempotency key, and — for
   reversals — a link to/from the original (`reverses_id`). A posted transfer shows
   a `Reverse` action (admin only, reason required, idempotency key auto-generated).
@@ -175,8 +188,11 @@ self-service. JSON twins: `GET /admin/limit-requests`,
 ### 4.5 Audit log
 
 `admin_actions` joined to operators: who did what, to which target, when, with the
-JSON detail and the approver. Filterable, read-only, exportable. Pairs with the
-ledger to answer "who authorized this movement and why."
+JSON detail. Read-only, free-text searchable (action / operator / detail) and
+cursor-paginated; **no export path** — pull the table directly if you need one.
+`ListAuditLog` also resolves the `approved_by` operator, but the table doesn't
+render an approver column yet. Pairs with the ledger to answer "who authorized
+this movement and why."
 
 ### 4.6 Reconciliation
 
@@ -263,12 +279,16 @@ payment `under_review` and files it into the screening queue (§4.4a).
 
 ## 5. Safety patterns (the UX that protects money)
 
-1. **Confirm modals** for every money/destructive action, restating the concrete
-   effect: *"Credit €250.00 to IBAN …7821 (Alice Smith). This posts a ledger
-   entry from external_clearing. Reason: ___"*.
-2. **Idempotency keys are automatic.** The UI generates a key per action attempt
-   and sends it; a retried/double-clicked submit reuses the key → the DB replays
-   the original result. The operator literally cannot create a duplicate movement.
+1. **Confirm prompts** for every money/destructive action — `hx-confirm` (the
+   browser's own dialog), restating the concrete effect: *"Credit this account
+   (posts a ledger deposit from external_clearing)?"* Credit/withdraw take an
+   amount only; their ledger description is fixed (`Console credit` /
+   `Console withdrawal`), so there is no free-text reason on the money forms.
+2. **Idempotency keys are automatic** on the forms that *create* a movement —
+   credit, withdraw, reverse. The UI generates a key per action attempt and sends
+   it; a retried/double-clicked submit reuses the key → the DB replays the original
+   result. The operator literally cannot create a duplicate movement. (Post/cancel
+   need no key — they only advance an existing transfer's status; see §4.3.)
 3. **Optimistic disable**: action buttons disable on click (`hx-disabled-elt`),
    re-enable on response — kills the double-submit instinct even before the key
    does.
@@ -279,8 +299,10 @@ payment `under_review` and files it into the screening queue (§4.4a).
 5. **No raw balance field anywhere.** "Credit/Debit" always means a ledger
    `deposit`/`withdraw`; there is no input that writes `balance_minor`. An
    "edit balance" field cannot exist by design.
-6. **Reason required** on reverse, freeze, close, and any maker-checker action —
-   stored in `admin_actions.detail` / `transfers.failure_reason`.
+6. **Reason required on reverse** — the one free-text field the console demands,
+   stored via `reverse_transfer` and the `admin_actions.detail` row. Freeze/unfreeze
+   and approve/reject collect no reason (the actor, target and action are audited
+   regardless); dispute resolve takes an *optional* note.
 7. **Toasts + inline errors**: the DB error mapping (§5 of `03-...md`) surfaces as
    human messages ("Insufficient available funds: have €90.00, need €100.00").
 
@@ -294,14 +316,24 @@ One handler feeds both the JSON API and HTML. The interaction patterns:
 |---------|------|-----|
 | Drill-down | `hx-get` → right rail target | account/transfer detail |
 | Live search | `hx-get` + `hx-trigger="input changed delay:300ms"` | account/transfer search |
-| Safe action | `hx-post` + `hx-confirm` + `hx-disabled-elt="this"` + `Idempotency-Key` | credit, post, reverse |
-| Auto-refresh | `hx-trigger="every 10s"` on the pending queue & reconcile badge | keep ops view live |
+| Safe action | `hx-post` + `hx-confirm` + `hx-disabled-elt="this"` (+ `Idempotency-Key` on credit/withdraw/reverse) | credit, post, reverse |
+| Auto-refresh | `hx-trigger="… every 15s"` on Dashboard, Approvals + Screenings, and Limit requests | keep ops view live |
+| Refresh on mutation | `hx-trigger="bank0:refresh from:body"` — Transfers and Reconciliation refresh **only** on this event, they don't poll | avoid churn on quiet screens |
 | Partial swap | `hx-target` + `hx-swap="outerHTML"` | update one row after an action, not the whole table |
 
-Components (Templ): `Shell`, `Dashboard`, `AccountList`, `AccountDetail`,
-`Statement`, `TransferQueue`, `TransferDetail`, `ApprovalQueue`, `AuditLog`,
-`ReconcilePanel`, plus shared `ConfirmModal`, `StatusChip`, `Money` (formats
-minor units → `€x.xx`).
+Components (Templ, `web/template/`): `Shell`, `DashboardCards`,
+`UsersPanel`/`UsersRows`, `UserDetail`, `AccountsPanel`/`AccountsRows`,
+`StatementView`/`StatementBody`/`StatementItems`,
+`TransfersPanel`/`TransferTable`/`TransferItems`, `TransferDetail`,
+`ApprovalsPanel`/`ApprovalRows`/`ScreeningRows`,
+`LimitRequestsPanel`/`LimitRequestRows`, `DisputesPanel`/`DisputeRows`,
+`AuditPanel`/`AuditRows`/`AuditItems`, `ReconcilePanel`, `SettingsPanel`,
+`WarningRulesPanel`/`WarningRulesList`, `WatchlistPanel`/`WatchlistList`,
+`LoginPage`, `CreateUserForm`. The recurring `…Panel` / `…Rows` split is the
+"chrome vs. results fragment" pattern: the panel ships the search box + container,
+the rows fragment is what HTMX swaps back in. There is no confirm-modal component
+(`hx-confirm` does the job), no status-chip or money component — a status is a
+`span.pill` and money goes through `money.FormatMinor` (minor units → `€x.xx`).
 
 ---
 
@@ -328,8 +360,10 @@ in [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), consisten
   complements the customer's own "log out everywhere" ([`06-client-api.md`](06-client-api.md) §3.3).
 - Every portal route (admin JSON API **and** console HTML) sits behind the
   `requireSession` middleware; browsers/HTMX get a redirect to `/login`,
-  programmatic callers get `401`. `/health`, `/docs`, `/openapi.yaml`, `/login`
-  stay public.
+  programmatic callers get `401`. Public on the portal: `/health`, `/readyz`,
+  `/metrics`, `/docs`, `/openapi.yaml`, `GET`/`POST /login`, `POST /logout`, and
+  the embedded console assets under `/static/` (the login page is styled too).
+  Both `/login` POST and `/logout` still pass the `csrfGuard`.
 
 ---
 

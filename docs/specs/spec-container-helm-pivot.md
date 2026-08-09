@@ -26,7 +26,7 @@
 |---|---|
 | **Unchanged** | The application. Same binary, same run modes (`api`/`portal`), same embedded goose migrations, same `/health`·`/readyz`·`/metrics` contract. Zero Go/SQL changes are required by this pivot (the PWA option B in §5 would be the only exception, and it is not the recommended option). |
 | **Unchanged** | The chart's core shape: two Deployments from one image, pre-upgrade migrate hook Job, HTTPRoutes via Gateway API, advisory-locked in-process maintenance on portal pods. The serverless-only workaround (Cloud Scheduler + `bank0 maintenance` Job) is simply not needed here. |
-| **Changes** | `deploy.yml` was deleted outright (it only ever deployed the dead path); W2 recreates it as a publisher (image → GHCR, chart → GHCR OCI). |
+| **Changes** | `deploy.yml` was deleted outright (it only ever deployed the dead path); W2/W4 recreate it as a publisher (W2: image → GHCR, W4: chart → GHCR OCI). |
 | **Changes** | The chart grows the small knobs a real shared cluster needs: admission-clean hook Job, `imagePullSecrets`, per-surface Gateway attachment. |
 | **Changes** | The PWA needs an in-cluster home (§5) — the only genuinely new piece. |
 | **Deleted** | Everything Supabase/Cloud Run: `docs/08`, `deploy/cloudrun/`, `.github/workflows/deploy.yml`, the PG17 `uuidv7()` polyfill in `00001_foundation.sql`, and every PG17 CI leg. PG18 is the floor. |
@@ -77,7 +77,7 @@ as-is, ❌ = gap (with priority/effort in the repo's `P0–P2` / `S/M/L` scale).
 
 | Concern | Today | Verdict |
 |---|---|---|
-| **No `:latest`** (admission) | `bank0.image` helper renders `repo:{{ tag \| default .Chart.AppVersion }}` → `ghcr.io/minhtt159/bank0:0.1.0`. Never `latest`. | ✅ |
+| **No `:latest`** (admission) | `bank0.image` helper renders `repo:{{ tag \| default .Chart.AppVersion }}` → `ghcr.io/minhtt159/bank0:1.0.0`. Never `latest`. | ✅ |
 | **Resource requests** (admission) — Deployments | Both api and portal set `resources.requests` + `limits` from values. | ✅ |
 | **Resource requests** (admission) — **migrate hook Job** | [`migrate-job.yaml`](../../deploy/helm/bank0/templates/migrate-job.yaml) sets **no `resources`**. the resource-requests policy **rejects the hook pod → every `helm install`/`upgrade` on the target cluster fails before anything else runs.** | ❌ **P0, S** |
 | **SA token automount** (admission) — Deployments | Both pods set `automountServiceAccountToken: false`. | ✅ |
@@ -92,7 +92,7 @@ as-is, ❌ = gap (with priority/effort in the repo's `P0–P2` / `S/M/L` scale).
 | **`/metrics` exposure** | docs/04 says "restrict at the network layer" — implicitly Cloudflare's WAF. Attached to the external Gateway through the tunnel, `/metrics` on `api.*` is on the public internet. Cheap fix: an HTTPRoute rule matching `/metrics` (and nothing else) that never leaves the Gateway on external routes; or accept it (it leaks RED metrics, not data). | ❌ **P2, S** — decide (§8 Q7) |
 | **Sizing defaults** | api HPA 3–10 + portal ×2 is prod-ish; fine as chart defaults. The operator overrides at install time (`-f` a local values file) — do **not** commit an environment values file unless the operator wants it in-repo. | ✅ |
 | **HPA** | CPU-based `autoscaling/v2`, needs metrics-server — present in any real cluster; `autoscaling.enabled=false` falls back to `replicaCount`. | ✅ |
-| **Chart/app versioning** | `Chart.yaml` is `version: 0.1.0` / `appVersion: 0.1.0` and nothing bumps or publishes it. Fine while the chart was copy-installed from the repo; publishing (§6) needs a bump-on-release discipline. | ❌ **P1, S** |
+| **Chart/app versioning** | `Chart.yaml` is `version: 1.0.0` / `appVersion: "1.0.0"` (bumped for the release) but nothing publishes it. Fine while the chart is copy-installed from the repo; publishing (§6/W4) needs a bump-on-release discipline. | ❌ **P1, S** (publish half) |
 | **PWA** | Not in the chart at all — it lived on the (deferred) Worker. | ❌ **P1, M** — §5 |
 
 ## 4. Image strategy
@@ -170,7 +170,7 @@ publisher. What each of its jobs turned into:
 | Wave | What | Checkpoint (must pass before the next wave) |
 |---|---|---|
 | **W1** | **Chart admission-compliance + pull secrets** (the two ❌ P0-S + P1-S rows of §3): migrate hook Job gets `resources`, `automountServiceAccountToken: false`, and both securityContexts; add `image.pullSecrets` plumbed into all three pod specs. | `helm template` diff reviewed; rendered manifests pass the three admission policies (policy-engine dry-run locally, or a throwaway install on the cluster). Default rendering otherwise byte-identical. |
-| **W2** | **Image publish**: rewrite `deploy.yml` → GHCR multi-arch build/push (`sha-` on main, semver on tags), including the 2-line `$BUILDPLATFORM` Dockerfile tweak (§2). GCP/Cloudflare jobs and secrets deleted (the *path* stays documented in docs/08). | `docker run ghcr.io/minhtt159/bank0:sha-… serve` answers `/health` on both arches; no `latest` tag exists on the package. |
+| **W2** | **Image publish**: rewrite `deploy.yml` → GHCR multi-arch build/push (`sha-` on main, semver on tags), including the 2-line `$BUILDPLATFORM` Dockerfile tweak (§2). GCP/Cloudflare jobs and secrets deleted (the retired path is recorded in §0 — `docs/08` itself is gone). | `docker run ghcr.io/minhtt159/bank0:sha-… serve` answers `/health` on both arches; no `latest` tag exists on the package. |
 | **W3** | **Per-surface Gateway attachment**: `api.gateway`/`portal.gateway` (or per-surface `parentRef`) values — name/namespace/sectionName each — defaulting to the current single-`gateway:` block so existing installs render unchanged; document the shared-gateway mode (TLS/redirect off, listener names from the platform Gateways). | Golden `helm template` unchanged with default values; with the operator's values the api route parents the external Gateway and the portal route parents the internal one. |
 | **W4** | **Chart publish + version discipline**: tag-triggered `helm package`/`push` to GHCR OCI; `Chart.yaml` version/appVersion bump becomes part of tagging a release. | `helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version …` works from a machine that has never seen the repo. |
 | **W5** | **PWA in-cluster** (§5, decided: option A on the **internal Gateway**): `deploy/Dockerfile.web`, web Deployment/Service, PWA-host HTTPRoute (internal Gateway) with the `/api` `URLRewrite` rule; `deploy-pwa` job becomes the web-image build. `web/app/` source untouched; `worker/` untouched until fraudbank's own Worker deploy exists. | Login + a transfer completed through the PWA host (LAN) with the browser only ever talking same-origin `/api/*`; Worker still deployable as fallback until this soaks. |

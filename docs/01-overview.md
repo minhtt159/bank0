@@ -71,12 +71,12 @@ graph LR
 ```
 
 `server.mode=all` serves both Go surfaces in one container for local development.
-The schema is a 16-file domain baseline under `db/migrations/`: `00001_foundation`
+The schema is a 17-file domain baseline under `db/migrations/`: `00001_foundation`
 (extensions, `uuidv7()`, enum types), `00002_iban`, `00003_users`,
 `00004_auth_tokens`, `00005_onboarding`, `00006_mfa`, `00007_accounts`,
 `00008_transfers`, `00009_maker_checker`, `00010_maintenance`,
 `00011_beneficiaries`, `00012_guided_scenarios`, `00013_disputes`, `00014_events`,
-`00015_fraud`, `00016_system_seed`.
+`00015_fraud`, `00016_system_seed`, `00017_iban_minting`.
 
 ---
 
@@ -152,9 +152,9 @@ From `portal.*`, a staff member (cookie session, role-gated) provisions and supe
 
 ### Deploy it
 
-bank0 is **self-hosted**: published container images + the Kubernetes/Helm +
-Gateway API setup ([`04-deployment.md`](04-deployment.md)), on a Postgres 18 you
-provision yourself.
+bank0 is **self-hosted**: a container image (build it from `deploy/Dockerfile`;
+registry publishing is planned) + the Kubernetes/Helm + Gateway API setup
+([`04-deployment.md`](04-deployment.md)), on a Postgres 18 you provision yourself.
 Migrations run as a pre-upgrade job; readiness pings the DB; `/metrics` exposes
 Prometheus RED + pool gauges.
 
@@ -177,4 +177,5 @@ Prometheus RED + pool gauges.
 
 The open backlog + product roadmap live in [`specs/`](specs/) (start at
 [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md)). The as-built behaviour of every
-shipped feature is documented in the reference docs above (`02`–`12`).
+shipped feature is documented in the reference docs above (`02`–`12`; there is no
+`08` — it was retired with the serverless deployment path).

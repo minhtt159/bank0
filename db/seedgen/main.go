@@ -9,7 +9,7 @@
 // Account IBANs are checksum-VALID (ISO 13616 / MOD-97 via internal/iban): real ones
 // drawn from the vendored db/seedgen/ibans pool first, then freshly GENERATED valid
 // IBANs across many countries for the remainder — so the count isn't capped by the
-// vendored set and the new accounts.iban CHECK (migration 00022) is satisfied.
+// vendored set and the accounts.iban CHECK (00007_accounts.sql) is satisfied.
 //
 // For speed at scale the generated SQL computes the bcrypt password/PIN hashes ONCE
 // and bulk-inserts; balances + activity go through the real deposit()/transfer()/

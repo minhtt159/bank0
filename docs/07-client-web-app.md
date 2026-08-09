@@ -1,6 +1,7 @@
 # bank0 — Client Web App (PWA, Cloudflare Workers)
 
-> A **lightweight, mobile-first PWA** (TypeScript / Preact + Vite, ~15 KB gzip)
+> A **lightweight, mobile-first PWA** (TypeScript / Preact + Vite; a small bundle —
+> roughly 22 KB of gzipped JS as of 1.0.0)
 > hosted on a **Cloudflare Worker** at `bank0.hnimn.art`, over the client API at
 > `api.bank0.hnimn.art` ([`06-client-api.md`](06-client-api.md)). Auth (JWT +
 > refresh, with MFA/step-up as a designed extension) lives in
@@ -11,7 +12,9 @@
 
 ## 1. Scope
 
-Six customer flows:
+The six core money flows the app was built around (self-registration, contact
+verification, device management, invites, the activity feed and disputes have since
+been added on top — see the route map in §5):
 
 1. Login with `username:password` → JWT (SSO/MFA covered in §9).
 2. View own details, accounts, statements.
@@ -74,7 +77,7 @@ endpoints.
 
 | Flow | Endpoint |
 |------|----------|
-| 1 Login | `POST /auth/login` → `{user_id, token, token_type, expires_at}` (HS256 JWT) |
+| 1 Login | `POST /auth/login` → `{user_id, token, token_type, expires_at, refresh_token}` (HS256 JWT + opaque refresh). When the account has MFA on, no tokens are issued: the body is `{mfa_required:true, mfa_token}` and the app exchanges it at `POST /auth/mfa/verify` |
 | 2/3 Accounts | `GET /users/{id}/accounts` → `[Account]` (ownership-scoped to `sub`) |
 | 2/3 Account + balance | `GET /accounts/{id}` → `Account` |
 | 2/3 Statement | `GET /accounts/{id}/ledger?cursor&limit` → `[LedgerEntry]` (cursor-paginated, running balance, counterparty) |
@@ -106,30 +109,43 @@ query/body params without colliding with the admin package.
   ```sql
   CREATE TABLE beneficiaries (
       id                 UUID PRIMARY KEY DEFAULT uuidv7(),
-      owner_user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      owner_user_id      UUID NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
       label              TEXT NOT NULL,                 -- "Mum", "Landlord"
-      credit_account_id  UUID NOT NULL REFERENCES accounts(id),
-      iban               TEXT NOT NULL,                 -- denormalized for display/search
-      owner_name_masked  TEXT,                          -- e.g. "J*** D**" from resolve
+      credit_account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+      iban               VARCHAR(34) NOT NULL,          -- denormalized for display/search
+      owner_name_masked  TEXT NOT NULL DEFAULT '',      -- e.g. "J*** D**" from resolve
       created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (label <> ''),
       UNIQUE (owner_user_id, credit_account_id)
   );
   CREATE INDEX idx_beneficiaries_owner ON beneficiaries (owner_user_id);
+  -- every persisted IBAN passes the same checksum authority as accounts
+  ALTER TABLE beneficiaries
+      ADD CONSTRAINT beneficiaries_iban_checksum CHECK (iban_is_valid(iban));
   ```
 - **DB functions** (PL/pgSQL, errors via `mapDBError`):
-  - `resolve_account_by_iban(p_iban) → (account_id, owner_name_masked)` — looks up an
-    **active** account by IBAN, returns the id + a **masked** owner name (never the full
-    PII or balance). `RAISE` (404-mapped) if not found/closed.
+  - `resolve_account_by_iban(p_iban, p_name_hint, p_caller)` — the
+    confirmation-of-payee call. Looks up an **active** account by IBAN and returns the
+    whole CoP/VOP verdict: `account_id`, `iban`, `owner_name_masked`, `match_result`,
+    `reason_code`, `suggested_name` (close matches only), `account_type`, `gate`,
+    `checked_at`, plus the recipient-risk fields (`recipient_risk`, `mule_suspected`,
+    `signals[]`, `is_first_payment_to_payee`). Never the full PII or a balance.
+    `RAISE` (404-mapped) if not found/inactive. `RETURNS TABLE`, so it's hand-written
+    with pgx, not sqlc.
   - `add_beneficiary(p_owner, p_label, p_iban) → id` — resolves the IBAN, stores the row;
     rejects self-IBAN and duplicates.
-  - `list_beneficiaries(p_owner) → [...]`, `delete_beneficiary(p_owner, p_id)` — both scoped.
+  - `delete_beneficiary(p_owner, p_id)` — owner-scoped removal.
+  - `is_known_payee(...)` — the shared step-up predicate (the Go gate and
+    `evaluate_transfer` both call it, so preview and enforcement can't diverge).
+  - **Listing is not a DB function**: `GET /beneficiaries` is a plain owner-scoped
+    sqlc `ListBeneficiaries` SELECT — there is no read-only logic to push down.
 - **Endpoints** (`tags:[client]`):
   | Method | Path | Purpose |
   |---|---|---|
   | GET | `/beneficiaries` | list saved payees (fuzzy is **client-side**) |
   | POST | `/beneficiaries` | add by IBAN+label → resolves, stores |
   | DELETE | `/beneficiaries/{id}` | remove |
-  | GET | `/beneficiaries/resolve?iban=` | preview an IBAN before saving (masked owner) |
+  | GET | `/beneficiaries/resolve?iban=&name=` | preview an IBAN before saving: masked owner **plus** the server-side CoP/VOP verdict and recipient-risk fields ([`06`](06-client-api.md) §1). Pass the typed `name` or the verdict degrades to `unable`. The client renders it, never decides |
 - **Transfer is unchanged:** the SPA sends `credit_account = beneficiary.credit_account_id`
   to `POST /transfers`. Beneficiaries are purely a **lookup/directory**;
   `createTransfer` still enforces that the **debit** account belongs to the caller.
@@ -152,7 +168,7 @@ query/body params without colliding with the admin package.
 | Data | `fetch` wrapper → `/api/*` | Adds `Authorization`, generates `Idempotency-Key`, maps errors. |
 | Fuzzy search | **Fuse.js** (~5 KB) or a hand-rolled scorer | Flows 5 source/destination pick; lists are small (own accounts + saved payees) so it runs entirely client-side. |
 | Styling | Hand-written CSS, mobile-first, CSS variables; system font stack | No UI framework; keeps the bundle tiny and the look native-feeling. |
-| PWA | `vite-plugin-pwa` → `manifest.webmanifest` + service worker | Installable, app-icon, offline shell. **Network-first** for `/api/*` (never cache money data); precache only the app shell. |
+| PWA | `vite-plugin-pwa` → `manifest.webmanifest` + service worker | Installable, app-icon, offline shell. **Network-only** for `/api/*` (never cache money data); precache only the app shell. |
 | Money formatting | `Intl.NumberFormat` over **minor units** | API returns `*_minor` int64; format = `value/100` with the account `currency`. |
 
 **Hard rules for a banking PWA:** never cache API responses containing balances/transfers in
@@ -164,16 +180,27 @@ retry** of that same attempt so a flaky network can't double-post.
 
 ## 5. Screens & flow mapping
 
+The router (`src/app.tsx`, `preact-iso`) registers thirteen routes plus a default;
+everything but `/login`, `/register` and `/verify` is wrapped in `<Protected>`:
+
 ```
-/login        →  username/password form           → POST /auth/login, store token+user_id
+/login        →  username/password form            → POST /auth/login (+ MFA exchange), store token+user_id
+/register     →  invite-gated self-registration    → POST /auth/register
+/verify       →  6-digit contact verification      → POST /auth/verify-contact, POST /auth/resend-code
 /             →  Accounts home (vertical scroll)   → GET /users/{id}/accounts        [Flow 3]
-/accounts/:id →  Account detail + statement        → GET /accounts/:id, GET .../ledger (infinite scroll via cursor) [Flow 2/3]
-/profile      →  My details                        → GET /me                          [Flow 2]
+/accounts/:id →  Account detail + statement        → GET /accounts/:id, GET .../ledger ("Load more" per cursor page) [Flow 2/3]
+/profile      →  My details                        → GET /me, PATCH /me              [Flow 2]
+/password     →  Change password                   → POST /me/password
+/devices      →  Signed-in devices                 → GET /me/sessions, DELETE /me/sessions/:family
+/invite       →  Invite a friend                   → GET/POST /me/invitations
+/activity     →  Notification feed                 → GET /me/events, POST /me/events/read
+/disputes     →  My disputes                       → GET /disputes, POST /transfers/:id/dispute
 /transfer     →  Transfer card                     → fuzzy source (accounts) + fuzzy dest (beneficiaries) [Flow 4/5]
-                 + "add payee" → GET /beneficiaries/resolve?iban= → POST /beneficiaries
+                 + "add payee" → GET /beneficiaries/resolve?iban=&name= → POST /beneficiaries
                  confirm step → POST /transfers/intent (preflight; warning card / ack / cooling-off)
                  submit → POST /transfers (Idempotency-Key)
 /transfer/:id →  Result / receipt                  → GET /transfers/:id → "Back to home" [Flow 6]
+(default)     →  Home
 ```
 
 Details per flow:
@@ -182,10 +209,11 @@ Details per flow:
    401 → inline error. A 401 from any later call (token expired) → bounce to `/login`.
 2. **Profile + statements.** `/profile` shows `GET /me`. Statements are the `ledger` view:
    each `LedgerEntry` already carries `direction`, `signed_amount`, `balance_after`,
-   `counterparty_iban/owner`, `description` — render as a running list; **infinite-scroll**
-   by passing the last row's `posted_at` as the next `cursor`.
+   `counterparty_iban/owner`, `description` — render as a running list, paged by an
+   explicit **"Load more"** button that passes the last row's `posted_at` as the next
+   `cursor` (deliberate: an explicit tap beats a scroll heuristic on a money list).
 3. **Home = accounts.** Vertical list of cards (IBAN, kind, `available_minor` prominent,
-   `balance_minor` secondary, status badge if not `active`). Tap → `/accounts/:id`. Pull-to-refresh.
+   `balance_minor` secondary, status badge if not `active`). Tap → `/accounts/:id`.
 4. **Create transaction.** FAB / "Send" → `/transfer`.
 5. **Transfer card.**
    - **Source:** fuzzy filter over the user's own accounts (already loaded). Default =
@@ -227,9 +255,16 @@ web/app/                     # the customer SPA (sibling of web/template/, the p
     api/client.ts            # fetch wrapper: base /api, Bearer, Idempotency-Key, 401 refresh, error map
     api/types.ts             # hand-kept mirror of the openapi client schemas
     store/auth.ts            # @preact/signals: token + refresh token (sessionStorage)
-    routes/{Login,Home,Account,Profile,Transfer,Receipt}.tsx
-    lib/{money.ts,fuzzy.ts}  styles.css
+    routes/                  # Login Register Verify Home Account Profile ChangePassword
+                             # Devices Invite Activity Disputes Transfer Receipt
+    components/AddPayeePanel.tsx
+    hooks/useFraudGate.ts    # the preflight → warning → ack → cooling-off state machine
+    lib/                     # money fuzzy iban duration labels onboarding
+                             # fraudGate (+ .test.ts siblings), feedback.tsx (toasts)
+    styles.css
   vite.config.ts             # @preact/preset-vite + vite-plugin-pwa; dev proxy /api -> :8090
+  vitest.config.ts           # unit tests for the pure lib/ helpers
+  playwright.config.ts  e2e/ # end-to-end suite (globalSetup boots Postgres + api + vite)
 worker/
   index.ts                   # static-asset serving + /api/* proxy to api.bank0.hnimn.art
   wrangler.toml              # route bank0.hnimn.art/*, [assets] binding, API_ORIGIN var
@@ -238,7 +273,9 @@ worker/
 - **Type safety:** `src/api/types.ts` is a hand-kept mirror of the client schemas
   (generatable with `openapi-typescript` to track the contract like the Go side).
 - **Tooling:** `task webapp:dev` (Vite + `/api` proxy), `task webapp:build`
-  (`tsc --noEmit` + Vite + PWA), `task webapp:deploy` (build + `wrangler deploy`).
+  (`tsc --noEmit` + Vite + PWA), `task webapp:deploy` (build + `wrangler deploy`),
+  `task e2e` (Playwright browser suite — globalSetup boots a throwaway Postgres +
+  api binary + vite; pass args after `--`, e.g. `task e2e -- --ui`).
 
 ---
 
@@ -338,7 +375,9 @@ The SPA and Worker are built and deployed via the Taskfile:
 - **SPA** (`web/app/`) — Vite + Preact + TS, api client (Bearer + Idempotency-Key +
   error map), signals auth store, the six flows above, and the PWA layer (manifest +
   icon, autoUpdate service worker that precaches the shell and treats `/api/*` as
-  network-only). Production build is ~14.5 KB gzipped JS.
+  network-only). The production build stays small — on the order of 22 KB of
+  gzipped JS at 1.0.0; measure it (`task webapp:build`) rather than trusting a
+  number in a doc.
 
 Auth hardening (Worker-held refresh cookie + MFA) and SSO/OIDC (Worker PKCE +
 RS256/JWKS on the API) are designed extensions — see
@@ -352,8 +391,9 @@ RS256/JWKS on the API) are designed extensions — see
   an implicit group and saved payees as another.
 - **Confirmation of payee depth:** the masked owner name (initials) is shown at
   resolve time, balancing the privacy/UX trade-off in `resolve_account_by_iban`.
-- **Locale/currency:** single currency ([`02`](02-data-model.md)); display locale is
-  fixed rather than browser-detected.
+- **Locale/currency:** single currency ([`02`](02-data-model.md)); the display locale
+  is **browser-detected** — `Intl.NumberFormat(undefined, …)` in `lib/money.ts`, so
+  amounts format per the user's own locale.
 - **Token persistence:** `sessionStorage` (clears on tab close), until the BFF cookie
   lands.
 - **Offline:** strictly online, given it's a bank — the service worker caches only the
