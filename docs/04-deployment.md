@@ -160,7 +160,7 @@ graph TD
 
 | Concern | How |
 |---|---|
-| **HA / scaling** | `bank0-api` is a Deployment behind an HPA (CPU-based, 3–10 replicas). Stateless — all state is in Postgres. |
+| **HA / scaling** | `bank0-api` is a Deployment behind an HPA (CPU-based, 3–10 replicas). Stateless — all state is in Postgres. Opt-in: an Argo Rollouts canary instead of the Deployment (`api.rollout.enabled` — see *Canary releases* below). |
 | **Routing / two domains** | **Gateway API on Envoy Gateway.** One `Gateway` with a per-host HTTPS listener; two `HTTPRoute`s (api/portal) attach by `parentRef`/`sectionName` and fan out to the two Services. Same image, different `mode`, scaled independently. The chart can create the Gateway (`gateway.create=true`) or attach to a shared one. |
 | **Migrations** | A `pre-install,pre-upgrade` hook Job runs `bank0 migrate up` (embedded migrations) before new pods roll. |
 | **Maintenance** | `expire_holds` + cleanup **and `reconcile()`** run **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. A non-zero `reconcile()` result (ledger/cache drift) is logged at WARN — page on it. |
@@ -182,8 +182,8 @@ platform-owned Gateways wants.
 | Mode | Values | Renders |
 |---|---|---|
 | **Chart owns the Gateway** (default) | `gateway.create=true` | a `Gateway` (per-host HTTPS listeners, cert-manager annotation), both HTTPRoutes, and the HTTP→HTTPS redirect route |
-| **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace` | both HTTPRoutes only, parented to that Gateway. `sectionName` is the chart's own listener naming (`https-api`/`https-portal`/`http`), so the shared Gateway must use those names — otherwise use the mode below. TLS and redirect are the platform's business here. |
-| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all — just Deployments/Services. Write the HTTPRoutes yourself, which is also how you give api and portal *different* parentRefs (two platform Gateways, e.g. external + internal) until per-surface attachment lands. |
+| **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace`; per-surface `api.gateway`/`portal.gateway` (`name`/`namespace`/`sectionName`) where those defaults don't fit | both HTTPRoutes only, parented to that Gateway. The default `sectionName`s are the chart's own listener naming (`https-api`/`https-portal`/`http`); a platform Gateway names its listeners itself, so set `api.gateway.sectionName`/`portal.gateway.sectionName` to *its* names (e.g. `https`). The per-surface blocks also let api and portal parent **different** Gateways (external + internal), and `api.routeAnnotations`/`portal.routeAnnotations` carry platform conventions (e.g. a Gatus endpoint) onto the chart's routes. TLS and redirect are the platform's business here. |
+| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all — just Deployments/Services. Write the HTTPRoutes yourself — still the mode for routes the chart shouldn't own (extra rules, filters). Incompatible with the canary mode below, which needs the api route chart-managed. |
 
 **Two releases in one cluster:** the chart's object names are release-scoped
 (`{{ .Release.Name }}-api`), but if you write your own HTTPRoutes for a staging and a
@@ -211,6 +211,75 @@ HTTPRoute/bank0-https-redirect parentRef bank0 sectionName=http        -> 301 ht
 > to match your install. To attach to a platform-managed shared Gateway instead of
 > creating one, set `gateway.create=false` and point `gateway.name`/`gateway.namespace`
 > at it (that Gateway's `allowedRoutes` must permit routes from this namespace).
+
+### Canary releases (Argo Rollouts, opt-in)
+
+`api.rollout.enabled=true` switches the **api** surface from a Deployment to an
+[Argo Rollouts](https://argo-rollouts.readthedocs.io/en/stable/) canary — one
+**or** the other renders, never both. Portal stays a plain Deployment (2
+replicas of server-rendered HTML don't need progressive delivery). Off by
+default: the default render is unchanged and needs no Argo CRDs.
+
+What flips when it's on:
+
+| Object | Change |
+|---|---|
+| `Deployment/bank0-api` | replaced by a `Rollout` (same pod template — both render from one helper, so they can't drift) |
+| `Service/bank0-api-canary` | added; the route's second backendRef. The Rollouts controller pins **both** api Services to the right ReplicaSets by injecting `rollouts-pod-template-hash` into their selectors ([spec](https://argo-rollouts.readthedocs.io/en/stable/features/specification/)) |
+| `HTTPRoute/bank0-api` | gains the canary backendRef, explicit weights `100`/`0`. Explicit because Gateway API defaults an unspecified weight to **1** ([traffic splitting](https://gateway-api.sigs.k8s.io/guides/traffic-splitting/)) — two weightless refs would split 50/50 before Rollouts ever acted |
+| `HPA/bank0-api` | `scaleTargetRef` retargets `kind: Rollout, apiVersion: argoproj.io/v1alpha1` ([HPA support](https://argo-rollouts.readthedocs.io/en/stable/features/hpa-support/)) — left on the Deployment it would silently scale nothing |
+
+Traffic shifts through the [Gateway API traffic-router
+plugin](https://rollouts-plugin-trafficrouter-gatewayapi.readthedocs.io/), which
+**rewrites the two backendRef weights on the chart's api HTTPRoute** at every
+`setWeight` step. That is why `api.rollout.enabled` **requires
+`api.exposed=true`** (the chart `fail`s otherwise): the canary route must be
+chart-managed — an object whose weights two owners fight over converges on
+whichever wrote last. Bring-your-own-routes cannot carry a canary.
+
+**Cluster prerequisites** (not this chart's to install):
+
+- the Argo Rollouts controller, with the plugin declared in the
+  `argo-rollouts-config` ConfigMap (`trafficRouterPlugins` key, binary from a
+  GitHub release URL or an init-container-mounted `file:///plugins/…`), then a
+  controller restart ([plugin installation](https://rollouts-plugin-trafficrouter-gatewayapi.readthedocs.io/en/latest/installation/));
+- RBAC for the controller to `get`/`patch`/`update` HTTPRoutes ([quick start](https://rollouts-plugin-trafficrouter-gatewayapi.readthedocs.io/en/latest/quick-start/));
+- under GitOps, the tool that owns the route must tolerate the plugin's weight
+  writes — Argo CD needs `ignoreDifferences` on the route's
+  `backendRefs[].weight` *plus* the `RespectIgnoreDifferences=true` sync option,
+  or self-heal reverts the canary to 100/0 mid-rollout.
+
+`api.rollout.steps` is `spec.strategy.canary.steps` verbatim. The default is
+10% → `pause: {}` → 50% → 1m soak: a bare `pause: {}` holds **indefinitely**
+until a human runs `kubectl argo rollouts promote`, while `pause: {duration:}`
+resumes on its own ([canary strategy](https://argo-rollouts.readthedocs.io/en/stable/features/canary/)).
+`api.rollout.analysis` (also verbatim) attaches background analysis;
+`startingStep: N` delays it until step index N ([analysis](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/)).
+An `AnalysisTemplate` it references must live in the **app namespace** — Kargo
+Stage verification reads templates from the **project namespace** instead
+([Kargo verification](https://docs.kargo.io/user-guide/how-to-guides/verification)),
+so a namespace-scoped template is duplicated per consumer; only a
+`ClusterAnalysisTemplate` (`clusterScope: true` here, `kind:
+ClusterAnalysisTemplate` in Kargo) can be shared. Same CRDs, different
+executors: the Rollouts controller runs canary analysis, Kargo's controller
+runs its own verification AnalysisRuns.
+
+> **⚠️ Shared-schema constraint — read before canarying.** Migrations run as a
+> **pre-upgrade hook**, so the schema is migrated **before** the first canary
+> pod starts: for the entire canary window, the OLD pods run against the NEW
+> schema, and a 50/50 split means half of production traffic does. A canary
+> release is therefore only safe when its migrations are **backward-compatible
+> with the previous binary** (additive columns, no renames/drops/retyped
+> columns, no changed PL/pgSQL signatures the old binary calls). If a release
+> can't meet that, don't canary it — promote it in one step, or split the
+> migration expand/contract-style across two releases. This is a property of
+> the app's release discipline, not something the chart can check for you.
+> Aborting a rollout returns *traffic* to stable, not the *schema* — `migrate
+> down` stays a manual, deliberate act.
+
+One-time flips of `api.rollout.enabled` are **not** canaried: Helm deletes the
+Deployment and creates the Rollout in the same upgrade, a plain pod
+replacement. Flip it in a quiet moment, not bundled with an app version bump.
 
 > **Why advisory-locked in-process instead of a CronJob?** It keeps one mechanism
 > and works identically for compose and K8s. A `bank0 maintenance` subcommand also
