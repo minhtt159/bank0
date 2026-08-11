@@ -24,6 +24,59 @@ imagePullSecrets:
       key: {{ .Values.database.secretKey }}
 {{- end -}}
 
+{{/* Pod template for the api surface — shared by the Deployment and the Rollout
+     (api.rollout.enabled renders one OR the other, never both) so the two can't
+     drift: a probe/env fix lands in whichever kind a release actually runs.
+     Call with root context; emit at column 0, callers nindent into place. */}}
+{{- define "bank0.apiPodTemplate" -}}
+metadata:
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  {{- if .Values.image.pullSecrets }}
+  {{- include "bank0.imagePullSecrets" . | nindent 2 }}
+  {{- end }}
+  containers:
+    - name: app
+      image: {{ include "bank0.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      args: ["serve"]
+      ports:
+        - { name: http, containerPort: 8080 }
+      env:
+        - { name: APP_SERVER_MODE, value: "api" }
+        - { name: APP_ADMIN_RUN_MAINTENANCE, value: {{ .Values.api.runMaintenance | quote }} }
+        - { name: APP_ADMIN_SESSION_IDLE_TIMEOUT, value: {{ .Values.admin.sessionIdleTimeout | quote }} }
+        - { name: APP_SERVER_TRUST_PROXY_HEADERS, value: {{ .Values.trustProxyHeaders | quote }} }
+        - { name: APP_SERVER_TRUSTED_PROXY_HOPS, value: {{ .Values.trustedProxyHops | quote }} }
+        - { name: APP_SERVER_AUTO_MIGRATE, value: "false" }
+        - { name: APP_LOGGING_ENCODING, value: {{ .Values.logging.encoding | quote }} }
+        - { name: APP_LOGGING_LEVEL, value: {{ .Values.logging.level | quote }} }
+        - { name: APP_APP_ENV, value: "production" }
+        {{- include "bank0.dsnEnv" . | nindent 8 }}
+        {{- include "bank0.jwtEnv" . | nindent 8 }}
+      readinessProbe:
+        # DB-aware: /readyz pings Postgres, so a pod with a dead/exhausted pool
+        # is pulled from rotation instead of serving 500s.
+        httpGet: { path: /readyz, port: http }
+        initialDelaySeconds: 3
+        periodSeconds: 10
+      livenessProbe:
+        # Cheap, DB-blind: a transient DB blip must not get the pod killed.
+        httpGet: { path: /health, port: http }
+        initialDelaySeconds: 5
+        periodSeconds: 15
+      resources:
+        {{- toYaml .Values.api.resources | nindent 8 }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+{{- end -}}
+
 {{- define "bank0.authSecretName" -}}
 {{- if .Values.auth.existingSecret }}{{ .Values.auth.existingSecret }}{{- else }}{{ .Release.Name }}-auth{{- end -}}
 {{- end -}}

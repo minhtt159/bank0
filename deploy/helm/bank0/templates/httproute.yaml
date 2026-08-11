@@ -11,6 +11,10 @@ metadata:
     app.kubernetes.io/name: bank0
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: api
+  {{- with .Values.api.routeAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   parentRefs:
     {{- include "bank0.parentRef" (dict "root" $ "surface" .Values.api "listener" "https-api") | nindent 4 }}
@@ -20,6 +24,17 @@ spec:
     - backendRefs:
         - name: {{ .Release.Name }}-api
           port: {{ .Values.service.port }}
+          {{- if .Values.api.rollout.enabled }}
+          # Canary mode: the Rollouts Gateway API plugin rewrites these two
+          # weights during a rollout - Argo CD must ignoreDifferences on them.
+          # Explicit 100/0, not weightless: Gateway API defaults an unspecified
+          # weight to 1, which would split 50/50 before Rollouts ever acted.
+          # 100/0 is also the steady state the plugin restores after promotion.
+          weight: 100
+        - name: {{ .Release.Name }}-api-canary
+          port: {{ .Values.service.port }}
+          weight: 0
+          {{- end }}
 {{- end }}
 {{- if .Values.portal.exposed }}
 ---
@@ -31,6 +46,10 @@ metadata:
     app.kubernetes.io/name: bank0
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: portal
+  {{- with .Values.portal.routeAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   parentRefs:
     {{- include "bank0.parentRef" (dict "root" $ "surface" .Values.portal "listener" "https-portal") | nindent 4 }}
@@ -43,9 +62,9 @@ spec:
 {{- end }}
 {{/*
   Redirect route: only when the chart OWNS the Gateway (its :80 listener is named
-  "http" — a platform Gateway's may not be, and its TLS/redirect policy is not ours
+  "http" - a platform Gateway's may not be, and its TLS/redirect policy is not ours
   to set) AND at least one surface is exposed ON IT. Without the exposed guard this
-  rendered with an EMPTY hostnames list, which matches every host on that listener —
+  rendered with an EMPTY hostnames list, which matches every host on that listener -
   so a surface re-parented elsewhere is excluded from both the guard and the
   hostname list, not just from the list.
 */}}

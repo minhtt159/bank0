@@ -30,18 +30,18 @@ logging:
   encoding: json            # json for log collectors; console only for a human tty
 
 admin:
-  # NB: the maker-checker threshold + default transfer limit are NOT app config —
+  # NB: the maker-checker threshold + default transfer limit are NOT app config -
   # they live in the DB (bank_settings, API-8) and are edited from the console
   # Settings panel. Only the session idle timeout is an app/infra knob.
   sessionIdleTimeout: 30m
 
 # Trust forwarded client-IP headers (CF-Connecting-IP / X-Forwarded-For) for the
-# per-IP auth rate-limit key. Set FALSE if a surface is ever reachable directly —
+# per-IP auth rate-limit key. Set FALSE if a surface is ever reachable directly -
 # a client could then forge the header and rotate the limiter key per request.
 #
 # X-Forwarded-For is read RIGHT-to-left, trustedProxyHops entries in, because a
 # Gateway running with use_remote_address (Envoy, nginx, Traefik) APPENDS the real
-# downstream address instead of replacing the header — only the right-most entries
+# downstream address instead of replacing the header - only the right-most entries
 # are proxy-authored. Cloudflare's CF-Connecting-IP is used as-is when present, since
 # Cloudflare replaces it outright.
 #
@@ -102,7 +102,7 @@ gateway:
     clusterIssuer: letsencrypt-prod
   httpsRedirect: true       # add an HTTP->HTTPS redirect HTTPRoute on the :80 listener
 
-# Client-facing API — scaled for HA.
+# Client-facing API - scaled for HA.
 api:
   exposed: true
   host: bank0-api.hnimn.art
@@ -119,11 +119,13 @@ api:
   # Going public, set these in the SAME change:
   #   trustedProxyHops: 2      (cloudflared + Envoy; see the note above)
   #   a Gateway-side global rate limit on /auth/*. The in-app limiter below is a
-  #     PER-REPLICA window, so 3-10 pods means 3-10x the configured limit — and
+  #     PER-REPLICA window, so 3-10 pods means 3-10x the configured limit - and
   #     with HPA on, the real ceiling moves by itself. Envoy Gateway's global rate
   #     limit (Valkey-backed) shares its counters across pods; autoscaling can then
   #     stay on, and the in-app limiter remains defence in depth.
   parentRef: {}
+  # Extra annotations on the api HTTPRoute (e.g. a gatus endpoint definition).
+  routeAnnotations: {}
   replicaCount: 3
   runMaintenance: false     # maintenance runs on portal only (advisory-locked)
   resources:
@@ -134,6 +136,37 @@ api:
     minReplicas: 3
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
+  # Progressive delivery via Argo Rollouts + the Gateway API traffic-router
+  # plugin. OFF by default: the chart renders a plain Deployment and needs no
+  # Argo CRDs. When enabled, the api surface renders a Rollout INSTEAD of the
+  # Deployment (never both), plus a second Service (<release>-api-canary) and a
+  # canary-aware api HTTPRoute whose two backendRef weights the plugin rewrites
+  # (100/0 at rest). Requires: the Argo Rollouts controller with the
+  # argoproj-labs/gatewayAPI plugin installed cluster-side, and api.exposed=true
+  # - the canary route must be chart-managed, because the plugin rewrites its
+  # weights and that object cannot have two owners. Portal stays a Deployment.
+  #
+  # SCHEMA WARNING: migrations run as a pre-upgrade hook, so a canary runs OLD
+  # pods against the NEW schema. Only canary a release whose migrations are
+  # backward-compatible - otherwise promote in one step (docs/04-deployment.md §3).
+  rollout:
+    enabled: false
+    # spec.strategy.canary.steps, verbatim. pause: {} (no duration) holds until
+    # a human runs `kubectl argo rollouts promote`; pause with a duration
+    # resumes on its own. Default: 10% -> hold for a human -> 50% -> short soak
+    # -> full.
+    steps:
+      - setWeight: 10
+      - pause: {}
+      - setWeight: 50
+      - pause:
+          duration: 1m
+    # spec.strategy.canary.analysis, verbatim - background analysis; set
+    # startingStep to skip the first N steps. Empty = manual promotion only.
+    # An AnalysisTemplate here must live in the app namespace (or be a
+    # ClusterAnalysisTemplate) - Kargo Stage verification templates live in the
+    # project namespace, so only cluster-scoped ones can be shared.
+    analysis: {}
 
 # Admin portal + operator console. It is the admin surface and has no MFA of its
 # own (#116): keep it internal, or put an identity-aware gate with MFA in front
@@ -143,6 +176,8 @@ portal:
   exposed: true
   host: bank0-portal.hnimn.art
   parentRef: {}             # same override as api.parentRef; leave empty
+  # Extra annotations on the portal HTTPRoute.
+  routeAnnotations: {}
   replicaCount: 2
   runMaintenance: true
   resources:
