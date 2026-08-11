@@ -107,10 +107,10 @@ api:
   exposed: true
   host: api.bank0.hnimn.art
   # Per-surface parentRef override for the api HTTPRoute. Empty fields fall back
-  # to the gateway block (name/namespace) and the chart's own listener naming
-  # (sectionName https-api, or http when gateway.tls.enabled=false). Those
-  # listener names only exist on a chart-created Gateway — attaching to a
-  # platform-owned one means using ITS names, e.g.:
+  # to the gateway block (name/namespace) and the chart's listener naming
+  # (sectionName https-api, or http when gateway.tls.enabled=false). Those names
+  # exist only on a chart-created Gateway. Platform-owned gateway = use ITS
+  # names, e.g.:
   #   gateway: { name: envoy-external, namespace: network, sectionName: https }
   gateway:
     name: ""
@@ -128,36 +128,34 @@ api:
     minReplicas: 3
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
-  # Progressive delivery via Argo Rollouts + the Gateway API traffic-router
-  # plugin. OFF by default: the chart renders a plain Deployment and needs no
-  # Argo CRDs. When enabled, the api surface renders a Rollout INSTEAD of the
-  # Deployment (never both), plus a second Service (<release>-api-canary) and a
-  # canary-aware api HTTPRoute whose two backendRef weights the plugin rewrites
-  # (100/0 at rest). Requires: the Argo Rollouts controller with the
-  # argoproj-labs/gatewayAPI plugin installed cluster-side, and api.exposed=true
-  # — the canary route must be chart-managed, because the plugin rewrites its
-  # weights and that object cannot have two owners. Portal stays a Deployment.
+  # Progressive delivery: Argo Rollouts + Gateway API traffic-router plugin.
+  # OFF by default — chart renders a plain Deployment, needs no Argo CRDs.
+  # ON: api renders a Rollout INSTEAD of the Deployment (never both), plus a
+  # <release>-api-canary Service and a two-backendRef api HTTPRoute whose
+  # weights the plugin rewrites (100/0 at rest). Portal stays a Deployment.
+  # Needs: Rollouts controller with the argoproj-labs/gatewayAPI plugin
+  # installed cluster-side, and api.exposed=true — the plugin rewrites the
+  # route's weights, so that object can't have two owners.
   #
   # SCHEMA WARNING: migrations run as a pre-upgrade hook, so a canary runs OLD
   # pods against the NEW schema. Only canary a release whose migrations are
-  # backward-compatible — otherwise promote in one step (docs/04-deployment.md §3).
+  # backward-compatible — else promote in one step (docs/04-deployment.md §3).
   rollout:
     enabled: false
-    # spec.strategy.canary.steps, verbatim. pause: {} (no duration) holds until
-    # a human runs `kubectl argo rollouts promote`; pause with a duration
-    # resumes on its own. Default: 10% -> hold for a human -> 50% -> short soak
-    # -> full.
+    # spec.strategy.canary.steps, verbatim. pause: {} = holds until a human runs
+    # `kubectl argo rollouts promote`; pause with duration resumes itself.
+    # Default: 10% -> human hold -> 50% -> short soak -> full.
     steps:
       - setWeight: 10
       - pause: {}
       - setWeight: 50
       - pause:
           duration: 1m
-    # spec.strategy.canary.analysis, verbatim — background analysis; set
-    # startingStep to skip the first N steps. Empty = manual promotion only.
-    # An AnalysisTemplate here must live in the app namespace (or be a
-    # ClusterAnalysisTemplate) — Kargo Stage verification templates live in the
-    # project namespace, so only cluster-scoped ones can be shared.
+    # spec.strategy.canary.analysis, verbatim — background analysis.
+    # startingStep skips the first N steps. Empty = manual promotion only.
+    # Template must live in the app namespace, or be a ClusterAnalysisTemplate:
+    # Kargo reads Stage-verification templates from the PROJECT namespace, so
+    # only cluster-scoped ones are shareable with it.
     analysis: {}
 
 # Admin portal + operator console.

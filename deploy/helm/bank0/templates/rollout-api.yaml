@@ -2,19 +2,17 @@
 {{- if not .Values.api.exposed }}
 {{- fail "api.rollout.enabled requires api.exposed=true: the Rollouts Gateway API plugin rewrites backendRef weights on the api HTTPRoute, so the chart must own that route — bring-your-own-routes cannot carry the canary (the object can't have two owners)." }}
 {{- end }}
-# Argo Rollouts canary for the api surface — rendered INSTEAD of the api
-# Deployment (never both). Traffic shifts via the Gateway API traffic-router
-# plugin, which rewrites the two backendRef weights on the chart's api
-# HTTPRoute; the controller pins the -api (stable) and -api-canary Services to
-# the right ReplicaSets by injecting rollouts-pod-template-hash into their
-# selectors. Prereqs (cluster-side, not this chart's): the Argo Rollouts
-# controller with the argoproj-labs/gatewayAPI plugin configured, and RBAC for
-# it to get/patch/update HTTPRoutes.
+# Argo Rollouts canary for api — rendered INSTEAD of the api Deployment, never
+# both. Traffic shifts via the Gateway API traffic-router plugin, which rewrites
+# the two backendRef weights on the chart's api HTTPRoute. The controller pins
+# -api (stable) and -api-canary to the right ReplicaSets by injecting
+# rollouts-pod-template-hash into their selectors.
+# Cluster-side prereqs, not this chart's: Rollouts controller with the
+# argoproj-labs/gatewayAPI plugin, plus RBAC to get/patch/update HTTPRoutes.
 #
 # SCHEMA WARNING: migrations run as a pre-upgrade hook, so the whole canary —
-# old pods included — runs against the NEW schema. Only ship a canary whose
-# migrations are backward-compatible with the previous release (see
-# docs/04-deployment.md §3).
+# old pods included — runs against the NEW schema. Only canary a release whose
+# migrations are backward-compatible (docs/04-deployment.md §3).
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
@@ -33,8 +31,8 @@ spec:
       app.kubernetes.io/component: api
   strategy:
     canary:
-      # Stable traffic keeps flowing through the existing -api Service; the
-      # -canary Service exists only to be the route's second backendRef.
+      # Stable traffic keeps using the existing -api Service. -canary exists
+      # only as the route's second backendRef.
       stableService: {{ .Release.Name }}-api
       canaryService: {{ .Release.Name }}-api-canary
       trafficRouting:

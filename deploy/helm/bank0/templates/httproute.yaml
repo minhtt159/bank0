@@ -1,6 +1,6 @@
 {{- $gwNs := .Values.gateway.namespace | default .Release.Namespace -}}
 {{- $tls := .Values.gateway.tls.enabled -}}
-{{/* Per-surface parentRef: api/portal.gateway overrides fall back to the shared
+{{/* Per-surface parentRef: api/portal.gateway overrides fall back to shared
      gateway block and the chart's own listener naming. A platform Gateway names
      its listeners itself (e.g. "https"), so sectionName must be settable — the
      hardcoded https-api/https-portal only exist on a chart-created Gateway. */}}
@@ -31,11 +31,11 @@ spec:
         - name: {{ .Release.Name }}-api
           port: {{ .Values.service.port }}
           {{- if .Values.api.rollout.enabled }}
-          # Canary mode: the Rollouts Gateway API plugin rewrites these two
-          # weights during a rollout — Argo CD must ignoreDifferences on them.
+          # Canary mode: the plugin rewrites these two weights mid-rollout, so
+          # Argo CD needs ignoreDifferences on them.
           # Explicit 100/0, not weightless: Gateway API defaults an unspecified
-          # weight to 1, which would split 50/50 before Rollouts ever acted.
-          # 100/0 is also the steady state the plugin restores after promotion.
+          # weight to 1 — that splits 50/50 before Rollouts ever acts. 100/0 is
+          # also the steady state the plugin restores after promotion.
           weight: 100
         - name: {{ .Release.Name }}-api-canary
           port: {{ .Values.service.port }}
