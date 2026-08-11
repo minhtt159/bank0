@@ -2,6 +2,9 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
+  # Values-named, not release-scoped — intentional: a created Gateway is
+  # single-tenant per namespace. Two releases in one namespace share one
+  # (gateway.create=false) or set gateway.name apart.
   name: {{ .Values.gateway.name }}
   labels:
     app.kubernetes.io/name: bank0
