@@ -6,6 +6,10 @@ metadata:
     app.kubernetes.io/name: bank0
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: portal
+  {{- with .Values.workloadAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.portal.replicaCount }}
   selector:
@@ -49,6 +53,9 @@ spec:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 3
             periodSeconds: 10
+            # 2s, not the 1s default: /readyz's own DB deadline is 1s — a slow but
+            # successful ping must not count as a probe failure.
+            timeoutSeconds: 2
           livenessProbe:
             # Cheap, DB-blind: a transient DB blip must not get the pod killed.
             httpGet: { path: /health, port: http }
