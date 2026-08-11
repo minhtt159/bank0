@@ -15,6 +15,10 @@ database:
 
 migrations:
   enabled: true             # run `bank0 migrate up` as a pre-upgrade hook Job
+  # Job deadline, seconds, retries included. Keep SHORTER than the helm
+  # --timeout (default 5m): a lock-blocked migration then fails the upgrade
+  # loudly instead of hanging it and leaving the Job running past it.
+  activeDeadlineSeconds: 240
   # Requests are mandatory on the target cluster (admission policy). goose applies
   # DDL and waits on the server, so the Job is I/O-bound, not CPU-bound.
   resources:
@@ -50,6 +54,13 @@ admin:
 # CF-Connecting-IP makes the count moot on that path).
 trustProxyHeaders: true
 trustedProxyHops: 1
+
+# Annotations on the WORKLOADS (api Deployment/Rollout + portal Deployment
+# metadata — not the pod templates). Main use: reloader.stakater.com/auto:
+# "true" so a rotated Secret rolls the pods, existingSecret/ESO path included
+# — a checksum annotation can't see external rotations. Without Reloader a
+# rotated Secret needs a manual restart (docs/04-deployment.md §3).
+workloadAnnotations: {}
 
 # Pod- and container-level hardening applied to both deployments. The image is
 # distroless:nonroot (uid 65532) and writes nothing to disk, so a read-only root
@@ -128,6 +139,10 @@ api:
     minReplicas: 3
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
+  # PodDisruptionBudget, maxUnavailable: 1 (fixed — see templates/pdb.yaml for
+  # why not minAvailable).
+  pdb:
+    enabled: true
   # Progressive delivery: Argo Rollouts + Gateway API traffic-router plugin.
   # OFF by default — chart renders a plain Deployment, needs no Argo CRDs.
   # ON: api renders a Rollout INSTEAD of the Deployment (never both), plus a
@@ -172,6 +187,9 @@ portal:
   routeAnnotations: {}
   replicaCount: 2
   runMaintenance: true
+  # PodDisruptionBudget — same shape and reasoning as api.pdb.
+  pdb:
+    enabled: true
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits:   { cpu: 500m, memory: 256Mi }

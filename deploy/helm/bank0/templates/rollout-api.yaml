@@ -21,6 +21,10 @@ metadata:
     app.kubernetes.io/name: bank0
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: api
+  {{- with .Values.workloadAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   {{- if not .Values.api.autoscaling.enabled }}
   replicas: {{ .Values.api.replicaCount }}

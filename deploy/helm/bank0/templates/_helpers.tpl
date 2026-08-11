@@ -66,6 +66,9 @@ spec:
         httpGet: { path: /readyz, port: http }
         initialDelaySeconds: 3
         periodSeconds: 10
+        # 2s, not the 1s default: /readyz's own DB deadline is 1s — a slow but
+        # successful ping must not count as a probe failure.
+        timeoutSeconds: 2
       livenessProbe:
         # Cheap, DB-blind: a DB blip must not kill the pod.
         httpGet: { path: /health, port: http }
