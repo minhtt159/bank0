@@ -24,10 +24,10 @@ imagePullSecrets:
       key: {{ .Values.database.secretKey }}
 {{- end -}}
 
-{{/* Pod template for the api surface — shared by the Deployment and the Rollout
-     (api.rollout.enabled renders one OR the other, never both) so the two can't
-     drift: a probe/env fix lands in whichever kind a release actually runs.
-     Call with root context; emit at column 0, callers nindent into place. */}}
+{{/* api pod template — shared by the Deployment and the Rollout (rollout.enabled
+     renders one OR the other, never both) so they can't drift: a probe/env fix
+     lands in whichever kind a release runs.
+     Call with root context; emits at column 0, callers nindent. */}}
 {{- define "bank0.apiPodTemplate" -}}
 metadata:
   labels:
@@ -61,13 +61,13 @@ spec:
         {{- include "bank0.dsnEnv" . | nindent 8 }}
         {{- include "bank0.jwtEnv" . | nindent 8 }}
       readinessProbe:
-        # DB-aware: /readyz pings Postgres, so a pod with a dead/exhausted pool
-        # is pulled from rotation instead of serving 500s.
+        # DB-aware: /readyz pings Postgres. Dead/exhausted pool = pulled from
+        # rotation instead of serving 500s.
         httpGet: { path: /readyz, port: http }
         initialDelaySeconds: 3
         periodSeconds: 10
       livenessProbe:
-        # Cheap, DB-blind: a transient DB blip must not get the pod killed.
+        # Cheap, DB-blind: a DB blip must not kill the pod.
         httpGet: { path: /health, port: http }
         initialDelaySeconds: 5
         periodSeconds: 15

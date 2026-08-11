@@ -14,15 +14,14 @@ spec:
     - { name: http, port: {{ .Values.service.port }}, targetPort: http }
 {{- if .Values.api.rollout.enabled }}
 ---
-# Canary Service for the api Rollout: the second backendRef the traffic-router
-# plugin weights. Same selector as -api at install; the Rollouts controller
-# hash-pins both Services to their ReplicaSets during a canary. Deliberately
-# NOT carrying app.kubernetes.io/name, so the ServiceMonitor (which matches
-# name+instance) skips it — after a rollout finishes both Services select the
-# SAME pods, and matching both would scrape every api pod twice, double-counting
-# the dashboard's sum(rate(...)). Cost: canary pods aren't scraped during a
-# canary; drive analysis from gateway-side metrics, or add a PodMonitor if you
-# need per-canary-pod app metrics.
+# Canary Service for the api Rollout — second backendRef the plugin weights.
+# Same selector as -api at install; Rollouts hash-pins both to their ReplicaSets
+# mid-canary.
+# No app.kubernetes.io/name on purpose, so the ServiceMonitor (matches
+# name+instance) skips it. After promotion both Services select the SAME pods —
+# matching both scrapes every api pod twice and doubles sum(rate(...)).
+# Cost: canary pods unscraped during a canary. Use gateway-side metrics for
+# analysis, or add a PodMonitor if you need per-canary-pod app metrics.
 apiVersion: v1
 kind: Service
 metadata:
