@@ -1,6 +1,6 @@
 bank0 {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }}.
 
-  client API  : https://{{ .Values.api.host }}      (deployment {{ .Release.Name }}-api, mode=api{{ if .Values.api.autoscaling.enabled }}, HPA {{ .Values.api.autoscaling.minReplicas }}-{{ .Values.api.autoscaling.maxReplicas }}{{ end }})
+  client API  : https://{{ .Values.api.host }}      ({{ if .Values.api.rollout.enabled }}rollout{{ else }}deployment{{ end }} {{ .Release.Name }}-api, mode=api{{ if .Values.api.autoscaling.enabled }}, HPA {{ .Values.api.autoscaling.minReplicas }}-{{ .Values.api.autoscaling.maxReplicas }}{{ end }})
   admin portal: https://{{ .Values.portal.host }}   (deployment {{ .Release.Name }}-portal, mode=portal, {{ .Values.portal.replicaCount }} replicas)
   API docs    : https://{{ .Values.api.host }}/docs
 
