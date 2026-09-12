@@ -9,6 +9,8 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/google/uuid"
+
+	"github.com/minhtt159/bank0/internal/db"
 )
 
 // TOTP MFA (spec-step-up-mfa). enroll/confirm sit behind requireJWT (you manage
@@ -198,13 +200,20 @@ func (s *Server) MfaVerify(w http.ResponseWriter, r *http.Request) {
 	if req.Link != nil {
 		txnLink = transferLinkHash(req.Link.DebitAccount, req.Link.CreditAccount, req.Link.AmountMinor)
 	}
-	refresh := newSessionToken()
-	if _, err := s.pg.IssueRefreshToken(r.Context(), userID, hashToken(refresh),
-		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), clampLabel(req.DeviceLabel)); err != nil {
-		s.mapDBError(w, r, err)
-		return
+	// The pending-login token carries the forced-rotation flag from login, so the
+	// second factor does not launder it away: same no-refresh-family rule as Login.
+	pr := db.Principal{UserID: userID, Role: claims.Role, Username: claims.Username,
+		MustChangePassword: claims.PWC}
+	refresh := ""
+	if !pr.MustChangePassword {
+		refresh = newSessionToken()
+		if _, err := s.pg.IssueRefreshToken(r.Context(), userID, hashToken(refresh),
+			int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), clampLabel(req.DeviceLabel)); err != nil {
+			s.mapDBError(w, r, err)
+			return
+		}
 	}
-	s.writeTokenPair(w, userID, claims.Role, claims.Username, refresh, []string{"pwd", "otp"}, txnLink)
+	s.writeTokenPair(w, pr, refresh, []string{"pwd", "otp"}, txnLink)
 }
 
 // transferLinkHash is the WYSIWYS commitment: the exact (debit, credit, amount)

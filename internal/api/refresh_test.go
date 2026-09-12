@@ -12,9 +12,10 @@ import (
 )
 
 type loginResult struct {
-	UserID       string `json:"user_id"`
-	Token        string `json:"token"`
-	RefreshToken string `json:"refresh_token"`
+	UserID                 string `json:"user_id"`
+	Token                  string `json:"token"`
+	RefreshToken           string `json:"refresh_token"`
+	PasswordChangeRequired bool   `json:"password_change_required"`
 }
 
 func clientLogin(t *testing.T, ts *httptest.Server, username, password string) loginResult {

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: bank0 API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Core-banking backend. Two surfaces, separated by domain:
       * **client** (api.bank0.hnimn.art) — customer-facing money operations
@@ -10,6 +10,14 @@ info:
     This file is the source of truth. `oapi-codegen` generates the Go
     `ServerInterface` for each tag (client/admin); handler drift is a compile
     error. Edit here, regenerate, fix the compiler.
+
+    **Forced password rotation.** An operator can require a customer to change
+    their password. Such a login still returns an access token, plus
+    `password_change_required: true` and no `refresh_token`. That token reaches
+    exactly two operations — `POST /me/password` and `POST /auth/logout-all`;
+    every other bearer operation answers `403` with error code
+    `password_change_required`. Changing the password clears the flag; the client
+    then logs in again for a normal pair.
 servers:
   - url: https://api.bank0.hnimn.art
     description: client
@@ -1304,9 +1312,10 @@ components:
         token: { type: string, description: "JWT access token (HS256). Send as 'Authorization: Bearer <token>'. Absent when mfa_required." }
         token_type: { type: string, example: Bearer }
         expires_at: { type: string, format: date-time }
-        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required." }
+        refresh_token: { type: string, description: "Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required or password_change_required." }
         mfa_required: { type: boolean, description: "When true, no tokens are issued; exchange mfa_token + code at /auth/mfa/verify." }
         mfa_token: { type: string, description: "Short-lived (5m) pending-login token. Present only when mfa_required." }
+        password_change_required: { type: boolean, description: "When true, an operator has required a password change: the access token reaches only POST /me/password and POST /auth/logout-all (everything else 403 password_change_required), and no refresh_token is issued. Route the user to a change-password screen." }
     RefreshRequest:
       type: object
       required: [refresh_token]

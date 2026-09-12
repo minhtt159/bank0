@@ -888,7 +888,10 @@ type LoginResponse struct {
 	// MfaToken Short-lived (5m) pending-login token. Present only when mfa_required.
 	MfaToken *string `json:"mfa_token,omitempty"`
 
-	// RefreshToken Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required.
+	// PasswordChangeRequired When true, an operator has required a password change: the access token reaches only POST /me/password and POST /auth/logout-all (everything else 403 password_change_required), and no refresh_token is issued. Route the user to a change-password screen.
+	PasswordChangeRequired *bool `json:"password_change_required,omitempty"`
+
+	// RefreshToken Opaque refresh token. POST to /auth/refresh to rotate it for a new pair. Absent when mfa_required or password_change_required.
 	RefreshToken *string `json:"refresh_token,omitempty"`
 
 	// Token JWT access token (HS256). Send as 'Authorization: Bearer <token>'. Absent when mfa_required.

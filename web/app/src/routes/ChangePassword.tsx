@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
 import { clearAuth } from "../store/auth";
-import { stashNotice } from "../lib/onboarding";
+import { stashNotice, takeNotice } from "../lib/onboarding";
 import { ErrorBanner } from "../lib/feedback";
 
 const MIN_LEN = 12; // matches ChangePasswordRequest.new_password minLength in the spec
@@ -14,6 +14,8 @@ export function ChangePassword() {
   const [confirm, setConfirm] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Set when a forced rotation sent the user here, so the screen says why.
+  const [notice] = useState(() => takeNotice());
 
   const tooShort = next.length > 0 && next.length < MIN_LEN;
   const mismatch = confirm.length > 0 && next !== confirm;
@@ -31,10 +33,6 @@ export function ChangePassword() {
       stashNotice("Password changed. Every device was signed out — sign in with your new password.");
       clearAuth();
       route("/login", true);
-      return;
-      setCurrent("");
-      setNext("");
-      setConfirm("");
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Could not change password");
     } finally {
@@ -47,6 +45,9 @@ export function ChangePassword() {
       <a class="muted" href="/profile">‹ Profile</a>
       <h1>Change password</h1>
       <form onSubmit={submit}>
+        {notice && (
+          <p class="muted" role="status" aria-live="polite" style="padding:0 0 4px">{notice}</p>
+        )}
         {err && <ErrorBanner>{err}</ErrorBanner>}
         <label for="cur">Current password</label>
         <input id="cur" type="password" autocomplete="current-password" value={current}

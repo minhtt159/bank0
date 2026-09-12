@@ -104,7 +104,7 @@ func TestRegisterCreatesLockedPendingUser(t *testing.T) {
 	}
 
 	// The locked user cannot log in yet (right creds, wrong lifecycle state).
-	if _, _, _, ok, err := pg.Login(ctx, uname, "correct-horse-battery"); err != nil || ok {
+	if _, ok, err := pg.Login(ctx, uname, "correct-horse-battery"); err != nil || ok {
 		t.Errorf("login before verify: ok=%v err=%v, want denied", ok, err)
 	}
 }
@@ -225,7 +225,7 @@ func TestVerifyContactHappyPathUnlocksLogin(t *testing.T) {
 	}
 
 	// Login now succeeds.
-	if _, _, _, ok, err := pg.Login(ctx, uname, "correct-horse-battery"); err != nil || !ok {
+	if _, ok, err := pg.Login(ctx, uname, "correct-horse-battery"); err != nil || !ok {
 		t.Errorf("login after verify: ok=%v err=%v, want ok", ok, err)
 	}
 

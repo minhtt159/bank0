@@ -9,15 +9,14 @@ import (
 type changePasswordReq struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
-	RefreshToken    string `json:"refresh_token"`
 }
 
 // ChangePassword implements genclient.ServerInterface. Client surface only (behind
-// requireJWT). It verifies the current password, stores the new one, and revokes
-// every OTHER refresh-token family for the caller — the session performing the
-// change is spared via its refresh_token's family_id, so the user isn't logged out
-// of the device they're using. 204 on success. See
-// docs/specs/spec-change-password.md.
+// requireJWT), and one of the two routes a forced-rotation token may still reach
+// (jwt.go passwordChangeRouteOK). It verifies the current password, stores the new
+// one, and revokes EVERY session and refresh family for the caller — including the
+// one making the call, which must re-authenticate with the new password. 204 on
+// success. docs/06 §2.
 func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {

@@ -47,7 +47,10 @@ func NewServer(cfg config.Config, log *slog.Logger, pg *db.Postgres) *Server {
 	s := &Server{cfg: cfg, log: log, pg: pg, jwtTTL: cfg.Auth.JWTTTL,
 		refreshTTL: cfg.Auth.RefreshTTL, refreshAbs: cfg.Auth.RefreshAbsoluteTTL}
 	if s.jwtTTL <= 0 {
-		s.jwtTTL = time.Hour
+		// Same 15m as the config default (config.go). An hour here would silently
+		// widen every access-token window, forced rotation (00019) included, on a
+		// config that merely forgot the key.
+		s.jwtTTL = 15 * time.Minute
 	}
 	if s.refreshTTL <= 0 {
 		s.refreshTTL = 720 * time.Hour

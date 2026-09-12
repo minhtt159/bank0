@@ -6,7 +6,11 @@ export interface LoginResponse {
   token: string;
   token_type: string;
   expires_at: string;
-  refresh_token: string;
+  // Absent when password_change_required: a flagged account gets no refresh family.
+  refresh_token?: string;
+  // An operator requires a password change. The token reaches only POST /me/password
+  // and POST /auth/logout-all; everything else answers 403.
+  password_change_required?: boolean;
 }
 
 export interface User {
