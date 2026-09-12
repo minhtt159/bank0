@@ -9,6 +9,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+
+	"github.com/minhtt159/bank0/internal/db"
 )
 
 const devJWTSecret = "dev-insecure-secret-change-me"
@@ -31,6 +33,10 @@ type clientClaims struct {
 	// WYSIWYS): sha256(debit|credit|amount) committed at /auth/mfa/verify time.
 	// Changing amount or payee invalidates the factor.
 	TxnLink string `json:"txn_link,omitempty"`
+	// PWC carries users.must_change_password (00019) from the function that
+	// verified the credential. requireJWT holds such a token to the password
+	// change; see passwordChangeRouteOK.
+	PWC bool `json:"pwc,omitempty"`
 }
 
 // hasFreshOTP reports whether the token proves a recent second factor. Step-up
@@ -45,22 +51,23 @@ func (c *clientClaims) hasFreshOTP(maxAge time.Duration) bool {
 	return false
 }
 
-func (s *Server) issueJWT(userID uuid.UUID, role, username string, amr []string, txnLink string) (string, time.Time, error) {
+func (s *Server) issueJWT(pr db.Principal, amr []string, txnLink string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(s.jwtTTL)
 	claims := clientClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   userID.String(),
+			Subject:   pr.UserID.String(),
 			Issuer:    s.cfg.Auth.JWTIssuer,
 			Audience:  jwt.ClaimStrings{s.cfg.Auth.JWTAudience},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
 		},
-		Role:     role,
-		Username: username,
+		Role:     pr.Role,
+		Username: pr.Username,
 		AMR:      amr,
 		AuthTime: now.Unix(),
 		TxnLink:  txnLink,
+		PWC:      pr.MustChangePassword,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := tok.SignedString(s.jwtSecret)
@@ -75,19 +82,20 @@ const mfaTokenAudience = "bank0-mfa"
 // issueMFAToken mints the pending-login token: same HS256 secret, distinct
 // audience, short TTL. Carries role+username so verify can mint the real pair
 // without a second user lookup.
-func (s *Server) issueMFAToken(userID uuid.UUID, role, username string) (string, error) {
+func (s *Server) issueMFAToken(pr db.Principal) (string, error) {
 	now := time.Now()
 	claims := clientClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   userID.String(),
+			Subject:   pr.UserID.String(),
 			Issuer:    s.cfg.Auth.JWTIssuer,
 			Audience:  jwt.ClaimStrings{mfaTokenAudience},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.Auth.MFATokenTTL)),
 			ID:        uuid.NewString(),
 		},
-		Role:     role,
-		Username: username,
+		Role:     pr.Role,
+		Username: pr.Username,
+		PWC:      pr.MustChangePassword,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString(s.jwtSecret)
@@ -144,9 +152,28 @@ func (s *Server) requireJWT(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
+		if claims.PWC && !passwordChangeRouteOK(r) {
+			writeError(w, http.StatusForbidden, "password_change_required",
+				"this account must change its password before using the API (POST /me/password)")
+			return
+		}
 		ctx := context.WithValue(r.Context(), subjectCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// passwordChangeRouteOK is the allowlist a forced-rotation token may still reach:
+// the change itself, and the logout that ends every other session. Anything else
+// is 403 — without this the flag would brick the account instead of gating it.
+func passwordChangeRouteOK(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/me/password", "/auth/logout-all":
+		return true
+	}
+	return false
 }
 
 func bearerToken(r *http.Request) string {

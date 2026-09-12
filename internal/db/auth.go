@@ -11,21 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Login verifies credentials via check_user_credentials, which returns the user's
-// id plus the JWT claims (role, username) so the handler can mint the access token
-// without a second GetUserByID round trip (AUTH-1). Invalid credentials yield zero
-// rows -> ok=false.
-func (p *Postgres) Login(ctx context.Context, username, password string) (id uuid.UUID, role, uname string, ok bool, err error) {
+// Principal is what a credential check resolves to: the user id plus the claims
+// the API mints straight into the access token, with no second round trip
+// (AUTH-1). MustChangePassword is the forced-rotation flag (00019); the client
+// surface refuses everything but the password change while it is set.
+type Principal struct {
+	UserID             uuid.UUID
+	Role               string
+	Username           string
+	MustChangePassword bool
+}
+
+// Login verifies credentials via check_user_credentials, which returns the
+// Principal so the handler can mint the access token without a second
+// GetUserByID round trip (AUTH-1). Invalid credentials yield zero rows ->
+// ok=false.
+func (p *Postgres) Login(ctx context.Context, username, password string) (pr Principal, ok bool, err error) {
 	err = p.Pool.QueryRow(ctx,
-		`SELECT user_id, role, username FROM check_user_credentials($1::citext, $2::text)`,
-		username, password).Scan(&id, &role, &uname)
+		`SELECT user_id, role, username, must_change_password FROM check_user_credentials($1::citext, $2::text)`,
+		username, password).Scan(&pr.UserID, &pr.Role, &pr.Username, &pr.MustChangePassword)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, "", "", false, nil
+		return Principal{}, false, nil
 	}
 	if err != nil {
-		return uuid.Nil, "", "", false, err
+		return Principal{}, false, err
 	}
-	return id, role, uname, true, nil
+	return pr, true, nil
 }
 
 // SessionUser is the authenticated subject behind a portal session.
@@ -159,13 +170,14 @@ func (p *Postgres) RevokeUserFamily(ctx context.Context, userID, familyID uuid.U
 
 // RotateRefreshToken consumes oldHash and mints newHash atomically. On reuse it
 // raises 28000 (family revoked); on expiry/unknown it raises 28P01 — both mapped
-// to 401 by the API. Returns the token's user id.
-func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash string, idleSeconds, absoluteSeconds int, userAgent, ip string) (userID uuid.UUID, role, uname string, err error) {
+// to 401 by the API. Returns the Principal behind the token, so a flag raised
+// after login binds on the next rotation.
+func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash string, idleSeconds, absoluteSeconds int, userAgent, ip string) (pr Principal, err error) {
 	var family uuid.UUID
 	err = p.Pool.QueryRow(ctx,
-		`SELECT user_id, family_id, role, username FROM rotate_refresh_token($1::text, $2::text, $3::int, $4::int, $5::text, $6::text)`,
+		`SELECT user_id, family_id, role, username, must_change_password FROM rotate_refresh_token($1::text, $2::text, $3::int, $4::int, $5::text, $6::text)`,
 		oldHash, newHash, idleSeconds, absoluteSeconds, userAgent, ip,
-	).Scan(&userID, &family, &role, &uname)
+	).Scan(&pr.UserID, &family, &pr.Role, &pr.Username, &pr.MustChangePassword)
 	if err != nil {
 		// Reuse detected (28000): rotate only RAISEd (its own UPDATE would roll
 		// back), so revoke the family here in a separate, committing statement.
@@ -180,9 +192,9 @@ func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash stri
 				slog.Error("refresh-token reuse detected but revoking the family failed", "err", rerr)
 			}
 		}
-		return uuid.Nil, "", "", err
+		return Principal{}, err
 	}
-	return userID, role, uname, nil
+	return pr, nil
 }
 
 // RevokeRefreshToken is single-session logout; idempotent (no error if unknown).

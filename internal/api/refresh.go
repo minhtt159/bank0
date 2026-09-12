@@ -3,27 +3,37 @@ package api
 import (
 	"net/http"
 
-	"github.com/google/uuid"
+	"github.com/minhtt159/bank0/internal/db"
 )
 
 // writeTokenPair issues an access JWT for the user and writes the standard auth
 // response (access token + the given refresh token). Login, Refresh and MfaVerify
 // share it; amr records the factors this token proves (["pwd"] or ["pwd","otp"]).
 // Returns false (after writing a 500) if the JWT can't be minted.
-func (s *Server) writeTokenPair(w http.ResponseWriter, userID uuid.UUID, role, username, refresh string, amr []string, txnLink string) bool {
-	token, exp, err := s.issueJWT(userID, role, username, amr, txnLink)
+//
+// A principal under forced rotation (00019) gets the access token — it is the
+// credential /me/password needs — plus password_change_required, and no refresh
+// token: the account is one password change away from re-authenticating anyway,
+// and a possibly-compromised credential should not gain a long-lived one.
+func (s *Server) writeTokenPair(w http.ResponseWriter, pr db.Principal, refresh string, amr []string, txnLink string) bool {
+	token, exp, err := s.issueJWT(pr, amr, txnLink)
 	if err != nil {
 		s.log.Error("issue jwt", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return false
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":       userID,
-		"token":         token,
-		"token_type":    "Bearer",
-		"expires_at":    exp,
-		"refresh_token": refresh,
-	})
+	body := map[string]any{
+		"user_id":    pr.UserID,
+		"token":      token,
+		"token_type": "Bearer",
+		"expires_at": exp,
+	}
+	if pr.MustChangePassword {
+		body["password_change_required"] = true
+	} else {
+		body["refresh_token"] = refresh
+	}
+	writeJSON(w, http.StatusOK, body)
 	return true
 }
 
@@ -47,7 +57,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newRefresh := newSessionToken()
-	userID, role, uname, err := s.pg.RotateRefreshToken(r.Context(),
+	pr, err := s.pg.RotateRefreshToken(r.Context(),
 		hashToken(req.RefreshToken), hashToken(newRefresh),
 		int(s.refreshTTL.Seconds()), int(s.refreshAbs.Seconds()), r.UserAgent(), s.clientIP(r))
 	if err != nil {
@@ -56,7 +66,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	// A refresh is not a re-authentication of the second factor: step-up
 	// freshness is per-/auth/mfa/verify, never preserved across rotation.
-	s.writeTokenPair(w, userID, role, uname, newRefresh, []string{"pwd"}, "")
+	s.writeTokenPair(w, pr, newRefresh, []string{"pwd"}, "")
 }
 
 // Logout implements genclient.ServerInterface: revoke the presented refresh token

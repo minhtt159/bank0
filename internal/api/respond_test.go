@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/minhtt159/bank0/internal/config"
+	"github.com/minhtt159/bank0/internal/db"
 )
 
 // A list endpoint must emit `[]` not `null` even when the DB returns a nil slice;
@@ -191,7 +192,7 @@ func TestBindingErrorReturnsJSON(t *testing.T) {
 	ts := httptest.NewServer(s.Router())
 	defer ts.Close()
 
-	tok, _, err := s.issueJWT(uuid.New(), "customer", "alice", []string{"pwd"}, "")
+	tok, _, err := s.issueJWT(db.Principal{UserID: uuid.New(), Role: "customer", Username: "alice"}, []string{"pwd"}, "")
 	if err != nil {
 		t.Fatalf("issueJWT: %v", err)
 	}

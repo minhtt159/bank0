@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,8 +37,7 @@ func postLogin(t *testing.T, ts *httptest.Server, username, password string) int
 }
 
 // POST /me/password verifies the current password, stores the new one, and revokes
-// every OTHER refresh family (sparing the session that supplied its refresh token).
-// See spec-change-password.md.
+// EVERY session and refresh family for the user, the caller's included. docs/06 §2.
 func TestHTTPChangePassword(t *testing.T) {
 	ts, pg := newTestServer(t)
 	_, name := mkUser(t, pg, sqlc.UserRoleCustomer)
@@ -79,5 +79,74 @@ func TestHTTPChangePassword(t *testing.T) {
 	}
 	if code := postLogin(t, ts, name, newPw); code != 200 {
 		t.Errorf("new pw login = %d, want 200", code)
+	}
+}
+
+// getMe is the cheapest "can this token still use the API" probe.
+func getMe(t *testing.T, ts *httptest.Server, token string) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /me: %v", err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// A customer an operator has flagged must not keep transacting with the old
+// password: the flag rides the JWT out of check_user_credentials/rotate_refresh_token
+// (00019) and requireJWT holds the token to POST /me/password. Issue #99.
+func TestHTTPFlaggedCustomerHeldToPasswordChange(t *testing.T) {
+	ts, pg := newTestServer(t)
+	id, name := mkUser(t, pg, sqlc.UserRoleCustomer)
+	ctx := context.Background()
+
+	sess := clientLogin(t, ts, name, "pw")
+	if sess.RefreshToken == "" || sess.PasswordChangeRequired {
+		t.Fatal("a normal login must yield a refresh token and no flag")
+	}
+
+	if err := pg.RequirePasswordChange(ctx, id); err != nil {
+		t.Fatalf("require password change: %v", err)
+	}
+
+	// The rotation path picks the flag up: a client that just keeps refreshing
+	// cannot outrun it.
+	rot, code := doRefresh(t, ts, sess.RefreshToken)
+	if code != 200 || !rot.PasswordChangeRequired || rot.RefreshToken != "" {
+		t.Fatalf("refresh while flagged = %d flag=%v refresh=%q, want 200 flag=true refresh=\"\"",
+			code, rot.PasswordChangeRequired, rot.RefreshToken)
+	}
+
+	// Logging in again with the OLD password still works (that is what the flag is
+	// for) but buys nothing: no refresh family, and the API is shut.
+	lr := clientLogin(t, ts, name, "pw")
+	if !lr.PasswordChangeRequired || lr.RefreshToken != "" {
+		t.Fatalf("login while flagged: flag=%v refresh=%q, want true and empty",
+			lr.PasswordChangeRequired, lr.RefreshToken)
+	}
+	if code := getMe(t, ts, lr.Token); code != 403 {
+		t.Errorf("GET /me while flagged = %d, want 403", code)
+	}
+
+	const newPw = "new-password-123"
+	if code := postPassword(t, ts, lr.Token, `{"current_password":"nope","new_password":"`+newPw+`"}`); code != 401 {
+		t.Errorf("wrong current while flagged = %d, want 401", code)
+	}
+	// The one door left open.
+	if code := postPassword(t, ts, lr.Token, `{"current_password":"pw","new_password":"`+newPw+`"}`); code != 204 {
+		t.Fatalf("change password while flagged = %d, want 204", code)
+	}
+
+	// change_password clears the flag (00018): the next login is normal again.
+	after := clientLogin(t, ts, name, newPw)
+	if after.PasswordChangeRequired || after.RefreshToken == "" {
+		t.Fatalf("login after change: flag=%v refresh=%q, want false and non-empty",
+			after.PasswordChangeRequired, after.RefreshToken)
+	}
+	if code := getMe(t, ts, after.Token); code != 200 {
+		t.Errorf("GET /me after change = %d, want 200", code)
 	}
 }

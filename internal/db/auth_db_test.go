@@ -624,7 +624,7 @@ func TestPerAccountLoginLockout(t *testing.T) {
 	}
 
 	// The client surface is locked out too — same account, other door.
-	if _, _, _, ok, err := pg.Login(ctx, name, "correct-horse-battery"); err != nil {
+	if _, ok, err := pg.Login(ctx, name, "correct-horse-battery"); err != nil {
 		t.Fatalf("client login: %v", err)
 	} else if ok {
 		t.Error("client login must also honour the lock")

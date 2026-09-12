@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { api, ApiError } from "../api/client";
 import { setAuth, isAuthed } from "../store/auth";
-import { takeNotice } from "../lib/onboarding";
+import { takeNotice, stashNotice } from "../lib/onboarding";
 import { ErrorBanner } from "../lib/feedback";
 
 export function Login() {
@@ -24,7 +24,13 @@ export function Login() {
     setErr("");
     try {
       const r = await api.login(username, password);
-      setAuth({ token: r.token, userId: r.user_id, expiresAt: r.expires_at, refreshToken: r.refresh_token });
+      setAuth({ token: r.token, userId: r.user_id, expiresAt: r.expires_at, refreshToken: r.refresh_token ?? "" });
+      if (r.password_change_required) {
+        // Every other screen would 403; the change clears the flag.
+        stashNotice("Your bank requires a new password before you can continue.");
+        route("/password", true);
+        return;
+      }
       route("/", true);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Sign in failed");

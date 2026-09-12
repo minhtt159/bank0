@@ -81,7 +81,13 @@ function tryRefresh(): Promise<boolean> {
       const resp = await postJSON("/auth/refresh", { refresh_token: rt });
       if (!resp.ok) return false;
       const d = (await resp.json()) as LoginResponse;
-      setAuth({ token: d.token, userId: d.user_id, expiresAt: d.expires_at, refreshToken: d.refresh_token });
+      setAuth({ token: d.token, userId: d.user_id, expiresAt: d.expires_at, refreshToken: d.refresh_token ?? "" });
+      if (d.password_change_required) {
+        // A rotation the bank has forced: the new token only opens /me/password,
+        // so retrying the original call would just 403. Send the user there.
+        location.hash = "/password";
+        return false;
+      }
       return true;
     } catch {
       return false;

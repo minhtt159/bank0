@@ -157,7 +157,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	id, role, uname, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
+	pr, ok, err := s.pg.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		s.mapDBError(w, r, err)
 		return
@@ -169,26 +169,31 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	// MFA-enabled users get a pending-login token instead of the real pair; the
 	// client exchanges it (+ a TOTP/recovery code) at /auth/mfa/verify.
-	if enabled, err := s.pg.MFAEnabled(r.Context(), id); err != nil {
+	if enabled, err := s.pg.MFAEnabled(r.Context(), pr.UserID); err != nil {
 		s.mapDBError(w, r, err)
 		return
 	} else if enabled {
-		mfaTok, err := s.issueMFAToken(id, role, uname)
+		mfaTok, err := s.issueMFAToken(pr)
 		if err != nil {
 			s.logFor(r.Context()).Error("issue mfa token", "err", err)
 			writeError(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"user_id": id, "mfa_required": true, "mfa_token": mfaTok,
+			"user_id": pr.UserID, "mfa_required": true, "mfa_token": mfaTok,
 		})
 		return
 	}
-	refresh := newSessionToken()
-	if _, err := s.pg.IssueRefreshToken(r.Context(), id, hashToken(refresh),
-		int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), clampLabel(req.DeviceLabel)); err != nil {
-		s.mapDBError(w, r, err)
-		return
+	// Under forced rotation there is no refresh family to mint: the only thing
+	// this login may do is change the password (requireJWT holds it there).
+	refresh := ""
+	if !pr.MustChangePassword {
+		refresh = newSessionToken()
+		if _, err := s.pg.IssueRefreshToken(r.Context(), pr.UserID, hashToken(refresh),
+			int(s.refreshTTL.Seconds()), r.UserAgent(), s.clientIP(r), clampLabel(req.DeviceLabel)); err != nil {
+			s.mapDBError(w, r, err)
+			return
+		}
 	}
-	s.writeTokenPair(w, id, role, uname, refresh, []string{"pwd"}, "")
+	s.writeTokenPair(w, pr, refresh, []string{"pwd"}, "")
 }
