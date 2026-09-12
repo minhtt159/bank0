@@ -60,8 +60,8 @@ func (s *Server) mapDBError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) {
+	pg, isPG := errors.AsType[*pgconn.PgError](err)
+	if isPG {
 		// msg is the raw Postgres exception text. We echo it ONLY for developer-
 		// authored business RAISEs (P0001, and the crafted check_violation messages
 		// below) which are meaningful + safe for the client. For raw, Postgres-
@@ -155,8 +155,7 @@ func dbErrorMessage(err error) string {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "not found"
 	}
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) {
+	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
 		// Echo the Postgres message ONLY for crafted SQLSTATEs whose text is a
 		// developer-authored, operator-safe business message. Any other PgError
 		// (a raw constraint name, a generic engine error) gets a curated message so
@@ -192,8 +191,7 @@ var craftedFlashCodes = map[string]bool{
 // pgx.ErrNoRows / business PgError is an expected outcome and is not logged.
 func (s *Server) dbFlash(r *http.Request, err error) string {
 	if !errors.Is(err, pgx.ErrNoRows) {
-		var pg *pgconn.PgError
-		if !errors.As(err, &pg) {
+		if _, ok := errors.AsType[*pgconn.PgError](err); !ok {
 			s.logFor(r.Context()).Error("unmapped db error -> console flash", "err", err)
 		}
 	}

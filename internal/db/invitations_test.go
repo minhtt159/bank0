@@ -146,9 +146,7 @@ func TestInvitationSingleUseRace(t *testing.T) {
 	var ok, alreadyUsed, other int
 
 	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			email := "race-" + uuid.NewString()[:8] + "@example.com"
 			token := "tok-" + uuid.NewString()
 			_, err := pg.RegisterUser(context.Background(), RegisterParams{
@@ -169,7 +167,7 @@ func TestInvitationSingleUseRace(t *testing.T) {
 				other++
 				t.Errorf("unexpected race error: %v (sqlstate %q)", err, sqlstate(err))
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 

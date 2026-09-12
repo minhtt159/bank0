@@ -102,6 +102,6 @@ func (p *Postgres) VerifyContact(ctx context.Context, tokenHash, codeHash string
 // — not the expired/consumed 28000, which must not count as an attempt. Matching
 // on the SQLSTATE, not the message: the lockout must not depend on wording.
 func isWrongVerificationCode(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "28P01"
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "28P01"
 }
