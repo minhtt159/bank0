@@ -1,4 +1,11 @@
-# bank0 — Ledger, Lifecycle & Idempotency
+# bank0 - Ledger, Lifecycle & Idempotency
+
+**TL;DR.** This is the engine. A transfer moves through a state machine that
+lives in PL/pgSQL, under row locks: `request_transfer` claims the idempotency key
+and places a hold, `post_transfer` writes the two ledger entries whose trigger
+updates both balances. A replay returns the original result rather than posting
+again. A correction is a reversing pair, never an edit. The error table in
+"Error mapping" is the complete set of SQLSTATEs the API knows how to translate.
 
 > The engine. This is where "state transitions live in the database" and
 > "idempotency is enforced by the database" become concrete.
@@ -12,8 +19,8 @@
 stateDiagram-v2
     [*] --> pending : request_transfer()  (creates hold)
     pending --> posted   : post_transfer()    (writes ledger, captures hold)
-    pending --> held         : place_transfer_hold()  (fraud 'review' — funds stay reserved)
-    pending --> under_review : place_transfer_hold()  (AML screening hit — funds stay reserved)
+    pending --> held         : place_transfer_hold()  (fraud 'review' - funds stay reserved)
+    pending --> under_review : place_transfer_hold()  (AML screening hit - funds stay reserved)
     held         --> posted   : client_confirm_transfer() (customer releases)
     held         --> canceled : cancel_transfer()  (customer withdraws)
     held         --> canceled : expire_holds()     (confirmation window expired)
@@ -31,34 +38,34 @@ stateDiagram-v2
 
 | State | `status_iso` | Meaning | Balance effect | Available effect |
 |-------|--------------|---------|----------------|------------------|
-| `pending` | `PDNG` | requested, funds reserved | none (no ledger yet) | debit account ↓ by amount (hold) |
-| `held` | `PDNG` | parked for a **customer** confirmation / cooling-off (Rec 22 `review` decision) | none (no ledger yet) | hold stays active (funds still reserved) |
-| `under_review` | `PDNG` | parked for **operator** screening/AML review (Rec 25 watchlist hit) | none (no ledger yet) | hold stays active (funds still reserved) |
-| `posted` | `ACSC` | settled, ledger written | debit ↓, credit ↑ | hold released, balance already reflects it |
+| `pending` | `PDNG` | requested, funds reserved | none (no ledger yet) | debit account v by amount (hold) |
+| `held` | `PDNG` | parked for a **customer** confirmation / cooling-off (a customer cooling-off decision) | none (no ledger yet) | hold stays active (funds still reserved) |
+| `under_review` | `PDNG` | parked for **operator** screening/AML review | none (no ledger yet) | hold stays active (funds still reserved) |
+| `posted` | `ACSC` | settled, ledger written | debit v, credit ^ | hold released, balance already reflects it |
 | `failed` | `RJCT` | rejected / expired | none | hold released |
 | `canceled` | `CANC` | withdrawn before posting | none | hold released |
 | `reversed` | `ACSC` | settled then corrected | inverse entries applied | n/a |
 
-The **`status_iso`** response field is the ISO-20022-aligned parallel status (Rec 20) —
+The **`status_iso`** response field is the ISO-20022-aligned parallel status -
 a **computed** projection of `status` onto the Berlin Group
 ExternalPaymentTransactionStatus code list (`iso_status()`, [`00008`](../db/migrations/00008_transfers.sql)),
 never stored, exposed additively alongside the flat `status`. It exists so the
-contract speaks rail before a rail exists; the mapping rationale (why `posted →
+contract speaks rail before a rail exists; the mapping rationale (why `posted ->
 ACSC`, why a `reversed` original *stays* `ACSC`, why `RCVD` is unused) lives in
 [`12-rail-readiness.md`](12-rail-readiness.md) §4.
 
-**Two parked states between `pending` and `posted`** (Recs 22/25): `held` and
-`under_review` both sit on money that hasn't reached the ledger yet — the
+**Two parked states between `pending` and `posted`**: `held` and
+`under_review` both sit on money that hasn't reached the ledger yet - the
 authorization hold stays `active` (funds reserved), only its `expires_at` is
 stretched to cover the (longer) window (`transfers.hold_reason` / `hold_expires_at`
 carry the why + the deadline, on a **business-day** clock via `add_business_days`;
 both are kept after release for audit). Release is one-way to `posted`
-(`client_confirm_transfer` for `held`, `approve_request` for `under_review`) — a
+(`client_confirm_transfer` for `held`, `approve_request` for `under_review`) - a
 parked transfer is **never auto-released**; if its window lapses the sweep
 auto-cancels it (§2.6).
 
 **Terminal states** (`posted` can still be `reversed`): `failed`, `canceled`,
-`reversed`. There is no edit and no delete — only forward transitions and
+`reversed`. There is no edit and no delete - only forward transitions and
 reversing entries. That is what makes the history trustworthy.
 
 > **Why two phases?** Reserve (`pending`+hold) and settle (`posted`+ledger) are
@@ -76,12 +83,13 @@ Each function is the **single entry point** for one transition. Handlers call
 exactly one of these and translate its result. Signatures are the contract;
 bodies below are abbreviated to the load-bearing logic.
 
-### 2.1 `request_transfer` — create a pending transfer + hold (idempotent)
+### 2.1 `request_transfer` - create a pending transfer + hold (idempotent)
 
 ```sql
 -- returns (transfer_id, status, was_replay)
 CREATE FUNCTION request_transfer(
     p_idempotency_key TEXT,
+    p_caller          UUID,     -- owner namespace for the key (the JWT subject)
     p_debit_account   UUID,
     p_credit_account  UUID,
     p_amount_minor    BIGINT,
@@ -104,9 +112,9 @@ DECLARE
     v_transfer_id UUID;
 BEGIN
     -- (a) Idempotency gate: first writer wins.
-    INSERT INTO idempotency_keys (key, scope, request_hash, status)
-    VALUES (p_idempotency_key, 'transfer', v_hash, 'in_progress')
-    ON CONFLICT (key) DO NOTHING;
+    INSERT INTO idempotency_keys (owner_id, key, scope, request_hash, status)
+    VALUES (p_caller, p_idempotency_key, 'transfer', v_hash, 'in_progress')
+    ON CONFLICT (owner_id, key) DO NOTHING;
 
     IF NOT FOUND THEN
         -- key already exists -> this is a replay (or a concurrent duplicate)
@@ -157,7 +165,7 @@ BEGIN
     UPDATE idempotency_keys
        SET status = 'completed', transfer_id = v_transfer_id,
            response = jsonb_build_object('transfer_id', v_transfer_id, 'status', 'pending')
-     WHERE key = p_idempotency_key;
+     WHERE owner_id = p_caller AND key = p_idempotency_key;
 
     RETURN QUERY SELECT v_transfer_id, 'pending'::transfer_status, FALSE;
 END;
@@ -168,15 +176,15 @@ The locking + `INSERT ... ON CONFLICT` makes this safe under concurrent
 duplicate submissions: only one transaction creates the row; the other sees the
 key and replays. No double-spend, no double-post.
 
-### 2.2 `post_transfer` — pending → posted (idempotent)
+### 2.2 `post_transfer` - pending -> posted (idempotent)
 
 ```sql
 CREATE FUNCTION post_transfer(
     p_transfer_id UUID,
     -- which source states this call may post FROM. Defaults to {pending} so the
     -- plain 1-arg admin/sqlc call can NEVER release a parked transfer; the release
-    -- paths pass it explicitly (client_confirm_transfer → {held};
-    -- approve_request/screening → {under_review}).
+    -- paths pass it explicitly (client_confirm_transfer -> {held};
+    -- approve_request/screening -> {under_review}).
     p_allow_from  transfer_status[] DEFAULT ARRAY['pending']::transfer_status[]
 ) RETURNS transfer_status LANGUAGE plpgsql AS $$
 DECLARE v_t transfers%ROWTYPE;
@@ -188,7 +196,7 @@ BEGIN
     IF v_t.status = 'posted' THEN RETURN 'posted'; END IF;
     IF NOT (v_t.status = ANY(p_allow_from)) THEN
         RAISE EXCEPTION 'cannot post transfer in state %', v_t.status
-            USING ERRCODE = 'check_violation';                      -- 23514 → 422
+            USING ERRCODE = 'check_violation';                      -- 23514 -> 422
     END IF;
 
     -- Write BOTH legs. The BEFORE INSERT trigger updates balances + balance_after.
@@ -219,13 +227,13 @@ the design's spine.
 > **`p_allow_from` is a safety fence, not a feature knob.** A raw admin/sqlc
 > `post_transfer(id)` posts only from `pending`; releasing a `held` or
 > `under_review` transfer requires the *release* function to opt that source state
-> in. So a stray direct post can never spring a payment past its fraud/AML gate —
+> in. So a stray direct post can never spring a payment past its fraud/AML gate -
 > the only doors into `posted` from a parked state are `client_confirm_transfer`
 > (§2.3b) and `approve_request` (the maker-checker queue,
-> [`00009`](../db/migrations/00009_maker_checker.sql) — it takes an
+> [`00009`](../db/migrations/00009_maker_checker.sql) - it takes an
 > `admin_actions.id`, not a transfer id).
 
-### 2.3 `cancel_transfer` — pending/held/under_review → canceled
+### 2.3 `cancel_transfer` - pending/held/under_review -> canceled
 
 ```sql
 CREATE FUNCTION cancel_transfer(p_transfer_id UUID, p_reason TEXT DEFAULT '')
@@ -238,7 +246,7 @@ BEGIN
     -- lapses) are all cancellable; every other state raises.
     IF v_status NOT IN ('pending', 'held', 'under_review') THEN
         RAISE EXCEPTION 'cannot cancel transfer in state %', v_status
-            USING ERRCODE = 'check_violation';                      -- 23514 → 422
+            USING ERRCODE = 'check_violation';                      -- 23514 -> 422
     END IF;
 
     UPDATE holds SET status='released', released_at=now()
@@ -252,16 +260,16 @@ $$;
 ```
 
 Cancelling a parked transfer releases its (stretched) hold just like a `pending`
-one. The *customer* path (`client_cancel_transfer`) refuses `under_review` — AML
+one. The *customer* path (`client_cancel_transfer`) refuses `under_review` - AML
 screening is operator territory (§2.3b); the operator refuses it via
 `reject_request` ([`00009`](../db/migrations/00009_maker_checker.sql), keyed on the
 queue's `admin_actions.id`), which calls straight into `cancel_transfer`.
 
-### 2.3a `place_transfer_hold` — pending → held / under_review (park, don't post)
+### 2.3a `place_transfer_hold` - pending -> held / under_review (park, don't post)
 
 The single entry point that **parks** a transfer without touching the ledger. Both
-gates (§2.8) funnel through it: the fraud `review` decision → `held`, an AML
-watchlist hit → `under_review`.
+gates (§2.8) funnel through it: the fraud `review` decision -> `held`, an AML
+watchlist hit -> `under_review`.
 
 ```sql
 CREATE FUNCTION place_transfer_hold(
@@ -282,7 +290,7 @@ BEGIN
        SET status = p_new_status, hold_reason = p_reason, hold_expires_at = v_expires
      WHERE id = p_transfer_id;
     -- Keep the funds reserved: STRETCH the active hold to the window's end. No
-    -- active↔non-active edge is crossed, so the held_minor cache stays correct.
+    -- active<->non-active edge is crossed, so the held_minor cache stays correct.
     UPDATE holds SET expires_at = v_expires
      WHERE transfer_id = p_transfer_id AND status = 'active';
 
@@ -302,16 +310,16 @@ $$;
 
 The load-bearing subtlety is the hold **stretch**: because the row never leaves
 `status='active'`, the `held_minor` cache the ledger trigger maintains is untouched,
-and reconcile invariant I4 (held-cache == Σ active holds) still holds while a
+and reconcile invariant I4 (held-cache == SUM active holds) still holds while a
 transfer is parked. The one-way `CHECK (hold_expires_at IS NOT NULL OR status NOT
 IN ('held','under_review'))` guarantees a parked row always carries a deadline for
 the sweep to act on.
 
-### 2.3b `client_confirm_transfer` — held → posted (customer release, idempotent)
+### 2.3b `client_confirm_transfer` - held -> posted (customer release, idempotent)
 
-The customer releases their **own** `held` transfer (the Rec 22 cooling-off).
+The customer releases their **own** `held` transfer (the cooling-off).
 Ownership is enforced exactly like the post/cancel lifecycle: a foreign or unknown
-transfer surfaces as *not found* (→ 404, hiding existence).
+transfer surfaces as *not found* (-> 404, hiding existence).
 
 ```sql
 CREATE FUNCTION client_confirm_transfer(p_caller_subject UUID, p_transfer_id UUID)
@@ -326,10 +334,10 @@ BEGIN
     END IF;
     IF v_status = 'posted' THEN RETURN 'posted'; END IF;                       -- idempotent
     IF v_status <> 'held' THEN
-        RAISE EXCEPTION 'cannot confirm a transfer in state %', v_status;      -- P0001 → 409
+        RAISE EXCEPTION 'cannot confirm a transfer in state %', v_status;      -- P0001 -> 409
     END IF;
     IF v_expires IS NOT NULL AND v_expires < now() THEN
-        RAISE EXCEPTION 'cannot confirm: the confirmation window has expired'; -- P0001 → 409
+        RAISE EXCEPTION 'cannot confirm: the confirmation window has expired'; -- P0001 -> 409
     END IF;
     RETURN post_transfer(p_transfer_id, ARRAY['held']::transfer_status[]);     -- release
 END;
@@ -337,12 +345,12 @@ $$;
 ```
 
 Note the source-state opt-in on the release: `post_transfer(id, {held})`. An
-`under_review` transfer is deliberately **not** confirmable here — screening is
+`under_review` transfer is deliberately **not** confirmable here - screening is
 operator-only, and the customer's `client_cancel_transfer` refuses it too.
 Confirming an already-posted transfer is an idempotent no-op; anything else (wrong
 state, lapsed window) is a `409`.
 
-### 2.4 `reverse_transfer` — posted → reversed (idempotent, appends inverse)
+### 2.4 `reverse_transfer` - posted -> reversed (idempotent, appends inverse)
 
 ```sql
 CREATE FUNCTION reverse_transfer(
@@ -368,14 +376,14 @@ BEGIN
     END IF;
 
     SELECT * INTO v_orig FROM transfers WHERE id=p_transfer_id FOR UPDATE;
-    -- Rec 4: a second reverse under a DIFFERENT key is idempotent, not an error.
+    -- a second reverse under a DIFFERENT key is idempotent, not an error.
     -- Find the existing reversal via reverses_id, point THIS newly-claimed key at it,
-    -- and return its id — so every reverse of the same transfer, across any key,
+    -- and return its id - so every reverse of the same transfer, across any key,
     -- converges on ONE reversal (never a second inverse pair).
     IF v_orig.status = 'reversed' THEN
         SELECT id INTO v_rev_id FROM transfers WHERE reverses_id=p_transfer_id LIMIT 1;
         UPDATE idempotency_keys SET status='completed', transfer_id=v_rev_id
-         WHERE owner_id='00000000-…' AND key=p_idempotency_key;   -- system namespace
+         WHERE owner_id='00000000-...' AND key=p_idempotency_key;   -- system namespace
         RETURN v_rev_id;
     END IF;
     IF v_orig.status <> 'posted' THEN
@@ -384,7 +392,7 @@ BEGIN
     END IF;
 
     -- Clawback safety: lock the account the reversal will DEBIT (the original CREDIT
-    -- account) and confirm it can still be clawed back — otherwise the inverse entry
+    -- account) and confirm it can still be clawed back - otherwise the inverse entry
     -- would drive it below zero and trip the raw accounts CHECK.
     SELECT * INTO v_cp FROM accounts WHERE id = v_orig.credit_account_id FOR UPDATE;
     IF v_cp.kind <> 'system' AND v_cp.balance_minor < v_orig.amount_minor THEN
@@ -412,26 +420,26 @@ END;
 $$;
 ```
 
-The original transfer and its entries are never touched — the correction is new
-history. Reconciliation invariants I1–I3 still hold after a reversal.
+The original transfer and its entries are never touched - the correction is new
+history. Reconciliation invariants I1-I3 still hold after a reversal.
 
-> **A `reversed` original keeps `status_iso = ACSC`** — it *did* settle, and a
+> **A `reversed` original keeps `status_iso = ACSC`** - it *did* settle, and a
 > reversal does not un-settle it. The return is a **separate** reversal transfer
 > (`kind='reversal'`, itself `ACSC`); the interbank leg of a real return would be
 > `disputes.recall_status`/`pacs.004`, not a status flip. This asymmetry is the
-> saga shape a real rail inherits — see [`12-rail-readiness.md`](12-rail-readiness.md) §4/§2.
+> saga shape a real rail inherits - see [`12-rail-readiness.md`](12-rail-readiness.md) §4/§2.
 
-Reverse is idempotent on **two** axes (Rec 4): on the `Idempotency-Key` (a replay
+Reverse is idempotent on **two** axes: on the `Idempotency-Key` (a replay
 with the same key returns the stored reversal id), *and* on the transfer itself (a
-second reverse of an already-reversed original — even under a **different** key —
+second reverse of an already-reversed original - even under a **different** key -
 returns the **existing** reversal id, `200`, never a second inverse pair). The
 `idx_transfers_reverses` partial index keys that short-circuit lookup.
 
-### 2.5 `deposit` / `withdraw` — money crossing the bank boundary
+### 2.5 `deposit` / `withdraw` - money crossing the bank boundary
 
 A deposit doesn't mint money; it's a transfer **from the `external_clearing`
 system account to the customer**. Thin wrappers over `transfer()` (the auto-post
-convenience, §5) — they keep the sentinel namespace, so the fraud/AML gate never
+convenience, §5) - they keep the sentinel namespace, so the fraud/AML gate never
 sees them:
 
 ```sql
@@ -454,11 +462,11 @@ END;
 $$;
 ```
 
-An admin credit is just a `deposit`, fully on the ledger, fully reconcilable —
+An admin credit is just a `deposit`, fully on the ledger, fully reconcilable -
 there is no direct-balance write anywhere. The `external_clearing` balance tells
 you exactly how much money has entered the bank.
 
-### 2.6 `expire_holds` — batch sweep (scheduler-driven)
+### 2.6 `expire_holds` - batch sweep (scheduler-driven)
 
 ```sql
 CREATE FUNCTION expire_holds() RETURNS INT LANGUAGE plpgsql AS $$
@@ -473,7 +481,7 @@ BEGIN
         UPDATE transfers SET status='failed', failure_reason='hold expired'
         WHERE id IN (SELECT transfer_id FROM expired) AND status='pending'
     ), lapsed AS (
-        -- a PARKED transfer whose window ran out: AUTO-CANCEL (never auto-release —
+        -- a PARKED transfer whose window ran out: AUTO-CANCEL (never auto-release -
         -- the safe direction). held = the customer never confirmed; under_review =
         -- the operator never cleared it. Distinct reasons keep the two apart.
         UPDATE transfers
@@ -488,15 +496,15 @@ END;
 $$;
 ```
 
-The sweep now has **three arms** off the one set of expired holds: a lapsed
-`pending` → `failed` (unchanged), a lapsed `held` → `canceled`
-(`'confirmation window expired'`), and a lapsed `under_review` → `canceled`
+The sweep has **three arms** off the one set of expired holds: a lapsed
+`pending` -> `failed` (unchanged), a lapsed `held` -> `canceled`
+(`'confirmation window expired'`), and a lapsed `under_review` -> `canceled`
 (`'review window expired'`). A parked transfer is always cancelled, never posted,
-when its clock runs out — the fail-safe direction for money that never got its
+when its clock runs out - the fail-safe direction for money that never got its
 green light. Run by the in-process maintenance sweep (advisory-locked; could be
-`pg_cron` or a scheduled job instead — see [`04-deployment.md`](04-deployment.md) §3).
+`pg_cron` or a scheduled job instead - see [`04-deployment.md`](04-deployment.md) §3).
 
-### 2.7 `reconcile` — assert the invariants
+### 2.7 `reconcile` - assert the invariants
 
 ```sql
 -- returns one row per failing invariant; empty result = books are correct
@@ -523,7 +531,7 @@ LANGUAGE sql AS $$
     SELECT 'global_nonzero', format('global ledger sums to %s', SUM(signed_amount))
     FROM ledger_entries HAVING SUM(signed_amount) <> 0
     UNION ALL
-    -- I4: held-cache matches active holds (accounts.held_minor == Σ active holds)
+    -- I4: held-cache matches active holds (accounts.held_minor == SUM active holds)
     SELECT 'held_drift', format('account %s: cache=%s holds=%s', a.id, a.held_minor, COALESCE(h.s,0))
     FROM accounts a
     LEFT JOIN (SELECT account_id, SUM(amount_minor) s FROM holds WHERE status='active' GROUP BY account_id) h
@@ -532,7 +540,7 @@ LANGUAGE sql AS $$
     UNION ALL
     -- I5: a parked transfer MUST still reserve its funds. A held/under_review row
     -- with no active hold means money the transfer claims to move was silently freed
-    -- — a leak the sweep would miss. (Recs 22/25.)
+    -- - a leak the sweep would miss.
     SELECT 'missing_hold', format('transfer %s in state %s has no active hold', t.id, t.status)
     FROM transfers t
     WHERE t.status IN ('held','under_review')
@@ -543,12 +551,12 @@ $$;
 `missing_hold` (I5) is the parked-state guardrail: `place_transfer_hold` reserves
 funds by stretching the existing active hold rather than crossing a hold-status
 edge, so I4 (`held_drift`) alone can't catch a parked transfer whose hold went
-missing — I5 asserts every `held`/`under_review` row still owns an `active` hold.
+missing - I5 asserts every `held`/`under_review` row still owns an `active` hold.
 
-### 2.8 The fraud / AML gate (Recs 22 & 25)
+### 2.8 The fraud / AML gate
 
 The parked states are produced by a gate that runs **inside `transfer()`** (the
-auto-post convenience, §5) between `request_transfer` and `post_transfer` — after
+auto-post convenience, §5) between `request_transfer` and `post_transfer` - after
 the pending row + hold exist, before any ledger entry. The gate is a tail of
 guarded steps; the *first* one that fires decides the outcome:
 
@@ -564,17 +572,17 @@ IF v_replay OR v_status <> 'pending' THEN RETURN (v_id, v_status, v_replay); END
 -- must post as before, never park behind a fraud gate.
 IF p_caller = <all-zero sentinel> THEN RETURN post_transfer(v_id); END IF;
 
--- (1) AML screening (Rec 25): a watchlist hit on EITHER party parks the payment
---     for operator review — under_review, 4 business days.
+-- (1) AML screening: a watchlist hit on EITHER party parks the payment
+--     for operator review - under_review, 4 business days.
 IF screen_payment(p_debit, p_credit) FOUND THEN
     RETURN place_transfer_hold(v_id, 'under_review', 'screening', 4, p_caller, <detail>);
 END IF;
 
--- (2) Fraud/warning decision (Rec 22). exclude_transfer = v_id so the just-inserted
+-- (2) Fraud/warning decision. exclude_transfer = v_id so the just-inserted
 --     pending row doesn't inflate its own velocity math (intent & submit agree).
 v_eval := evaluate_transfer(p_caller, p_debit, p_credit, p_amount, 0, v_id);
 IF v_eval.decision = 'block'  THEN RAISE 'payment blocked: %' USING ERRCODE='check_violation'; END IF;
-IF v_eval.required_ack        THEN PERFORM assert_warning_ack(...); END IF;   -- missing → 23514
+IF v_eval.required_ack        THEN PERFORM assert_warning_ack(...); END IF;   -- missing -> 23514
 IF v_eval.decision = 'review' THEN
     RETURN place_transfer_hold(v_id, 'held', <category>, 1, p_caller, <detail>);  -- cooling-off
 END IF;
@@ -583,32 +591,32 @@ RETURN post_transfer(v_id);   -- allow / warn / step_up all post here
 
 The three read-only helpers behind it:
 
-- **`screen_payment(debit, credit)`** — the AML seam. Returns the first active
+- **`screen_payment(debit, credit)`** - the AML seam. Returns the first active
   `watchlist_entries` hit (ILIKE against a party's registered `full_name`, creditor
   preferred) or *no rows*. The list ships **empty**, so with no entries this is a
   no-op and `transfer()` behaves exactly as before.
-- **`evaluate_transfer(caller, debit, credit, amount, step_up_limit, exclude)`** —
-  the Rec 22 decision. Wraps `assess_transfer_risk` (server-authoritative band +
+- **`evaluate_transfer(caller, debit, credit, amount, step_up_limit, exclude)`** -
+  the decision. Wraps `assess_transfer_risk` (server-authoritative band +
   reason codes), picks the single best-matching active `warning_rules` row
   (`block > review > warn`, then `priority DESC`, then oldest), folds in the step-up
-  axis (a configured per-payment limit, a `high` band, or an **unsaved** payee —
+  axis (a configured per-payment limit, a `high` band, or an **unsaved** payee -
   `NOT is_known_payee(caller, credit)`, the same predicate the Go gate reads, and
   deliberately *not* `assess_transfer_risk`'s `first_payment_to_payee`, else the
   preview would under/over-promise step-up), and collapses everything to **one**
   decision by precedence
   `block > review > step_up > warn > allow`. `STABLE`, read-only, and it
-  `assert_caller_owns(caller, debit)` first (`42501` → `403`) so it is safe to expose
+  `assert_caller_owns(caller, debit)` first (`42501` -> `403`) so it is safe to expose
   on the client intent endpoint. **The numeric risk score is never surfaced.** The
-  `warning_rules` table also ships **empty** — with no rules it degrades to today's
+  `warning_rules` table is **empty** by default - with no rules it degrades to the
   `allow`/`step_up` behaviour.
-- **`assert_warning_ack(user, category, debit, credit, amount, cooling_off)`** —
+- **`assert_warning_ack(user, category, debit, credit, amount, cooling_off)`** -
   enforces that the caller already recorded the required warning acknowledgement for
   **this exact payment**. A qualifying `warning_acks` row matches on
   `(user, category, debit account, credit counterparty IBAN, exact amount)` with
   `acknowledged = TRUE`, **aged past** the cooling-off yet still **fresh** (within
-  `cooling_off + 30 min`) — so a customer can neither pre-click far in advance nor
+  `cooling_off + 30 min`) - so a customer can neither pre-click far in advance nor
   replay a stale ack from a prior session. Missing / too-fresh / too-old /
-  mismatched → `check_violation` (`23514` → `409 ack_required`).
+  mismatched -> `check_violation` (`23514` -> `409 ack_required`).
 
 Two invariants make this safe to bolt onto the money path:
 
@@ -619,12 +627,12 @@ Two invariants make this safe to bolt onto the money path:
 2. **`exclude_transfer` keeps intent and submit in agreement.** Both the preflight
    (`POST /transfers/intent`, §5) and the submit gate call `evaluate_transfer`; the
    submit path passes the just-inserted transfer id as `p_exclude_transfer` so its
-   own pending row doesn't inflate the velocity count — the two compute the same
+   own pending row doesn't inflate the velocity count - the two compute the same
    band at a boundary.
 
 ---
 
-## 3. Idempotency — the contract with the API
+## 3. Idempotency - the contract with the API
 
 > Idempotency lives at the DB level, so the API carries **no business logic** of
 > its own. Here is exactly what the API can assume.
@@ -667,42 +675,41 @@ header is `Idempotency-Key`. Keys expire after 7 days (`idempotency_keys.expires
 swept by the same ticker as `expire_holds`.
 
 **Concurrency note**: the `in_progress` status handles the rare case where two
-identical requests race before the first finishes — the second sees the key, and
+identical requests race before the first finishes - the second sees the key, and
 either replays the (now `completed`) result or, if still `in_progress`, the API
 returns `409 Conflict / retry` (the safe answer: "your request is being
 processed").
 
-**Gates never re-run on replay (as-built, Rec 22/25).** The fraud/AML gate (§2.8)
+**Gates never re-run on replay (as-built).** The fraud/AML gate (§2.8)
 runs *after* `request_transfer` has claimed the key, and `transfer()`
 short-circuits on a replay **before** reaching it. So a replayed key returns the
-transfer's **live status verbatim** — `posted`, `held`, `under_review`, whatever it
-became on the first call — and never re-screens, never re-evaluates a warning rule,
+transfer's **live status verbatim** - `posted`, `held`, `under_review`, whatever it
+became on the first call - and never re-screens, never re-evaluates a warning rule,
 and never demands a fresh acknowledgement. A payment parked as `held`/`under_review`
 by the first call stays parked under replay; the customer moves it forward with
 `confirm`/`cancel`, not by re-POSTing.
 
 **A blocked or ack-required attempt releases the key (as-built).** The whole of
-`transfer()` — the key claim in `request_transfer`, the pending row, the hold, and
-the gate — is **one transaction**. A `block` decision or a failed
+`transfer()` - the key claim in `request_transfer`, the pending row, the hold, and
+the gate - is **one transaction**. A `block` decision or a failed
 `assert_warning_ack` `RAISE`s, which rolls the transaction back *including the
 `idempotency_keys` INSERT*. So a `422 payment_blocked` / `409 ack_required` leaves
 **no** claimed key: the customer can acknowledge (respecting the cooling-off) and
 retry with the **same** key, and it will be treated as a fresh request rather than
-replaying the rejection. A successfully *parked* payment, by contrast, commits — its
+replaying the rejection. A successfully *parked* payment, by contrast, commits - its
 key is claimed and points at the `held`/`under_review` transfer.
 
 **Per-owner key namespace (as-built).** The `idempotency_keys` primary key is
-`(owner_id, key)`, not `key` alone — the raw client string is namespaced to the
+`(owner_id, key)`, not `key` alone - the raw client string is namespaced to the
 owning principal. `request_transfer` takes a `p_caller UUID` that the client path
-threads from the authenticated JWT subject (`client_transfer → transfer →
-request_transfer`); the `INSERT … ON CONFLICT (owner_id, key)` claims the key inside
-that owner's namespace. The abbreviated `(key)`/`ON CONFLICT (key)` in the §2 samples
-is the pre-namespace shorthand — the live functions key on `(owner_id, key)`.
+threads from the authenticated JWT subject (`client_transfer -> transfer ->
+request_transfer`); the `INSERT ... ON CONFLICT (owner_id, key)` claims the key inside
+that owner's namespace. The §2 samples show this key.
 
 Two consequences:
 
 - **Cross-owner independence.** The *same* raw key submitted by two different
-  customers is two independent claims — one customer's key can never collide with, or
+  customers is two independent claims - one customer's key can never collide with, or
   surface the stored `response` of, another's.
 - **Sentinel namespace for operator / system paths.** Callers with no customer
   subject (operator `deposit`/`withdraw`/`reverse`, maker-checker staging) use the
@@ -710,15 +717,15 @@ Two consequences:
   preserves the old global semantics *within that one shared namespace*.
 - **Dedicated registration sentinel.** Public `/auth/register` is also pre-auth
   (no subject yet), but it does **not** share the all-zero namespace: it claims its
-  key under a separate owner UUID ending `…0001`, with the `invitation_code` folded
-  into the fingerprint. This closes a key-squatting vector — the all-zero namespace
+  key under a separate owner UUID ending `...0001`, with the `invitation_code` folded
+  into the fingerprint. This closes a key-squatting vector - the all-zero namespace
   also carries **deterministic** system keys (e.g. `dispute-reimburse-<id>`), so a
   self-chosen registration key sharing it could pre-claim or collide with one.
   Isolating registration in its own owner namespace makes that impossible.
 
 Replay and fingerprint-mismatch semantics are **unchanged within a namespace**: a
 replay still returns the stored result, and a same-key/different-`request_hash` reuse
-still raises `check_violation` — the namespace only decides *whose* keyspace the claim
+still raises `check_violation` - the namespace only decides *whose* keyspace the claim
 lands in.
 
 ---
@@ -727,8 +734,8 @@ lands in.
 
 | Trigger | Table | Timing | Job |
 |---------|-------|--------|-----|
-| `trg_ledger_apply_balance` | `ledger_entries` | `BEFORE INSERT` (FOR EACH ROW) | the **only** balance writer: computes the signed delta, sets `NEW.balance_after`, and `UPDATE accounts SET balance_minor = …` (flagged via `set_config('bank0.in_ledger','on',true)`) |
-| `trg_accounts_guard_balance` | `accounts` | `BEFORE UPDATE` | **tamper guard**: rejects any `balance_minor` change unless `bank0.in_ledger='on'` — so a stray `UPDATE accounts SET balance_minor` (admin slip, buggy fn, manual psql) is *blocked*, not merely detected later |
+| `trg_ledger_apply_balance` | `ledger_entries` | `BEFORE INSERT` (FOR EACH ROW) | the **only** balance writer: computes the signed delta, sets `NEW.balance_after`, and `UPDATE accounts SET balance_minor = ...` (flagged via `set_config('bank0.in_ledger','on',true)`) |
+| `trg_accounts_guard_balance` | `accounts` | `BEFORE UPDATE` | **tamper guard**: rejects any `balance_minor` change unless `bank0.in_ledger='on'` - so a stray `UPDATE accounts SET balance_minor` (admin slip, buggy fn, manual psql) is *blocked*, not merely detected later |
 | `trg_ledger_immutable` | `ledger_entries` | `BEFORE UPDATE OR DELETE` | `RAISE EXCEPTION 'ledger_entries is append-only'` |
 | `trg_users_updated_at`, `trg_accounts_updated_at`, `trg_transfers_updated_at`, `trg_disputes_updated_at`, `trg_warning_rules_updated_at` | `users`, `accounts`, `transfers`, `disputes`, `warning_rules` | `BEFORE UPDATE` | the shared `set_updated_at()` fn (defined in `00003`): `NEW.updated_at = now()` |
 
@@ -743,10 +750,10 @@ lands in.
 > `BEFORE INSERT` trigger reads the current `accounts.balance_minor` under the row
 > lock already held by `post_transfer`, computes
 > `balance_after = balance_minor + signed_amount`, sets it on `NEW`, and applies
-> the `UPDATE accounts` — one logical "balance-follows-ledger" step.
+> the `UPDATE accounts` - one logical "balance-follows-ledger" step.
 
 The immutability trigger is what lets the rest of the system *trust* the ledger:
-nothing — not a buggy function, not a stray `psql` `UPDATE`, not the admin UI —
+nothing - not a buggy function, not a stray `psql` `UPDATE`, not the admin UI -
 can rewrite financial history. Corrections go through `reverse_transfer`.
 
 ---
@@ -757,20 +764,20 @@ can rewrite financial history. Corrections go through `reverse_transfer`.
 |--------|------|-------------|-------|
 | POST | `/transfers` | `transfer` (`request_transfer` + gate + `post_transfer`) | requires `Idempotency-Key`; may return `posted`/`held`/`under_review` |
 | POST | `/transfers/intent` | `evaluate_transfer` | read-only fraud/AML preflight; no key, moves no money, writes no row (§2.8) |
-| POST | `/transfers/{id}/post` | `client_post_transfer` (→ `post_transfer`) | for deferred settlement; owner only |
-| POST | `/transfers/{id}/confirm` | `client_confirm_transfer` | release a `held` transfer → `posted`; owner only |
-| POST | `/transfers/{id}/cancel` | `client_cancel_transfer` (→ `cancel_transfer`) | `pending` or `held`; `under_review` → 409 (operator-only) |
+| POST | `/transfers/{id}/post` | `client_post_transfer` (-> `post_transfer`) | for deferred settlement; owner only |
+| POST | `/transfers/{id}/confirm` | `client_confirm_transfer` | release a `held` transfer -> `posted`; owner only |
+| POST | `/transfers/{id}/cancel` | `client_cancel_transfer` (-> `cancel_transfer`) | `pending` or `held`; `under_review` -> 409 (operator-only) |
 | POST | `/transfers/{id}/reverse` | `reverse_transfer` | posted only; requires key + reason; admin |
 | POST | `/accounts/{id}/deposit` | `deposit` | admin; via external_clearing |
 | POST | `/accounts/{id}/withdraw` | `withdraw` | admin; via external_clearing |
-| GET | `/accounts/{id}` | — | balance + available (balance − active holds) |
-| GET | `/accounts/{id}/ledger` | — | statement; cursor on `(posted_at, id)` |
-| GET | `/transfers/{id}` | — | transfer + its legs |
+| GET | `/accounts/{id}` | - | balance + available (balance - active holds) |
+| GET | `/accounts/{id}/ledger` | - | statement; cursor on `(posted_at, id)` |
+| GET | `/transfers/{id}` | - | transfer + its legs |
 
 **The `transfer()` convenience** (auto-post path): one function that runs
 `request_transfer`, the fraud/AML gate (§2.8), then `post_transfer` in a single
 transaction, for the common "settle now" case. Still idempotent (the key guards the
-whole thing), still two-phase underneath — but for a real client subject the gate
+whole thing), still two-phase underneath - but for a real client subject the gate
 sits in the middle, so the returned status can be `posted` (allowed) or a parked
 `held`/`under_review` instead. System/operator (sentinel) callers skip the gate.
 
@@ -778,22 +785,35 @@ sits in the middle, so the returned status can be `posted` (allowed) or a parked
 
 DB functions `RAISE EXCEPTION` with SQLSTATE codes; the handler maps them:
 
-| DB signal | HTTP | Body |
-|-----------|------|------|
-| `insufficient available funds` | 422 | `{"error":"insufficient_funds"}` |
-| `... not active` / `... not found` | 409 / 404 | typed error |
-| `idempotency key reused with different parameters` (`check_violation`) | 422 | `{"error":"idempotency_key_conflict"}` |
-| `payment blocked: …` (`check_violation`, Rec 22 gate) | 422 | `{"error":"payment_blocked"}` |
-| `warning acknowledgement required …` (`check_violation`, Rec 22 gate) | 409 | `{"error":"ack_required"}` |
-| `cannot reverse transfer …: recipient has insufficient funds to claw back` (`check_violation`) | 422 | `{"error":"insufficient_funds"}` |
-| `unique_violation` (23505) | 409 | `{"error":"already_exists"}` |
-| `cannot confirm …` / `cannot cancel a transfer under review` (`P0001`) | 409 | `{"error":"invalid_state"}` |
-| `cannot post transfer in state X` / `cannot cancel transfer in state X` / `cannot place a hold …` / `can only reverse a posted transfer` — all `check_violation` with no matching message arm | 422 | `{"error":"unprocessable"}` |
-| `insufficient_privilege` (42501) — caller doesn't own the debit account | 403 | `{"error":"forbidden"}` |
-| `restrict_violation` (23001) — append-only ledger / balance tamper guard | 409 | `{"error":"immutable"}` |
-| `object_in_use` (55006) — the same key is still `in_progress` | 409 | `{"error":"in_progress"}` |
-| `configuration_limit_exceeded` (53400) — verification resend cooldown | 429 | `{"error":"rate_limited"}` |
-| anything else | 500 | `{"error":"internal"}` (logged with request id) |
+| SQLSTATE | Matched on | HTTP | `error` |
+|---|---|---|---|
+| (no rows) | `pgx.ErrNoRows` | 404 | `not_found` |
+| `23505` unique_violation | - | 409 | `already_exists` |
+| `23514` check_violation | message contains `insufficient` | 422 | `insufficient_funds` |
+| `23514` | `idempotency key` | 422 | `idempotency_key_conflict` |
+| `23514` | `account limit` | 409 | `account_limit` |
+| `23514` | `already handled` | 409 | `invalid_state` |
+| `23514` | `invitation limit` | 409 | `invitation_limit` |
+| `23514` | `invitation code` | 409 | `invalid_state` |
+| `23514` | `blocked` (fraud gate) | 422 | `payment_blocked` |
+| `23514` | `acknowledgement` (fraud gate) | 409 | `ack_required` |
+| `23514` | anything else | 422 | `unprocessable` |
+| `23001` restrict_violation | append-only ledger or balance tamper guard | 409 | `immutable` |
+| `55006` object_in_use | the same key is still in flight | 409 | `in_progress` |
+| `53400` configuration_limit_exceeded | verification resend cooldown | 429 | `rate_limited` |
+| `28000`, `28P01` | refresh-token replay, expiry, unknown | 401 | `unauthorized` |
+| `42501` insufficient_privilege | caller does not own the debit account | 403 | `forbidden` |
+| `22P02` invalid_text_representation | a malformed UUID reached the DB | 400 | `bad_request` |
+| `P0001` RAISE EXCEPTION | `not found` or `does not exist` | 404 | `not_found` |
+| `P0001` | `not active` or `cannot ...` | 409 | `invalid_state` |
+| `P0001` | anything else | 422 | `rejected` |
+| anything else | - | 500 | `internal` (logged with the request id) |
+
+Two rules keep this honest. A raw Postgres message (a constraint name, a generic
+check trip) is never echoed to the caller - only messages a developer wrote in a
+`RAISE` are, because only those are meant to be read by a human on the other end.
+And an unmapped error is a 500 that gets logged in full with its SQLSTATE, so a
+missing case shows up in the logs rather than as a plausible-looking 4xx.
 
 This table *is* the API's business knowledge. Everything else lives in the
 database.
@@ -822,5 +842,5 @@ database.
    -> transfers: T1 -> reversed
 
 reconcile() -> 0 rows. I1, I2 (T1 legs sum 0, T2 legs sum 0), I3 (global 0) all hold.
-History: T1 posted + T2 reversal — nothing edited, full story preserved.
+History: T1 posted + T2 reversal - nothing edited, full story preserved.
 ```

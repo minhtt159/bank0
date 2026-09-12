@@ -107,7 +107,7 @@ func gjson(t *testing.T, b, key string) string {
 }
 
 // Client surface: raise (party-only, one-open, category-validated), list/get scoped
-// to the raiser, empty list is []. See spec-disputes.md.
+// to the raiser, empty list is []. See docs/06 §1.
 func TestHTTPDisputesClient(t *testing.T) {
 	ts, pg := newTestServer(t)
 	resetDisputes(t, pg)

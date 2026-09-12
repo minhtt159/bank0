@@ -14,7 +14,7 @@ import (
 // ListSessions implements genclient.ServerInterface: the caller's active refresh-token
 // families (devices), newest activity first. When the caller presents their current
 // refresh token via X-Refresh-Token, that family is flagged current:true. Client
-// surface only; never returns any token material. See docs/specs/spec-sessions-devices.md.
+// surface only; never returns any token material. See docs/06 §3.
 func (s *Server) ListSessions(w http.ResponseWriter, r *http.Request, params genclient.ListSessionsParams) {
 	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {

@@ -26,7 +26,7 @@ func patchMe(t *testing.T, ts *httptest.Server, token, jsonBody string) (*http.R
 }
 
 // PATCH /me edits only name/email/phone, scoped to the JWT subject, and can never
-// touch password/status/role (escalation guard). See spec-self-service-profile.md.
+// touch password/status/role (escalation guard). See docs/06 §1.
 func TestHTTPUpdateMe(t *testing.T) {
 	ts, pg := newTestServer(t)
 	aliceID, aliceName := mkUser(t, pg, sqlc.UserRoleCustomer)

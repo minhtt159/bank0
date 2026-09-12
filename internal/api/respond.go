@@ -16,7 +16,7 @@ import (
 // endpoint must stay an array (typed clients like [LedgerEntry] / List<Transfer>
 // decode-fail on null). This is the single, audit-proof guarantee for every list
 // handler — present and future (disputes, list-my-transfers, ...). See
-// docs/09-fraudbank-integration.md §0.2.
+// docs/09-fraudbank-integration.md §2.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	if v != nil {
 		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.IsNil() {

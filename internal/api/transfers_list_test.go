@@ -9,7 +9,7 @@ import (
 )
 
 // GET /transfers: cross-account, ownership-scoped, caller-relative direction, bare
-// array, with filters. See spec-list-my-transfers.md (bare-array variant).
+// array, with filters. Bare arrays everywhere: docs/09 §2.
 func TestHTTPListMyTransfers(t *testing.T) {
 	ts, pg := newTestServer(t)
 	aliceID, aliceName := mkUser(t, pg, sqlc.UserRoleCustomer)

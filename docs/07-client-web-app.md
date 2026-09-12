@@ -1,400 +1,200 @@
-# bank0 — Client Web App (PWA, Cloudflare Workers)
+# bank0 - Customer PWA
 
-> A **lightweight, mobile-first PWA** (TypeScript / Preact + Vite; a small bundle —
-> roughly 22 KB of gzipped JS as of 1.0.0)
-> hosted on a **Cloudflare Worker** at `bank0.hnimn.art`, over the client API at
-> `api.bank0.hnimn.art` ([`06-client-api.md`](06-client-api.md)). Auth (JWT +
-> refresh, with MFA/step-up as a designed extension) lives in
-> [`06-client-api.md`](06-client-api.md). Source: `web/app/` (SPA) and `worker/`
-> (Worker).
+**TL;DR.** A Preact SPA served by a Cloudflare Worker at `bank0.hnimn.art`. The
+Worker also proxies `/api/*` to the client API, which means the browser only ever
+talks to one origin and there is no CORS surface. Money data is never cached:
+the service worker precaches the app shell and nothing else. Source is
+`web/app/` (SPA) and `worker/` (Worker).
 
----
-
-## 1. Scope
-
-The six core money flows the app was built around (self-registration, contact
-verification, device management, invites, the activity feed and disputes have since
-been added on top — see the route map in §5):
-
-1. Login with `username:password` → JWT (SSO/MFA covered in §9).
-2. View own details, accounts, statements.
-3. Homepage = the user's accounts as a vertical scroll list.
-4. Create a transaction (transfer).
-5. Transfer card: **fuzzy-pick the source account**, **fuzzy-pick the destination**
-   (from **saved beneficiaries**); a read-only **fraud preflight** (`/transfers/intent`)
-   may add a warning card + acknowledgement + cooling-off before Send.
-6. On success, show transfer details → back to homepage. A gated payment may land
-   `held` (customer confirms or cancels from the receipt) or `under_review`
-   (operator decides; no customer action).
-
-**Principles inherited** ([`01-overview.md`](01-overview.md)): the API stays thin, the
-ledger/DB stays the source of truth, ownership is scoped to the JWT subject. The web app
-adds **no business logic** — it's a presentation layer over the client API.
+The API this app calls is documented in [`06-client-api.md`](06-client-api.md);
+this page covers what the client does with it.
 
 ---
 
-## 2. Architecture — Worker as static host + same-origin proxy
+## 1. The Worker is a static host and a proxy
 
 ```mermaid
-graph LR
-    B[Mobile browser<br/>SPA / PWA] -->|same-origin HTTPS| W
-    subgraph CF[Cloudflare Worker · bank0.hnimn.art]
-      W[Worker]
-      A[(Static assets<br/>index.html, JS, CSS, SW)]
-      W --- A
-    end
-    W -->|proxy /api/* + Bearer| API[client API<br/>api.bank0.hnimn.art]
-    API --> PG[(Postgres · ownership-scoped)]
+flowchart LR
+    B([Browser]) -->|"GET /"| W[Cloudflare Worker]
+    B -->|"/api/transfers"| W
+    W -->|ASSETS binding| S[web/app/dist]
+    W -->|"drop /api, forward"| API[api.bank0.hnimn.art]
+    API --> DB[(Postgres)]
 ```
 
-The Worker does two jobs:
+Diagram: the Worker serves the built SPA from its assets binding and forwards
+anything under `/api/` to the client API, stripping the prefix. Both come back to
+the browser from the same origin.
 
-- **Serve the built SPA** (Workers Static Assets) — `index.html` + hashed JS/CSS +
-  `manifest.webmanifest` + service worker.
-- **Proxy `/api/*` → `https://api.bank0.hnimn.art/*`**, stripping the `/api` prefix and
-  forwarding the `Authorization` header.
+`worker/index.ts` does three things: rewrite and forward `/api/*` (passing
+through `Authorization`, `Idempotency-Key`, method and body), serve everything
+else from `ASSETS` with a single-page-application fallback so deep links work,
+and set `Content-Security-Policy`, `Strict-Transport-Security`,
+`X-Content-Type-Options` and `Referrer-Policy` on HTML responses.
 
-**Why proxy instead of calling `api.*` directly:** the browser only ever talks to its own
-origin (`bank0.hnimn.art`), so there is **no CORS** and **no backend change** to the api
-surface. It also positions the Worker as the future **BFF**
-([`06-client-api.md`](06-client-api.md) §6.3): refresh tokens already exist, so the Worker can
-later hold the refresh token in an `httpOnly; Secure; SameSite=Strict` cookie and inject the
-access token server-side, keeping tokens out of browser JS — **without changing the SPA**.
-
-**Token handling:** the access token (15m TTL) lives in the SPA in memory + a
-`sessionStorage` mirror (survives reload, cleared on tab close). The Worker forwards it as
-`Authorization: Bearer …`. The httpOnly-cookie BFF upgrade is a Worker-only change that
-doesn't touch the SPA.
+`worker/wrangler.toml` carries the route, the assets binding and `API_ORIGIN`.
+One trap: `routes` is a top-level key and must appear *before* any `[table]`
+section, or TOML folds it into `[vars]` and the Worker silently serves nothing.
 
 ---
 
-## 3. The client API behind these flows
-
-Full reference: [`06-client-api.md`](06-client-api.md). The flows map onto these
-endpoints.
-
-### 3.1 Reused as-is — `api/openapi.yaml`, `tags:[client]`
-
-| Flow | Endpoint |
-|------|----------|
-| 1 Login | `POST /auth/login` → `{user_id, token, token_type, expires_at, refresh_token}` (HS256 JWT + opaque refresh). When the account has MFA on, no tokens are issued: the body is `{mfa_required:true, mfa_token}` and the app exchanges it at `POST /auth/mfa/verify` |
-| 2/3 Accounts | `GET /users/{id}/accounts` → `[Account]` (ownership-scoped to `sub`) |
-| 2/3 Account + balance | `GET /accounts/{id}` → `Account` |
-| 2/3 Statement | `GET /accounts/{id}/ledger?cursor&limit` → `[LedgerEntry]` (cursor-paginated, running balance, counterparty) |
-| 4 Preflight | `POST /transfers/intent` → `TransferIntent` (decision + warning copy; read-only, no idempotency key) |
-| 4 Warning ack | `POST /me/warning-acks` (evidence row the submit-time gate checks) |
-| 4 Create transfer | `POST /transfers` (+`Idempotency-Key` header) → `TransferResult` |
-| 6 Transfer detail | `GET /transfers/{id}` → `Transfer` (incl. `hold_reason`/`hold_expires_at`) |
-| 6 Release held | `POST /transfers/{id}/confirm` → posts a `held` transfer (owner only) |
-| 6 Cancel held | `POST /transfers/{id}/cancel` → cancels `pending`/`held` (refuses `under_review`) |
-
-### 3.2 Backend endpoints behind these flows
-
-Both are **client-tagged**, ownership-scoped to the JWT `sub` (the `clientSubject`
-pattern used by `getAccount`/`listUserAccounts`), generated into `genclient`.
-They observe the **shared-op `Params` constraint**
-([`04-deployment.md`](04-deployment.md) §4): being **client-only**, they may carry
-query/body params without colliding with the admin package.
-
-**(a) `GET /me` — own profile** (Flow 2)
-- Returns the caller's own `User` (`full_name`, `email`, `phone_number`, `role`, `status`)
-  resolved from `sub`. No dedicated table — reuses the users read, scoped to the subject.
-- Spec: `tags:[client]` op `getMe`, reusing the `User` schema.
-- Handler: `internal/api/handlers_users.go`, a thin call to the user-by-id query with
-  `id := clientSubject(r)`.
-
-**(b) Saved beneficiaries** (Flow 5) — DB-first per [`01`](01-overview.md)
-
-- **Schema** ([`00011_beneficiaries.sql`](../db/migrations/00011_beneficiaries.sql)):
-  ```sql
-  CREATE TABLE beneficiaries (
-      id                 UUID PRIMARY KEY DEFAULT uuidv7(),
-      owner_user_id      UUID NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-      label              TEXT NOT NULL,                 -- "Mum", "Landlord"
-      credit_account_id  UUID NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
-      iban               VARCHAR(34) NOT NULL,          -- denormalized for display/search
-      owner_name_masked  TEXT NOT NULL DEFAULT '',      -- e.g. "J*** D**" from resolve
-      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-      CHECK (label <> ''),
-      UNIQUE (owner_user_id, credit_account_id)
-  );
-  CREATE INDEX idx_beneficiaries_owner ON beneficiaries (owner_user_id);
-  -- every persisted IBAN passes the same checksum authority as accounts
-  ALTER TABLE beneficiaries
-      ADD CONSTRAINT beneficiaries_iban_checksum CHECK (iban_is_valid(iban));
-  ```
-- **DB functions** (PL/pgSQL, errors via `mapDBError`):
-  - `resolve_account_by_iban(p_iban, p_name_hint, p_caller)` — the
-    confirmation-of-payee call. Looks up an **active** account by IBAN and returns the
-    whole CoP/VOP verdict: `account_id`, `iban`, `owner_name_masked`, `match_result`,
-    `reason_code`, `suggested_name` (close matches only), `account_type`, `gate`,
-    `checked_at`, plus the recipient-risk fields (`recipient_risk`, `mule_suspected`,
-    `signals[]`, `is_first_payment_to_payee`). Never the full PII or a balance.
-    `RAISE` (404-mapped) if not found/inactive. `RETURNS TABLE`, so it's hand-written
-    with pgx, not sqlc.
-  - `add_beneficiary(p_owner, p_label, p_iban) → id` — resolves the IBAN, stores the row;
-    rejects self-IBAN and duplicates.
-  - `delete_beneficiary(p_owner, p_id)` — owner-scoped removal.
-  - `is_known_payee(...)` — the shared step-up predicate (the Go gate and
-    `evaluate_transfer` both call it, so preview and enforcement can't diverge).
-  - **Listing is not a DB function**: `GET /beneficiaries` is a plain owner-scoped
-    sqlc `ListBeneficiaries` SELECT — there is no read-only logic to push down.
-- **Endpoints** (`tags:[client]`):
-  | Method | Path | Purpose |
-  |---|---|---|
-  | GET | `/beneficiaries` | list saved payees (fuzzy is **client-side**) |
-  | POST | `/beneficiaries` | add by IBAN+label → resolves, stores |
-  | DELETE | `/beneficiaries/{id}` | remove |
-  | GET | `/beneficiaries/resolve?iban=&name=` | preview an IBAN before saving: masked owner **plus** the server-side CoP/VOP verdict and recipient-risk fields ([`06`](06-client-api.md) §1). Pass the typed `name` or the verdict degrades to `unable`. The client renders it, never decides |
-- **Transfer is unchanged:** the SPA sends `credit_account = beneficiary.credit_account_id`
-  to `POST /transfers`. Beneficiaries are purely a **lookup/directory**;
-  `createTransfer` still enforces that the **debit** account belongs to the caller.
-- **Queries:** `db/queries/beneficiaries.sql` (sqlc).
-
-> **Privacy note:** IBAN resolution exposes that an account exists + a masked owner name —
-> standard for "confirmation of payee". No balances, no full PII. Rate-limit
-> `/beneficiaries/resolve` per subject (enumeration guard).
-
----
-
-## 4. Frontend stack (lightweight, mobile-first, PWA)
+## 2. Stack
 
 | Concern | Choice | Why |
 |---|---|---|
-| Framework | **Preact + TypeScript** | ~4 KB runtime, React-compatible DX, tiny bundle for mobile. |
-| Build | **Vite** | Fast, first-class Cloudflare/Workers + `vite-plugin-pwa` support. |
-| Router | **`preact-iso`** (or `wouter`) | Hash/history routing in ~1 KB; no heavy router. |
-| State | Signals / context | No Redux; auth token + accounts cache in a small store. |
-| Data | `fetch` wrapper → `/api/*` | Adds `Authorization`, generates `Idempotency-Key`, maps errors. |
-| Fuzzy search | **Fuse.js** (~5 KB) or a hand-rolled scorer | Flows 5 source/destination pick; lists are small (own accounts + saved payees) so it runs entirely client-side. |
-| Styling | Hand-written CSS, mobile-first, CSS variables; system font stack | No UI framework; keeps the bundle tiny and the look native-feeling. |
-| PWA | `vite-plugin-pwa` → `manifest.webmanifest` + service worker | Installable, app-icon, offline shell. **Network-only** for `/api/*` (never cache money data); precache only the app shell. |
-| Money formatting | `Intl.NumberFormat` over **minor units** | API returns `*_minor` int64; format = `value/100` with the account `currency`. |
+| Framework | Preact + TypeScript | a ~4 KB runtime with React-compatible ergonomics |
+| Build | Vite | fast, and `vite-plugin-pwa` is first-class |
+| Router | `preact-iso` | history routing in about a kilobyte |
+| State | `@preact/signals` | the auth token and an accounts cache; no store library |
+| Data | a `fetch` wrapper over `/api/*` | adds the bearer, generates the idempotency key, maps errors |
+| Fuzzy search | hand-rolled scorer in `lib/fuzzy.ts` | the lists are the user's own accounts and saved payees - small enough that a library would be heavier than the problem |
+| Styling | hand-written CSS with custom properties, system font stack | no UI framework |
+| PWA | `vite-plugin-pwa` | installable shell; `/api/*` is network-only |
+| Money | `Intl.NumberFormat` over minor units | the API returns int64 `*_minor`; format `value/100` with the account currency |
 
-**Hard rules for a banking PWA:** never cache API responses containing balances/transfers in
-the service worker; the SW caches **only** the static shell. Always send a fresh
-`Idempotency-Key` (UUID v4) per *user-initiated* transfer attempt, and **reuse the same key on
-retry** of that same attempt so a flaky network can't double-post.
+Measure the bundle with `task webapp:build` rather than trusting a number
+written down somewhere.
 
----
-
-## 5. Screens & flow mapping
-
-The router (`src/app.tsx`, `preact-iso`) registers thirteen routes plus a default;
-everything but `/login`, `/register` and `/verify` is wrapped in `<Protected>`:
-
-```
-/login        →  username/password form            → POST /auth/login (+ MFA exchange), store token+user_id
-/register     →  invite-gated self-registration    → POST /auth/register
-/verify       →  6-digit contact verification      → POST /auth/verify-contact, POST /auth/resend-code
-/             →  Accounts home (vertical scroll)   → GET /users/{id}/accounts        [Flow 3]
-/accounts/:id →  Account detail + statement        → GET /accounts/:id, GET .../ledger ("Load more" per cursor page) [Flow 2/3]
-/profile      →  My details                        → GET /me, PATCH /me              [Flow 2]
-/password     →  Change password                   → POST /me/password
-/devices      →  Signed-in devices                 → GET /me/sessions, DELETE /me/sessions/:family
-/invite       →  Invite a friend                   → GET/POST /me/invitations
-/activity     →  Notification feed                 → GET /me/events, POST /me/events/read
-/disputes     →  My disputes                       → GET /disputes, POST /transfers/:id/dispute
-/transfer     →  Transfer card                     → fuzzy source (accounts) + fuzzy dest (beneficiaries) [Flow 4/5]
-                 + "add payee" → GET /beneficiaries/resolve?iban=&name= → POST /beneficiaries
-                 confirm step → POST /transfers/intent (preflight; warning card / ack / cooling-off)
-                 submit → POST /transfers (Idempotency-Key)
-/transfer/:id →  Result / receipt                  → GET /transfers/:id → "Back to home" [Flow 6]
-(default)     →  Home
-```
-
-Details per flow:
-
-1. **Login.** Single card; on 200 store `{token, user_id, expires_at}`; redirect to `/`.
-   401 → inline error. A 401 from any later call (token expired) → bounce to `/login`.
-2. **Profile + statements.** `/profile` shows `GET /me`. Statements are the `ledger` view:
-   each `LedgerEntry` already carries `direction`, `signed_amount`, `balance_after`,
-   `counterparty_iban/owner`, `description` — render as a running list, paged by an
-   explicit **"Load more"** button that passes the last row's `posted_at` as the next
-   `cursor` (deliberate: an explicit tap beats a scroll heuristic on a money list).
-3. **Home = accounts.** Vertical list of cards (IBAN, kind, `available_minor` prominent,
-   `balance_minor` secondary, status badge if not `active`). Tap → `/accounts/:id`.
-4. **Create transaction.** FAB / "Send" → `/transfer`.
-5. **Transfer card.**
-   - **Source:** fuzzy filter over the user's own accounts (already loaded). Default =
-     `is_default` account.
-   - **Destination:** fuzzy filter over `GET /beneficiaries`. Inline "**+ Add payee**":
-     enter IBAN → `GET /beneficiaries/resolve` shows the masked owner for confirmation →
-     `POST /beneficiaries` → it appears in the list, selected.
-   - Amount input in major units → convert to `amount_minor`. Client-side guard against
-     `amount_minor > available_minor`. Confirm step.
-   - **Fraud preflight (Rec 22).** Entering the confirm step fires `POST /transfers/intent`
-     (advisory — a failed call never blocks). A returned warning renders as a severity-styled
-     card (colored border **plus** a text tag, never color-only; `role="alert"` for critical).
-     `decision:"block"` hides Send with plain-language guidance. `required_ack` adds an
-     "I understand the risk" checkbox: ticking it POSTs `/me/warning-acks` (category from the
-     warning, payee IBAN, exact amount) and starts a `cooling_off_seconds` countdown
-     (mm:ss on the Send button, `aria-live` polite) — Send enables at zero. `decision:"review"`
-     shows info copy that the payment will be held after sending.
-   - Submit `POST /transfers` with a UUID `Idempotency-Key` (held for the duration of the
-     attempt so retries dedupe). Submit-time `409 ack_required` / `422 payment_blocked`
-     re-render the same warning UI (re-fetching the preflight for real copy), not a raw error.
-6. **Receipt.** On success use `transfer_id` → `GET /transfers/:id`; show status, amount,
-   parties, `posted_at`. If `status=pending` (deferred settlement / maker-checker), say so.
-   `status=held` (risk cooling-off): explain the hold, show `hold_expires_at`
-   ("confirm before … or it will be canceled"), with **Confirm and send**
-   (`POST /transfers/:id/confirm`) and **Cancel payment** buttons. `status=under_review`
-   (screening): "being reviewed by the bank, no action needed, decision by
-   `hold_expires_at`" — no customer actions. "Back to home" → `/` (refetch accounts
-   so the new balance shows).
+Two rules that are not negotiable in a banking client. The service worker never
+caches a response carrying a balance or a transfer - only the static shell. And
+every user-initiated transfer attempt carries one `Idempotency-Key`, reused on
+every retry of *that* attempt, so a flaky network cannot double-post. A new
+attempt, after the user edits something, gets a new key.
 
 ---
 
-## 6. Repo layout & build
+## 3. Routes
+
+`src/app.tsx` registers thirteen routes plus a default. Everything except
+`/login`, `/register` and `/verify` is wrapped in `<Protected>`.
 
 ```
-web/app/                     # the customer SPA (sibling of web/template/, the portal UI)
-  index.html                 # public/icon.svg
+/login        username and password        POST /auth/login, then the MFA exchange if asked
+/register     invite-gated sign-up         POST /auth/register
+/verify       6-digit contact code         POST /auth/verify-contact, POST /auth/resend-code
+/             accounts home                GET /users/{id}/accounts
+/accounts/:id account detail + statement   GET /accounts/:id, GET .../ledger
+/profile      my details                   GET /me, PATCH /me
+/password     change password              POST /me/password
+/devices      signed-in devices            GET /me/sessions, DELETE /me/sessions/:family
+/invite       invite a friend              GET and POST /me/invitations
+/activity     notification feed            GET /me/events, POST /me/events/read
+/disputes     my disputes                  GET /disputes, POST /transfers/:id/dispute
+/transfer     the transfer card            see below
+/transfer/:id receipt                      GET /transfers/:id
+```
+
+**Login** stores `{token, user_id, expires_at}` and redirects home. Three
+responses need their own branch: `mfa_required` routes to the code entry,
+`password_change_required` routes to `/password` with a notice (every other
+screen would answer 403), and a 401 shows one generic error.
+
+**Statements** page with an explicit "Load more" button rather than an infinite
+scroll, passing the last row's cursor. On a list of money movements, a deliberate
+tap beats a scroll heuristic. Each ledger entry already arrives with its
+direction, signed amount, running balance, counterparty and description.
+
+**The transfer card** is the involved one:
+
+1. Pick a source from the user's own accounts, defaulting to the `is_default`
+   one. Pick a destination from saved payees, or add one inline - enter an IBAN,
+   `GET /beneficiaries/resolve` shows the masked owner name for confirmation,
+   `POST /beneficiaries` saves it.
+2. Amounts are entered in major units and converted to minor. The client checks
+   the amount against the available balance, which the server checks again.
+3. Entering the confirm step fires `POST /transfers/intent`, the read-only fraud
+   preflight. It is advisory: if the call fails, the flow continues. A returned
+   warning renders as a severity-styled card with both a colored border and a
+   text tag, never color alone, and `role="alert"` when it is critical.
+   `decision: "block"` hides Send. `required_ack` adds an "I understand" checkbox
+   that posts the acknowledgement and starts the cooling-off countdown - Send
+   enables when it reaches zero.
+4. Submit with a `crypto.randomUUID()` idempotency key. A submit-time
+   `409 ack_required` or `422 payment_blocked` re-renders the same warning card
+   rather than a raw error banner, because the database is the authority even
+   when the advisory preflight was skipped or raced.
+
+**The receipt** shows status, amount, parties and time. `pending` means deferred
+settlement or maker-checker. `held` explains the cooling-off, shows the expiry,
+and offers Confirm and Cancel. `under_review` says the bank is reviewing it and
+offers no actions, because the customer has none.
+
+---
+
+## 4. Layout
+
+```
+web/app/
   src/
-    main.tsx  app.tsx        # render + router/guard/shell (preact-iso)
-    api/client.ts            # fetch wrapper: base /api, Bearer, Idempotency-Key, 401 refresh, error map
-    api/types.ts             # hand-kept mirror of the openapi client schemas
-    store/auth.ts            # @preact/signals: token + refresh token (sessionStorage)
-    routes/                  # Login Register Verify Home Account Profile ChangePassword
-                             # Devices Invite Activity Disputes Transfer Receipt
-    components/AddPayeePanel.tsx
-    hooks/useFraudGate.ts    # the preflight → warning → ack → cooling-off state machine
-    lib/                     # money fuzzy iban duration labels onboarding
-                             # fraudGate (+ .test.ts siblings), feedback.tsx (toasts)
-    styles.css
-  vite.config.ts             # @preact/preset-vite + vite-plugin-pwa; dev proxy /api -> :8090
-  vitest.config.ts           # unit tests for the pure lib/ helpers
-  playwright.config.ts  e2e/ # end-to-end suite (globalSetup boots Postgres + api + vite)
+    main.tsx  app.tsx        render, router, guard, shell
+    api/client.ts            fetch wrapper: /api base, bearer, idempotency key, 401 refresh, error map
+    api/types.ts             hand-kept mirror of the client schemas
+    store/auth.ts            signals: access + refresh token (sessionStorage)
+    routes/                  one file per route above
+    components/              AddPayeePanel and friends
+    hooks/useFraudGate.ts    preflight -> warning -> ack -> cooling-off state machine
+    lib/                     money, fuzzy, iban, duration, labels, onboarding, fraudGate, feedback
+  vite.config.ts             preset-vite + vite-plugin-pwa; dev proxy /api -> :8090
+  playwright.config.ts e2e/  browser suite; globalSetup boots Postgres, the api binary and vite
 worker/
-  index.ts                   # static-asset serving + /api/* proxy to api.bank0.hnimn.art
-  wrangler.toml              # route bank0.hnimn.art/*, [assets] binding, API_ORIGIN var
+  index.ts                   asset serving + /api/* proxy
+  wrangler.toml              route, assets binding, API_ORIGIN
 ```
 
-- **Type safety:** `src/api/types.ts` is a hand-kept mirror of the client schemas
-  (generatable with `openapi-typescript` to track the contract like the Go side).
-- **Tooling:** `task webapp:dev` (Vite + `/api` proxy), `task webapp:build`
-  (`tsc --noEmit` + Vite + PWA), `task webapp:deploy` (build + `wrangler deploy`),
-  `task e2e` (Playwright browser suite — globalSetup boots a throwaway Postgres +
-  api binary + vite; pass args after `--`, e.g. `task e2e -- --ui`).
+`src/api/types.ts` is maintained by hand against `api/openapi.yaml`. It could be
+generated with `openapi-typescript` the way the Go side is, and is not - so a
+contract change means editing that file too, and nothing fails the build if you
+forget.
+
+Tasks: `task webapp:dev`, `task webapp:build` (`tsc --noEmit` then Vite),
+`task webapp:deploy`, `task e2e` (arguments after `--`, for example
+`task e2e -- --ui`).
 
 ---
 
-## 7. Cloudflare Worker
+## 5. Cross-cutting rules
 
-`worker/wrangler.toml` (the route is a top-level key — it must precede any `[table]`,
-or TOML folds it into `[vars]`):
+**Errors.** The API answers `{error, message}`. Map `401` to re-login, `403` to a
+permission message - except `step_up_required`, which routes to the MFA step and
+retries with the same idempotency key, and `password_change_required`, which
+routes to `/password`. `409 ack_required` and `422 payment_blocked` go back
+through the warning card. Other `422`s are business rules shown inline
+(insufficient funds, a limit, a frozen account). `429` backs off.
 
-```toml
-name = "bank0-webapp"
-main = "index.ts"
-compatibility_date = "2026-01-01"
-routes = [{ pattern = "bank0.hnimn.art/*", zone_name = "hnimn.art" }]
+**Money.** Every amount is an int64 minor unit. Never a float, at any point.
 
-[assets]
-directory = "../web/app/dist"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-
-[vars]
-API_ORIGIN = "https://api.bank0.hnimn.art"
-```
-
-Worker logic (`worker/index.ts`):
-- `GET /api/*` (and other methods): rewrite path (drop `/api`), `fetch(API_ORIGIN + rest)`,
-  pass through `Authorization`, `Idempotency-Key`, body, method; return the upstream response.
-- Everything else: serve from `ASSETS`; **SPA fallback** → `index.html` for unknown paths so
-  client routes deep-link.
-- Security headers on HTML: `Content-Security-Policy` (default-src self; connect-src self),
-  `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`.
-- (Later/BFF) terminate refresh-token cookies here; never expose the refresh token to JS.
+**Tokens.** The access token lives in memory and `sessionStorage`, never
+`localStorage`, and clears when the tab closes. The SPA refreshes transparently
+on a 401 in a single flight, so a burst of parallel requests cannot each spend
+the refresh token - a replayed refresh token revokes the whole family.
 
 ---
 
-## 8. Idempotency, errors, money — cross-cutting rules
+## 6. Security posture
 
-- **Idempotency-Key** is **required** by `POST /transfers`. Generate `crypto.randomUUID()`
-  when the user taps "Confirm"; keep it pinned to that attempt and resend it on retry. A new
-  attempt (user edits and resubmits) gets a new key.
-- **Error mapping:** the API returns `{error, message}`. Map `401`→re-login,
-  `403`→permission/ownership (or `step_up_required` → OTP step-up), `404`→not found,
-  `409 ack_required`→warning card + ack + cooling-off (not a raw banner),
-  `422 payment_blocked`→blocking warning card, other `422`→business rule
-  (insufficient funds, limit, frozen) shown inline, `429`→back off.
-- **Money:** all amounts are **int64 minor units**; never use floats. Display with
-  `Intl.NumberFormat(locale, {style:'currency', currency})` on `minor/100`.
+The SPA talks only to its own origin. Ownership is enforced server-side by
+subject scoping; the client is never trusted with it. `/beneficiaries/resolve`
+returns a masked owner name and is rate limited, so it cannot be walked to
+enumerate account holders. The confirm step always shows the resolved payee and
+IBAN before anything is sent.
 
----
-
-## 9. Auth lifecycle & SSO
-
-**Current:** username/password → `POST /auth/login` → short (15m) HS256 access token
-**+ refresh token**. The SPA refreshes transparently on a 401 (single-flight; the same
-`Idempotency-Key` rides the retry so a transfer can't double-post) and revokes server-side on
-sign-out. Full design in [`06-client-api.md`](06-client-api.md) §3.
-
-**Designed extensions ([`06-client-api.md`](06-client-api.md) §6):**
-- **Move refresh to the Worker/BFF** — hold the refresh token in an `httpOnly` cookie so the SPA
-  only ever sees a short-lived access token in memory. SPA code is unaffected.
-- **MFA (TOTP)** at login + **step-up** for large transfers — the transfer screen handles a
-  `step_up_required` 403 by routing to an MFA-verify step, then retrying with the same
-  `Idempotency-Key`.
-
-**SSO / OIDC (future, [`06-client-api.md`](06-client-api.md) §6.3):**
-- Move customer identity to OAuth2/OIDC (managed IdP or embedded). The Worker runs the
-  **authorization-code + PKCE** flow, exchanges the code server-side, and holds tokens in
-  httpOnly cookies — the SPA stays a pure relying party.
-- API migrates JWT validation from HS256-shared-secret to **RS256/JWKS** (`parseJWT` swaps to a
-  key set; `aud=bank0-client` unchanged). Login button becomes "Continue with <IdP>" alongside
-  (or replacing) the password form. No ledger/ownership changes — `sub` still maps to `users.id`.
+Two hardening steps are designed but not built. The refresh token could live in
+an httpOnly cookie terminated at the Worker, so the SPA only ever holds a
+short-lived access token - a Worker-only change, invisible to the SPA. And
+customer identity could move to OIDC, with the Worker running
+authorization-code + PKCE and `parseJWT` switching to RS256/JWKS. Neither changes
+the ledger or ownership scoping, because `sub` still maps to `users.id`. See
+[`06-client-api.md`](06-client-api.md) §6.3.
 
 ---
 
-## 10. Security model
+## 7. Decisions worth knowing
 
-- SPA talks **only** to its own origin; the Worker proxies to `api.*` (no CORS surface).
-- Access token in memory + `sessionStorage`; the path to an httpOnly-cookie BFF is a
-  Worker-only change. Tokens never go in `localStorage`.
-- The service worker **never** caches `/api/*` (money data); it precaches the shell only.
-- CSP/HSTS/nosniff headers from the Worker; HTTPS only.
-- Every transfer carries a stable `Idempotency-Key`; retries never double-post.
-- `/beneficiaries/resolve` returns the masked owner only, **rate-limited** (enumeration guard).
-- Ownership is enforced server-side (`clientSubject` scoping) — the SPA is never trusted.
-- Confirm-before-send on transfers; the resolved payee/IBAN is shown at confirm time.
-
----
-
-## 11. Build & deploy artifacts
-
-The SPA and Worker are built and deployed via the Taskfile:
-
-- **Backend support** — `GET /me` plus the `beneficiaries` schema/functions in
-  `db/migrations/`. Confirmation-of-payee `resolve` is hand-written pgx
-  (`resolve_account_by_iban()` RETURNS TABLE, which sqlc can't expand).
-- **Worker** (`worker/`) — static assets + `/api/*` proxy, `wrangler.toml`, SPA
-  fallback, security headers.
-- **SPA** (`web/app/`) — Vite + Preact + TS, api client (Bearer + Idempotency-Key +
-  error map), signals auth store, the six flows above, and the PWA layer (manifest +
-  icon, autoUpdate service worker that precaches the shell and treats `/api/*` as
-  network-only). The production build stays small — on the order of 22 KB of
-  gzipped JS at 1.0.0; measure it (`task webapp:build`) rather than trusting a
-  number in a doc.
-
-Auth hardening (Worker-held refresh cookie + MFA) and SSO/OIDC (Worker PKCE +
-RS256/JWKS on the API) are designed extensions — see
-[`06-client-api.md`](06-client-api.md) §6 and §9 below.
-
----
-
-## 12. Design choices
-
-- **Beneficiary self-transfer:** the picker shows the user's own *other* accounts as
-  an implicit group and saved payees as another.
-- **Confirmation of payee depth:** the masked owner name (initials) is shown at
-  resolve time, balancing the privacy/UX trade-off in `resolve_account_by_iban`.
-- **Locale/currency:** single currency ([`02`](02-data-model.md)); the display locale
-  is **browser-detected** — `Intl.NumberFormat(undefined, …)` in `lib/money.ts`, so
-  amounts format per the user's own locale.
-- **Token persistence:** `sessionStorage` (clears on tab close), until the BFF cookie
-  lands.
-- **Offline:** strictly online, given it's a bank — the service worker caches only the
-  app shell.
+- **Self-transfers** appear as an implicit group in the destination picker: the
+  user's own other accounts, then saved payees.
+- **Confirmation of payee shows initials**, not the full name. That is the
+  privacy-versus-usability trade-off made in `resolve_account_by_iban`.
+- **The display locale is browser-detected** - `Intl.NumberFormat(undefined, ...)`
+  in `lib/money.ts` - while the currency is single and comes from the account.
+- **There is no offline mode.** It is a bank; the service worker caches the shell
+  so the app opens, and every piece of data requires the network.

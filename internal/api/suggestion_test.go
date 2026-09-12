@@ -69,7 +69,7 @@ func seedScenario(t *testing.T, pg *db.Postgres, name string, target uuid.UUID, 
 // GET /transfers/suggestion (mule menu, v2): {"options":[...]} of up to 3 third-party
 // mule candidates drawn from the active guided_scenarios short-list — never the
 // caller's own; empty when no scenario applies; foreign from_account 403; a chosen
-// candidate still flows through POST /transfers. See spec-banking-grade-hardening.md §5.
+// candidate still flows through POST /transfers. See docs/09 §4.
 func TestHTTPGuidedMenu(t *testing.T) {
 	ts, pg := newTestServer(t)
 	resetScenarios(t, pg)

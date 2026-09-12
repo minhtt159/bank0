@@ -134,7 +134,7 @@ func (s *Server) Router() http.Handler {
 		// logout shares the refresh limiter so the whole /auth/* surface has the
 		// per-IP backstop (it consumes a refresh token and is reachable unauthenticated).
 		r.Handle("/auth/logout", s.rateLimit(s.refreshLimiter, s.clientIP, http.HandlerFunc(s.Logout))).Methods(http.MethodPost)
-		// Public self-registration surface (spec-self-registration.md). Shares the
+		// Public self-registration surface (docs/06 §1). Shares the
 		// strict login limiter: signup is unauthenticated, so the per-IP backstop is
 		// the only thing between the DB throttles and mass account creation.
 		r.Handle("/auth/register", s.rateLimit(s.loginLimiter, s.clientIP,
