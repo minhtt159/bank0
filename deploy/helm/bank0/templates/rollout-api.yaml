@@ -1,0 +1,55 @@
+{{- if .Values.api.rollout.enabled }}
+{{- if not .Values.api.exposed }}
+{{- fail "api.rollout.enabled requires api.exposed=true: the Rollouts Gateway API plugin rewrites backendRef weights on the api HTTPRoute, so the chart must own that route — bring-your-own-routes cannot carry the canary (the object can't have two owners)." }}
+{{- end }}
+# Argo Rollouts canary for api — rendered INSTEAD of the api Deployment, never
+# both. Traffic shifts via the Gateway API traffic-router plugin, which rewrites
+# the two backendRef weights on the chart's api HTTPRoute. The controller pins
+# -api (stable) and -api-canary to the right ReplicaSets by injecting
+# rollouts-pod-template-hash into their selectors.
+# Cluster-side prereqs, not this chart's: Rollouts controller with the
+# argoproj-labs/gatewayAPI plugin, plus RBAC to get/patch/update HTTPRoutes.
+#
+# SCHEMA WARNING: migrations run as a pre-upgrade hook, so the whole canary —
+# old pods included — runs against the NEW schema. Only canary a release whose
+# migrations are backward-compatible (docs/04-deployment.md §3).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+  {{- with .Values.workloadAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  strategy:
+    canary:
+      # Stable traffic keeps using the existing -api Service. -canary exists
+      # only as the route's second backendRef.
+      stableService: {{ .Release.Name }}-api
+      canaryService: {{ .Release.Name }}-api-canary
+      trafficRouting:
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: {{ .Release.Name }}-api
+            namespace: {{ .Release.Namespace }}
+      steps:
+        {{- toYaml .Values.api.rollout.steps | nindent 8 }}
+      {{- with .Values.api.rollout.analysis }}
+      analysis:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  template:
+    {{- include "bank0.apiPodTemplate" . | nindent 4 }}
+{{- end }}

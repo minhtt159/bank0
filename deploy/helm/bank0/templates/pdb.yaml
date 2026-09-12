@@ -1,0 +1,40 @@
+{{- if .Values.api.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+spec:
+  # maxUnavailable, NOT minAvailable: minAvailable 1 on a 1-replica install
+  # blocks node drains forever; maxUnavailable 1 degrades correctly at any
+  # replica count. Don't "fix" this back.
+  # Ceiling: fixed at 1 — becomes a value when someone runs enough replicas to
+  # want faster drains. During a canary the selector spans stable+canary pods:
+  # one eviction budget for the whole surface, which is the point.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+{{- end }}
+{{- if .Values.portal.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-portal
+  labels:
+    app.kubernetes.io/name: bank0
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: portal
+spec:
+  # Same reasoning as the api PDB above.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: portal
+{{- end }}

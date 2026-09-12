@@ -163,7 +163,7 @@ publisher. What each of its jobs turned into:
 
 | Wave | What | Checkpoint (must pass before the next wave) |
 |---|---|---|
-| **W3** | **Per-surface Gateway attachment**: `api.gateway`/`portal.gateway` (or per-surface `parentRef`) values — name/namespace/sectionName each — defaulting to the current single-`gateway:` block so existing installs render unchanged; document the shared-gateway mode (TLS/redirect off, listener names from the platform Gateways). | Golden `helm template` unchanged with default values; with the operator's values the api route parents the external Gateway and the portal route parents the internal one. |
+| **W3** ✅ | **Per-surface Gateway attachment**: `api.gateway`/`portal.gateway` (or per-surface `parentRef`) values — name/namespace/sectionName each — defaulting to the current single-`gateway:` block so existing installs render unchanged; document the shared-gateway mode (TLS/redirect off, listener names from the platform Gateways). **Shipped** (with the opt-in Rollouts canary) — as-built: [`../04-deployment.md`](../04-deployment.md) §3 *Gateway modes*. | Golden `helm template` unchanged with default values; with the operator's values the api route parents the external Gateway and the portal route parents the internal one. |
 | **W5** | **PWA in-cluster** (§5, decided: option A on the **internal Gateway**): `deploy/Dockerfile.web`, web Deployment/Service, PWA-host HTTPRoute (internal Gateway) with the `/api` `URLRewrite` rule; `deploy-pwa` job becomes the web-image build. `web/app/` source untouched; `worker/` untouched until fraudbank's own Worker deploy exists. | Login + a transfer completed through the PWA host (LAN) with the browser only ever talking same-origin `/api/*`; Worker still deployable as fallback until this soaks. |
 | **W6** | **First real install** (operator-driven, no code): create the `bank0-db` + JWT secrets, point the tunnel hostnames at the external Gateway and internal DNS at the internal one, `helm install` with a local values file. | `/readyz` green on both surfaces, console login, seeded transfer, `reconcile()` clean, Grafana dashboard populated. Then: update docs/04 §§0/3 + docs/07 to as-built and **retire this spec** (repo convention: no archive). |
 | **W7** *(optional)* | Cleanups per §8 answers: `/metrics` external exposure, `worker/` fate, GitOps. | — |
@@ -173,7 +173,10 @@ the migrate hook Job is admission-compliant (plus `image.pullSecrets` plumbing),
 and `publish.yml` pushes the multi-arch image on every `main` push and the image +
 chart on a `v*` tag. As-built: [`docs/04-deployment.md`](../04-deployment.md) §6.
 
-W3 remains blocked on Q8 (listener names); W5 needs only the registry, so it can
+**W3 shipped**: per-surface `api.gateway`/`portal.gateway` parentRef overrides
+(name/namespace/sectionName, falling back to the single `gateway:` block) landed
+with the opt-in Argo Rollouts canary mode — Q8 stopped blocking the chart change
+itself, only the install-time values. W5 needs only the registry, so it can
 start now.
 
 ## 8. Open questions — decisions needed from the operator

@@ -1,5 +1,11 @@
 {{- $gwNs := .Values.gateway.namespace | default .Release.Namespace -}}
 {{- $tls := .Values.gateway.tls.enabled -}}
+{{/* Per-surface parentRef: api/portal.gateway overrides fall back to shared
+     gateway block and the chart's own listener naming. A platform Gateway names
+     its listeners itself (e.g. "https"), so sectionName must be settable — the
+     hardcoded https-api/https-portal only exist on a chart-created Gateway. */}}
+{{- $apiGw := .Values.api.gateway | default dict -}}
+{{- $portalGw := .Values.portal.gateway | default dict -}}
 {{- if .Values.api.exposed }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -9,17 +15,32 @@ metadata:
     app.kubernetes.io/name: bank0
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: api
+  {{- with .Values.api.routeAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   parentRefs:
-    - name: {{ .Values.gateway.name }}
-      namespace: {{ $gwNs }}
-      sectionName: {{ if $tls }}https-api{{ else }}http{{ end }}
+    - name: {{ $apiGw.name | default .Values.gateway.name }}
+      namespace: {{ $apiGw.namespace | default $gwNs }}
+      sectionName: {{ $apiGw.sectionName | default (ternary "https-api" "http" $tls) }}
   hostnames:
     - {{ .Values.api.host | quote }}
   rules:
     - backendRefs:
         - name: {{ .Release.Name }}-api
           port: {{ .Values.service.port }}
+          {{- if .Values.api.rollout.enabled }}
+          # Canary mode: the plugin rewrites these two weights mid-rollout, so
+          # Argo CD needs ignoreDifferences on them.
+          # Explicit 100/0, not weightless: Gateway API defaults an unspecified
+          # weight to 1 — that splits 50/50 before Rollouts ever acts. 100/0 is
+          # also the steady state the plugin restores after promotion.
+          weight: 100
+        - name: {{ .Release.Name }}-api-canary
+          port: {{ .Values.service.port }}
+          weight: 0
+          {{- end }}
 {{- end }}
 {{- if .Values.portal.exposed }}
 ---
@@ -31,11 +52,15 @@ metadata:
     app.kubernetes.io/name: bank0
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: portal
+  {{- with .Values.portal.routeAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   parentRefs:
-    - name: {{ .Values.gateway.name }}
-      namespace: {{ $gwNs }}
-      sectionName: {{ if $tls }}https-portal{{ else }}http{{ end }}
+    - name: {{ $portalGw.name | default .Values.gateway.name }}
+      namespace: {{ $portalGw.namespace | default $gwNs }}
+      sectionName: {{ $portalGw.sectionName | default (ternary "https-portal" "http" $tls) }}
   hostnames:
     - {{ .Values.portal.host | quote }}
   rules:

@@ -9,8 +9,15 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   scaleTargetRef:
+    {{- /* Must follow the workload kind: an HPA left pointing at a Deployment
+           the Rollout replaced would silently stop scaling anything. */}}
+    {{- if .Values.api.rollout.enabled }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    {{- else }}
     apiVersion: apps/v1
     kind: Deployment
+    {{- end }}
     name: {{ .Release.Name }}-api
   minReplicas: {{ .Values.api.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}

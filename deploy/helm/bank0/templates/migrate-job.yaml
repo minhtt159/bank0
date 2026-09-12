@@ -13,6 +13,10 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
+  # Caps the whole Job, retries included. Must stay shorter than the helm
+  # --timeout it protects (default 5m): a lock-blocked migration then fails the
+  # upgrade loudly instead of hanging it and outliving it.
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
   template:
     metadata:
       labels:

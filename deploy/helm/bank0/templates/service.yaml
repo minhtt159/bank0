@@ -12,6 +12,30 @@ spec:
     app.kubernetes.io/component: api
   ports:
     - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+{{- if .Values.api.rollout.enabled }}
+---
+# Canary Service for the api Rollout — second backendRef the plugin weights.
+# Same selector as -api at install; Rollouts hash-pins both to their ReplicaSets
+# mid-canary.
+# No app.kubernetes.io/name on purpose, so the ServiceMonitor (matches
+# name+instance) skips it. After promotion both Services select the SAME pods —
+# matching both scrapes every api pod twice and doubles sum(rate(...)).
+# Cost: canary pods unscraped during a canary. Use gateway-side metrics for
+# analysis, or add a PodMonitor if you need per-canary-pod app metrics.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api-canary
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api-canary
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

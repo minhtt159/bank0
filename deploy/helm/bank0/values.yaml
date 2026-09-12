@@ -15,6 +15,10 @@ database:
 
 migrations:
   enabled: true             # run `bank0 migrate up` as a pre-upgrade hook Job
+  # Job deadline, seconds, retries included. Keep SHORTER than the helm
+  # --timeout (default 5m): a lock-blocked migration then fails the upgrade
+  # loudly instead of hanging it and leaving the Job running past it.
+  activeDeadlineSeconds: 240
   # Requests are mandatory on the target cluster (admission policy). goose applies
   # DDL and waits on the server, so the Job is I/O-bound, not CPU-bound.
   resources:
@@ -50,6 +54,13 @@ admin:
 # CF-Connecting-IP makes the count moot on that path).
 trustProxyHeaders: true
 trustedProxyHops: 1
+
+# Annotations on the WORKLOADS (api Deployment/Rollout + portal Deployment
+# metadata — not the pod templates). Main use: reloader.stakater.com/auto:
+# "true" so a rotated Secret rolls the pods, existingSecret/ESO path included
+# — a checksum annotation can't see external rotations. Without Reloader a
+# rotated Secret needs a manual restart (docs/04-deployment.md §3).
+workloadAnnotations: {}
 
 # Pod- and container-level hardening applied to both deployments. The image is
 # distroless:nonroot (uid 65532) and writes nothing to disk, so a read-only root
@@ -106,6 +117,18 @@ gateway:
 api:
   exposed: true
   host: api.bank0.hnimn.art
+  # Per-surface parentRef override for the api HTTPRoute. Empty fields fall back
+  # to the gateway block (name/namespace) and the chart's listener naming
+  # (sectionName https-api, or http when gateway.tls.enabled=false). Those names
+  # exist only on a chart-created Gateway. Platform-owned gateway = use ITS
+  # names, e.g.:
+  #   gateway: { name: envoy-external, namespace: network, sectionName: https }
+  gateway:
+    name: ""
+    namespace: ""
+    sectionName: ""
+  # Extra annotations on the api HTTPRoute (e.g. a gatus endpoint definition).
+  routeAnnotations: {}
   replicaCount: 3
   runMaintenance: false     # maintenance runs on portal only (advisory-locked)
   resources:
@@ -116,13 +139,57 @@ api:
     minReplicas: 3
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
+  # PodDisruptionBudget, maxUnavailable: 1 (fixed — see templates/pdb.yaml for
+  # why not minAvailable).
+  pdb:
+    enabled: true
+  # Progressive delivery: Argo Rollouts + Gateway API traffic-router plugin.
+  # OFF by default — chart renders a plain Deployment, needs no Argo CRDs.
+  # ON: api renders a Rollout INSTEAD of the Deployment (never both), plus a
+  # <release>-api-canary Service and a two-backendRef api HTTPRoute whose
+  # weights the plugin rewrites (100/0 at rest). Portal stays a Deployment.
+  # Needs: Rollouts controller with the argoproj-labs/gatewayAPI plugin
+  # installed cluster-side, and api.exposed=true — the plugin rewrites the
+  # route's weights, so that object can't have two owners.
+  #
+  # SCHEMA WARNING: migrations run as a pre-upgrade hook, so a canary runs OLD
+  # pods against the NEW schema. Only canary a release whose migrations are
+  # backward-compatible — else promote in one step (docs/04-deployment.md §3).
+  rollout:
+    enabled: false
+    # spec.strategy.canary.steps, verbatim. pause: {} = holds until a human runs
+    # `kubectl argo rollouts promote`; pause with duration resumes itself.
+    # Default: 10% -> human hold -> 50% -> short soak -> full.
+    steps:
+      - setWeight: 10
+      - pause: {}
+      - setWeight: 50
+      - pause:
+          duration: 1m
+    # spec.strategy.canary.analysis, verbatim — background analysis.
+    # startingStep skips the first N steps. Empty = manual promotion only.
+    # Template must live in the app namespace, or be a ClusterAnalysisTemplate:
+    # Kargo reads Stage-verification templates from the PROJECT namespace, so
+    # only cluster-scoped ones are shareable with it.
+    analysis: {}
 
 # Admin portal + operator console.
 portal:
   exposed: true
   host: portal.bank0.hnimn.art
+  # Per-surface parentRef override for the portal HTTPRoute — same shape and
+  # fallbacks as api.gateway (chart default sectionName: https-portal).
+  gateway:
+    name: ""
+    namespace: ""
+    sectionName: ""
+  # Extra annotations on the portal HTTPRoute.
+  routeAnnotations: {}
   replicaCount: 2
   runMaintenance: true
+  # PodDisruptionBudget — same shape and reasoning as api.pdb.
+  pdb:
+    enabled: true
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits:   { cpu: 500m, memory: 256Mi }
