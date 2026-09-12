@@ -11,8 +11,7 @@ import (
 // check_violation=23514, unique_violation=23505, restrict_violation=23001,
 // bare RAISE EXCEPTION=P0001); tests assert on the code, not the message text.
 func sqlstate(err error) string {
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) {
+	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return pg.Code
 	}
 	return ""

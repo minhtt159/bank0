@@ -81,7 +81,7 @@ and in-cluster PWA hosting are still open in
 
 ## Tech stack
 
-Go 1.26 · PostgreSQL 18 (native `uuidv7()`; 18 is the floor) ·
+Go 1.27 · PostgreSQL 18 (native `uuidv7()`; 18 is the floor) ·
 pgx/v5 + sqlc · goose migrations · slog · BIGINT minor units · bcrypt (pgcrypto) ·
 Templ + HTMX (console) · OpenAPI 3.1 contract-first (oapi-codegen + Scalar) · Helm.
 

@@ -154,8 +154,7 @@ func (s *Server) passwordRotationOK(w http.ResponseWriter, r *http.Request, su d
 		// for EVERY request, and denying would brick the console instead of guarding
 		// it. Any other error is a hard stop — the console needs the DB anyway, so
 		// there is nothing to keep working.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "42703" { // undefined_column
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "42703" { // undefined_column
 			return true
 		}
 		must = true // treat as flagged: hold them on the password screen
