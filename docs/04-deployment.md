@@ -7,7 +7,7 @@ Liveness is DB-blind and readiness is DB-aware, deliberately. CI publishes the
 image and chart but never deploys - `helm upgrade` is an operator command.
 
 > Self-hosted Postgres 18, Kubernetes, Helm and Gateway API is the only
-> deployment path; there is no managed or serverless variant. Per-surface
+> supported deployment path - there is no managed or serverless variant. Per-surface
 > Gateway attachment and in-cluster PWA hosting are still open: issues
 > [#117](https://github.com/minhtt159/bank0/issues/117),
 > [#118](https://github.com/minhtt159/bank0/issues/118) and
@@ -43,8 +43,8 @@ graph LR
 ### Edge: Gateway API
 
 The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster -
-TLS, routing, and rate-limiting are the Gateway's job. The PWA is still built and
-served as a Cloudflare Worker today; moving it in-cluster (and what that means for
+TLS, routing, and rate-limiting are the Gateway's job. The PWA is built and
+served as a Cloudflare Worker; moving it in-cluster (and what that means for
 the same-origin `/api/*` proxy) is planned in
 issue [#118](https://github.com/minhtt159/bank0/issues/118).
 
@@ -59,11 +59,11 @@ The binary serves different route surfaces based on `server.mode`
 |------|--------|---------|
 | `api` | client JSON API + `/docs` | `api.bank0.hnimn.art` (HA, autoscaled) |
 | `portal` | admin JSON API + operator console + `/docs` | `portal.bank0.hnimn.art` |
-| `all` | everything | local docker-compose (single container) |
+| `all` | everything | local development from one binary (`task run`). The compose stack does **not** use it - see §2. |
 
 The separation is enforced **in the app**, not just at the edge: an `api` pod
 literally does not register the admin routes or the console (they return 404), so
-a misrouted internal request can't reach admin operations. Verified:
+a misrouted internal request cannot reach admin operations. `mode=api` answers:
 
 ```
 mode=api     /auth/login=200  /admin/reconcile=404  /=404
@@ -76,7 +76,7 @@ Subcommands of the same binary:
 ```
 bank0 serve            # default
 bank0 migrate up|down|status
-bank0 maintenance      # run expire_holds + cleanup once
+bank0 maintenance      # one sweep: expire holds, clean keys and sessions, reconcile
 ```
 
 ### Auth per surface
@@ -169,15 +169,16 @@ graph TD
 | **HA / scaling** | `bank0-api` is a Deployment behind an HPA (CPU-based, 3-10 replicas). Stateless - all state is in Postgres. |
 | **Routing / two domains** | **Gateway API on Envoy Gateway.** One `Gateway` with a per-host HTTPS listener; two `HTTPRoute`s (api/portal) attach by `parentRef`/`sectionName` and fan out to the two Services. Same image, different `mode`, scaled independently. The chart can create the Gateway (`gateway.create=true`) or attach to a shared one. |
 | **Migrations** | A `pre-install,pre-upgrade` hook Job runs `bank0 migrate up` (embedded migrations) before new pods roll. |
-| **Maintenance** | `expire_holds` + cleanup **and `reconcile()`** run **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. A non-zero `reconcile()` result (ledger/cache drift) is logged at WARN - page on it. |
+| **Maintenance** | One sweep - expire holds, clean idempotency keys and sessions, expire pending verifications, and run `reconcile()` - runs **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. A non-zero `reconcile()` result (ledger/cache drift) is logged at WARN - page on it. |
 | **DB credentials** | `APP_DATABASE_DSN` from a Secret (`existingSecret` recommended; chart can create one from `database.dsn` for dev). |
 | **Probes** | **liveness -> `/health`** (cheap, DB-blind - a DB blip must not kill the pod); **readiness -> `/readyz`** (pings Postgres with a 1s deadline, 503 when the pool can't serve, so a pod with a dead/exhausted pool leaves the Service rotation). Both deployments. |
 | **Metrics** | `/metrics` - a real Prometheus **histogram** (`bank0_http_request_duration_seconds`, labelled by method/route-template/status -> `histogram_quantile` p50/p95/p99 + rate + error-rate) plus a live pgxpool gauge and the Go/process collectors (`client_golang`). Optional, off by default: a **ServiceMonitor** (`metrics.serviceMonitor.enabled`, needs the Prometheus Operator) and a **Grafana dashboard** ConfigMap auto-discovered by the kube-prometheus-stack sidecar (`metrics.dashboard.enabled`). |
 | **Logging** | `logging.level` (default `info`) and `logging.encoding` (default `json`) are set on both Deployments and the migrate Job. The image's baked `config.yaml` also defaults to `info` - only the local compose stack opts into `debug` - so an unconfigured pod never logs at debug. Raise `logging.level` to troubleshoot a live release without rebuilding the image. |
 | **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault` (values: `podSecurityContext` / `securityContext`), and a hardcoded `automountServiceAccountToken: false`. |
 | **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here) makes the auth rate limiter key on the real client IP instead of `RemoteAddr`: `CF-Connecting-IP` when present, else `X-Forwarded-For` read **right-to-left**, `trustedProxyHops` entries in (default 1 - count every proxy between client and pod). Right-to-left because an `use_remote_address` Gateway **appends** rather than replaces, so only the right-most entries are proxy-authored ([`10`](10-security-review.md)). |
-| **First login** | The seeded `admin` account (from `00016`) is flagged `must_change_password`, so the console holds it on `/console/password` until it is rotated and the admin JSON API answers `403` meanwhile ([`05`](05-admin-ui.md) §4.6a). The same flag binds the client API: a flagged customer's token reaches only `POST /me/password` ([`06`](06-client-api.md) §2.1). It is set only while the account still holds the seeded password. |
+| **First login** | The seeded `admin` account (seeded in `00016`, flagged by `00018`) is `must_change_password`, so the console holds it on `/console/password` until it is rotated and the admin JSON API answers `403` meanwhile ([`05`](05-admin-ui.md) §4.6a). The same flag binds the client API: a flagged customer's token reaches only `POST /me/password` ([`06`](06-client-api.md) §2.1). It is set only while the account still holds the seeded password. |
 | **JWT secret** | The `api` deployment mounts `APP_AUTH_JWT_SECRET` (Helm `auth.existingSecret`); the `portal` deployment doesn't need one (cookie sessions), and `Config.Validate` only requires it when the served mode includes the api surface. |
+| **MFA encryption key** | `APP_AUTH_MFA_ENC_KEY` encrypts the TOTP seed at rest. It is **not** required to boot, and an api pod without it answers `503` on every `/auth/mfa/*` route - so an install that follows only the two secrets above comes up with MFA broken and nothing in the logs saying why. Put it in the same secret as the JWT key. |
 | **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP->HTTPS. |
 
 ### Gateway modes
@@ -232,7 +233,7 @@ state to share between replicas.
 
 ---
 
-## 6. Publishing artifacts (`publish.yml`)
+## 4. Publishing artifacts (`publish.yml`)
 
 CI publishes; it never deploys. The cluster sits behind a tunnel and Actions has
 no path to it, so `helm upgrade` stays an operator command.

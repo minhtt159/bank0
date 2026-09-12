@@ -11,7 +11,9 @@ This document explains *why* bank0 is shaped the way it is. To run it, read the
 [README](../README.md). To change it, read
 [`08-development.md`](08-development.md).
 
-Single currency (EUR), amounts as integer minor units throughout. bank0 models
+Single currency (EUR). Every amount is an integer in **minor units** - the
+smallest unit of the currency, so EUR 12.34 is carried as `1234`. Money never
+touches a float or a decimal type anywhere in the system. bank0 models
 the payment lifecycle - authorization holds, settlement, reversal - rather than
 connecting to real rails like SEPA, SWIFT or card networks. Interest, statements
 and full KYC are out of scope and can be layered on without reshaping the core.
@@ -95,13 +97,14 @@ call PL/pgSQL functions, which write the append-only ledger, the account and
 transfer tables, and the idempotency keys. A trigger on ledger inserts maintains
 the account balance cache.
 
-The schema is a 17-file domain baseline under `db/migrations/` -
+The schema starts from a 17-file domain baseline under `db/migrations/`, frozen
+at the `v1.0.0` tag, with every later change as a new numbered migration on top
+(so the directory holds more than 17 files). The baseline is:
 `00001_foundation` (extensions, `uuidv7()`, enum types), `00002_iban`,
 `00003_users`, `00004_auth_tokens`, `00005_onboarding`, `00006_mfa`,
 `00007_accounts`, `00008_transfers`, `00009_maker_checker`, `00010_maintenance`,
 `00011_beneficiaries`, `00012_guided_scenarios`, `00013_disputes`,
-`00014_events`, `00015_fraud`, `00016_system_seed`, `00017_iban_minting` - frozen
-at the `v1.0.0` tag. Every change since is a new numbered migration on top.
+`00014_events`, `00015_fraud`, `00016_system_seed`, `00017_iban_minting`.
 
 ---
 
@@ -144,6 +147,10 @@ Diagram: the handler makes one call to `request_transfer`, which claims the
 idempotency key first. A replay returns the stored result without posting again;
 a first-time request locks the debit account, checks funds against the limit,
 places a hold, and posts two ledger entries whose trigger updates both balances.
+
+Both functions live in
+[`00008_transfers.sql`](../db/migrations/00008_transfers.sql), with the rest of
+the transfer lifecycle.
 
 A *hold* is a reservation: the funds are unavailable to spend but no ledger entry
 exists yet, so the money has not moved. Above the maker-checker threshold
@@ -188,8 +195,9 @@ See [`05-admin-ui.md`](05-admin-ui.md).
 | Understand IBAN validation and generation | [`11-iban-verification.md`](11-iban-verification.md) |
 | Understand the closed-core to real-rail seam | [`12-rail-readiness.md`](12-rail-readiness.md) |
 
-There is no `08` gap any more: it was retired with the serverless deployment path
-and now holds the development guide. The open backlog and product roadmap live in
-[`specs/`](specs/), starting at
-[`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md). Anything already built is
-described in the reference documents above, not in a spec.
+The open backlog and product roadmap live in
+the [issue tracker](https://github.com/minhtt159/bank0/issues). The one planning
+document that survives is
+[`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md), which is design thinking
+for product domains nobody has committed to building. Anything already built is
+described in the reference documents above, never in a spec.

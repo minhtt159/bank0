@@ -2,7 +2,8 @@
 
 **TL;DR.** Log in for a 15-minute access token and a rotating refresh token.
 Send the access token as `Authorization: Bearer`. Everything you can reach is
-scoped to your own user: another customer's account is a 404, not a 403. Money
+scoped to your own user: reading another customer's account is a 404, not a
+403, and paying *from* one is a 403. Money
 moves carry an `Idempotency-Key` and may be warned on, stepped up, or parked by
 the fraud gate before they post. Errors are always
 `{"error": <code>, "message": <text>}` - branch on `error` and the status, never
@@ -21,7 +22,7 @@ on the message.
 
 `api/openapi.yaml` is the source of truth; `oapi-codegen` generates the
 `genclient.ServerInterface` (tag `client`), and the handlers implement it, so
-spec/handler drift is a build error ([`04-deployment.md`](04-deployment.md) §4).
+spec/handler drift is a build error ([`08-development.md`](08-development.md) §3).
 Every route except the public ones is wrapped by `requireJWT` and scoped to the
 JWT subject.
 
@@ -58,14 +59,14 @@ JWT subject.
 | Transfers | POST | `/transfers/intent` | bearer | read-only fraud preflight (§8): `decision`, `risk_band`, `reason_codes[]`, optional `warning{}`, `step_up_method`. Writes nothing, and never returns a numeric score. |
 | Transfers | POST | `/transfers` | bearer | create and auto-post. `Idempotency-Key` required. The fraud gate may park it as `held` or `under_review`, or refuse it with `422 payment_blocked` / `409 ack_required` (§8). |
 | Transfers | GET | `/transfers/{id}` | bearer | transfer status (a party must be owned); every transfer carries `status_iso` (ISO-20022 parallel status); `held`/`under_review` carry `hold_reason` + `hold_expires_at` |
-| Transfers | POST | `/transfers/{id}/post` | `/cancel` | bearer | deferred-settlement lifecycle; `cancel` also releases a `held` transfer, but refuses `under_review` (409, operator-only) |
+| Transfers | POST | `/transfers/{id}/post` and `/transfers/{id}/cancel` | bearer | deferred-settlement lifecycle; `cancel` also releases a `held` transfer, but refuses `under_review` (409, operator-only) |
 | Transfers | POST | `/transfers/{id}/confirm` | bearer | release a `held` transfer to `posted` (§8.3). Owner only, idempotent; not-held, `under_review` or a lapsed window -> 409. |
 | Notifications | GET | `/me/events?cursor&cursor_id&limit&type&unread_only` | bearer | append-only feed (`transfer.posted`/`payment.incoming`/`transfer.held`/`device.new`/`dispute.updated`), written in the same txn as its cause; bare array, composite keyset |
 | Notifications | GET | `/me/events/unread` | bearer | unread count (badge) |
 | Notifications | POST | `/me/events/read` | bearer | mark read up to a cursor (or all); idempotent |
 | Fraud evidence | POST | `/me/warning-acks` | bearer | "warned and proceeded / backed out" liability evidence (CoP/VOP pivot); append-only, debit account must be the caller's |
 | Disputes | POST | `/transfers/{id}/dispute` | bearer | "I don't recognise this" - party-only, one open per (transfer, caller); optional `scam_type` starts the PSR claim (15-BBD `sla_due_at`) |
-| Disputes | GET | `/disputes` | `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id -> 404); each carries the disputed transfer's `currency` |
+| Disputes | GET | `/disputes` and `/disputes/{id}` | bearer | track own disputes (raiser-scoped; foreign id -> 404); each carries the disputed transfer's `currency` |
 | Health | GET | `/health` | public | DB-blind liveness/version |
 | Health | GET | `/readyz` | public | DB-aware readiness (pings the DB) |
 | Metrics | GET | `/metrics` | public | RED counters |
@@ -149,8 +150,10 @@ hard cap per family).
 
 ### 3.2 Rotation with reuse detection
 
-`POST /auth/refresh` calls `rotate_refresh_token(old, new, ...)`, one atomic
-transition:
+`POST /auth/refresh` takes the token in the request body as
+`{"refresh_token": "..."}` - it is not a header, and no bearer is needed, since
+the access token may already have expired. It calls
+`rotate_refresh_token(old, new, ...)`, one atomic transition:
 
 1. **Live token** -> mark it `rotated_at`, insert the child (`parent_id=old`, same
    family, new idle expiry), return the user -> new access + refresh pair.
@@ -240,7 +243,7 @@ behalf). One customer can never read or debit another's account.
 
 - `POST /transfers` **requires** an `Idempotency-Key` header; replays return the
   original result and never double-post ([`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md)).
-- **Documented header semantics.** The OpenAPI spec now spells the
+- **Documented header semantics.** The OpenAPI spec spells the
   `Idempotency-Key` contract out on every mutating money POST that carries one -
   `postTransfer`, `confirmTransfer`, `cancelTransfer`, `raiseDispute`,
   `reverseTransfer`: a replay with the same key + same parameters returns the
@@ -265,12 +268,13 @@ behalf). One customer can never read or debit another's account.
   in 1.x, and new tokens may be added at any time (treat an unknown token as a
   generic failure for its status class). The envelope is additive: new top-level
   members may appear in 1.x and MUST be ignored if unrecognised. **Path to
-  RFC 9457:** if `application/problem+json` is ever adopted, it will be
+  RFC 9457:** if `application/problem+json` is ever adopted, it is
   served via content negotiation (`Accept: application/problem+json`) with the
   `error` token carried as a `code` extension member, leaving the default
   response above untouched - never as an in-place replacement.
-- Money is **int64 minor units** end to end; `currency` is single (EUR) for now,
-  and now ships explicitly on every money-bearing **response** - including
+- Money is **int64 minor units** end to end - the smallest unit of the currency,
+  so EUR 12.34 travels as `1234`. Never a decimal, never a float; `currency` is single (EUR) for now,
+  and ships explicitly on every money-bearing **response** - including
   `Dispute`/`DecideDisputeResponse`. Requests **inherit** the debit account's
   currency by design (no request-side `currency`; see
   [`12-rail-readiness.md`](12-rail-readiness.md) §5).
@@ -279,6 +283,27 @@ behalf). One customer can never read or debit another's account.
   ExternalPaymentTransactionStatus (`PDNG`/`ACSC`/`RJCT`/`CANC`) **computed** from
   `status`, never stored, added alongside the flat `status` (never replacing it).
   See [`12-rail-readiness.md`](12-rail-readiness.md).
+
+---
+
+## 5.1 Transfer statuses
+
+There is one status vocabulary, and a client should switch on it exhaustively.
+`status_iso` rides alongside it as an ISO-20022 projection, computed from
+`status` and never stored - ignore it unless you are mapping to a payment rail.
+
+| `status` | `status_iso` | Means | Customer action |
+|---|---|---|---|
+| `pending` | `PDNG` | above the maker-checker threshold, waiting for a second operator | wait |
+| `held` | `PDNG` | the fraud gate parked it for a cooling-off period | **confirm** (`POST /transfers/{id}/confirm`) or **cancel**, before `hold_expires_at` |
+| `under_review` | `PDNG` | an AML watchlist hit; an operator must decide | none - confirm and cancel both answer 409 |
+| `posted` | `ACSC` | the ledger entries are written; the money has moved | none |
+| `canceled` | `CANC` | withdrawn by the customer or auto-canceled when a window lapsed | none |
+| `reversed` | `ACSC` | a later reversing pair undid it; the original entries remain | none |
+
+A lapsed `held` or `under_review` window is auto-canceled by the maintenance
+sweep. That is the fail-safe direction: an unanswered payment does not post
+itself.
 
 ---
 

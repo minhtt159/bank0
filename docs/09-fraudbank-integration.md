@@ -3,7 +3,7 @@
 **TL;DR.** External clients - the fraudbank web, Android and iOS apps - call
 `api.bank0.hnimn.art` exactly as bank0's own PWA does. There is no client-specific
 backend. Read [`06-client-api.md`](06-client-api.md) for the full contract; this
-page covers the five things client teams get wrong.
+page covers what client teams get wrong.
 
 Written for a developer building against the API who has never seen this
 repository. You need to know HTTP and JSON; banking terms are explained where
@@ -46,17 +46,19 @@ Two rules that bite:
   single-use. If two threads race the same refresh token, one of them gets a
   401 and the user is signed out everywhere. Serialize refreshes.
 - **`POST /me/password` revokes every session, including the caller's.** After a
-  204 your tokens are dead. Clear local state and send the user to sign-in; do
-  not keep using the token you made the call with.
+  204, every refresh token you hold is dead, on every device. The access token
+  you made the call with keeps working until it expires - at most 15 minutes -
+  because a JWT cannot be recalled, but there is nothing to renew it with.
+  Clear local state and send the user to sign in again.
 
 `POST /auth/logout` revokes one session; `POST /auth/logout-all` revokes every
 one.
 
 **Where the tokens live.** Native apps hold them in Keystore or Keychain and call
 the API directly - a proxy would add a hop and nothing else. Web holds them in
-the browser today, because `worker/index.ts` is a pass-through proxy. Moving them
+the browser, because `worker/index.ts` is a pass-through proxy. Moving them
 into httpOnly cookies at that same-origin seam is described in
-[`07-client-web-app.md`](07-client-web-app.md) §§2, 9. It is not built.
+[`07-client-web-app.md`](07-client-web-app.md) §6. It is not built.
 
 ---
 
@@ -101,8 +103,8 @@ confirmation of payee: a masked owner name and an IBAN.
 ## 5. Disputes feed the fraud engine
 
 Raising a dispute writes a `dispute_raised` audit row. It does **not** freeze
-anything, and no auto-freeze is planned - freezing on an accusation is a product
-decision, not a missing feature.
+anything. Freezing an account on an accusation is a product decision, not a
+missing feature.
 
 It is not inert either. `assess_transfer_risk` adds a `destination_flagged`
 score to any account on the receiving side of an open or under-review dispute

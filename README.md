@@ -8,7 +8,13 @@
 A core-banking backend: a double-entry ledger where correctness is a property of
 the database, fronted by a thin Go API, an operator console, and a customer PWA.
 It holds account balances and moves money between them without losing a cent,
-double-spending, or double-posting on a retry.
+spending the same money twice, or posting a payment twice because the client
+retried.
+
+Double-entry means every movement is recorded twice - a debit on one account and
+an equal credit on another - so the books balance by construction rather than by
+a nightly job. Amounts are integers in minor units (EUR 12.34 is `1234`), never
+floats.
 
 The unusual part is where the logic lives. Every money movement and every auth
 transition is a PL/pgSQL function holding explicit row locks; the Go handlers
@@ -53,8 +59,9 @@ Working on the code rather than running it:
 
 The first two are the same Go binary in different `server.mode`s - separated in
 the application, not just at the edge, so an `api` pod never registers an admin
-route. The third is a Cloudflare Worker. `server.mode=all` serves both Go
-surfaces from one container for local work.
+route. The third is a Cloudflare Worker. A third mode, `all`, serves both Go
+surfaces from one process; `task run` uses it, while the compose stack above runs
+the two modes as separate containers, the way production does.
 
 ## Deploy it
 

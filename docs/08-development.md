@@ -13,6 +13,8 @@ condensed version of this document for agents.
 
 Prerequisites: Go, Docker, SQL, and `task`
 ([Taskfile](https://taskfile.dev)). `task --list` shows everything available.
+Node is needed for two targets only: `task lint:openapi` and anything under
+`web/app/`.
 
 ---
 
@@ -101,7 +103,10 @@ straight from the database instead.
 3. Implement the method on `*Server` in `internal/api/handlers_*.go`.
 4. Scope it to the caller with `clientSubject(r.Context())`, or
    `clientSubjectOr401` when the handler needs a subject to do anything at all.
-   Anything the caller does not own is a 404.
+   Reads of something the caller does not own are a 404 - the API does not
+   confirm it exists. Writes *from* something they do not own (a debit account,
+   a `from_account`) are a 403, because the resource is named in the request and
+   hiding it would be dishonest rather than safe.
 5. Keep the handler thin: parse, call one DB function, map the error. If you are
    writing an `if` about money or permissions in Go, it belongs in the database.
 

@@ -52,7 +52,7 @@ The trap is twofold:
   forcing a **breaking** client change at the worst possible moment.
 
 **The resolution (spec §2): make the contract rail-ready *additively*, build no
-rail.** The cheap, additive pre-work has shipped - a bank-minted `uetr` +
+rail.** The cheap, additive pre-work is in place - a bank-minted `uetr` +
 originator `end_to_end_id`, an ISO-20022-aligned parallel `status_iso`
 , the fraud verdict + warning evidence moved server-side so they survive
 an async future - and the outbox/saga/recovery-point machinery lives here as
@@ -80,13 +80,13 @@ fires, **build none of it** - the closed core is strictly better without it.
 "a real external creditor exists." bank0 has none - every `credit_account_id` is
 an internal `accounts` row (customer or the `EXTERNAL_CLEARING` GL, §4). Building
 the outbox/relay/saga against a rail that doesn't exist adds crash windows and
-distributed-failure modes to a core that currently has neither.
+distributed-failure modes to a core that has neither.
 
 ---
 
 ## 3. - the BIAN boundary seam (Payment Order vs Payment Execution)
 
-BIAN splits a payment into two service domains that bank0 today fuses into one
+BIAN splits a payment into two service domains that bank0 fuses into one
 transaction:
 
 - **Payment Order** - the *instruction* and its lifecycle: request, validate,
@@ -143,7 +143,7 @@ commits synchronously (funds reserved, client gets a `pending`/`PDNG` receipt),
 and **execution** becomes the async rail submit + settlement ack that later flips
 the order to `posted`/`ACSC`. Crucially, **the client contract does not move**:
 the client already receives a `status` + `status_iso` and already tolerates a
-non-`posted` outcome (`held`/`under_review` today; a future `pending`-then-settled
+non-`posted` outcome (`held`/`under_review`; a future `pending`-then-settled
 tomorrow). The seam can be pulled apart without a breaking change because it was
 named, not smeared.
 
@@ -173,7 +173,8 @@ The additive pre-work already in the tree, and the rail role each field plays:
   triple**: a `reversed` original stays `ACSC` (it *did* settle), the reversal
   transfer is its own `ACSC` row, and the interbank return is
   `disputes.recall_status`/`pacs.004` - exactly the asymmetric-saga shape (§2 #5).
-  `posted -> ACSC` is honest *today* (closed core: posting is settlement); when a
+  `posted -> ACSC` is honest while the core is closed, because posting *is*
+  settlement; when a
   rail arrives, an intermediate `pending -> PDNG`-then-`ACSC` step slots in without
   the client relearning the vocabulary.
 - **`events` as a same-txn projection seed** - `emit_event` writes the per-user
@@ -184,7 +185,7 @@ The additive pre-work already in the tree, and the rail role each field plays:
   generalises the same discipline to a rail instruction instead of a notification.
 - **Per-owner idempotency namespace as a future rail-consumer dedup key** - the
   `idempotency_keys` PK is `(owner_id, key)` ([docs/03](03-ledger-lifecycle-idempotency.md) §3), not `key` alone.
-  Cross-owner isolation is a client-safety property today, but the same namespaced
+  Cross-owner isolation is a client-safety property, but the same namespaced
   key is exactly what a rail consumer would use to dedup **inbound** returns/recalls
   per originating principal without one principal's key colliding with another's.
 
@@ -200,7 +201,7 @@ warranted.
 |---|---|---|
 | **- partial capture** | `post_transfer(amount_to_capture <= hold.amount_minor)`: post the captured legs, release the residual hold. Keeps the single-transaction shape. | A product need for authorize-now / capture-less-later (card-style incremental capture, tips/adjustments). No current flow captures less than it authorized. |
 | **- ISO-4217 currency-metadata table** | A table carrying the minor-unit exponent per currency, so formatting/rounding are currency-driven rather than the hard-coded exponent-2 EUR assumption. Prerequisite for multi-currency / an FX-GL leg model. | The first non-EUR currency. Today `accounts.currency` is single-valued **structurally** - a hard `CHECK (currency = 'EUR')` on `accounts` ([`00007`](../db/migrations/00007_accounts.sql)) - and every amount is EUR minor units. therefore also requires **dropping that CHECK**, not just adding a table. |
-| **Request-side `currency`** | Accepting `currency` on `CreateTransferRequest`. | Multi-currency. **Deliberately omitted by design:** the server derives currency from the **debit account**, and `request_transfer` rejects a debit/credit currency mismatch - so a request-side currency would be redundant and a spoofing surface. `currency` now ships on money-bearing **responses**; requests **inherit** it. |
+| **Request-side `currency`** | Accepting `currency` on `CreateTransferRequest`. | Multi-currency. **Deliberately omitted by design:** the server derives currency from the **debit account**, and `request_transfer` rejects a debit/credit currency mismatch - so a request-side currency would be redundant and a spoofing surface. `currency` ships on money-bearing **responses**; requests **inherit** it. |
 
 ---
 

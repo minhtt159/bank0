@@ -113,7 +113,7 @@ The "is the bank healthy?" glance:
   - **Actions** on the card (role-gated, `hx-confirm` browser confirms):
     `Add credit` (deposit), `Withdraw`, `Freeze`/`Unfreeze`, `Set default`,
     and `Adjust transfer limit`. (`SetAccountStatus` also accepts `closed`, but no
-    console control posts it - closing is not an operator button today.)
+    console control posts it - there is no close button.)
   - **Statement** (`Statement ->` on the card) renders in the **main panel**, not
     the rail: `ledger_entries` newest-first with `balance_after` as a real running
     balance, cursor-paginated on `(posted_at, id)`, each row drilling into its
@@ -228,7 +228,7 @@ brick the console instead of guarding it.
 password change**: it sets the flag *and* drops every session that account holds, on
 both surfaces. Flagging alone would only inconvenience the legitimate user - whoever
 holds the old password keeps their session otherwise. The rail also shows when the
-current password was set, and whether the account is currently locked out.
+current password was set, and whether the account is locked out.
 
 ### 4.7 Disputes
 

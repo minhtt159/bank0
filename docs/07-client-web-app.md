@@ -142,8 +142,9 @@ worker/
 ```
 
 `src/api/types.ts` is maintained by hand against `api/openapi.yaml`. It could be
-generated with `openapi-typescript` the way the Go side is generated; it is not
-today, so a contract change means editing it.
+generated with `openapi-typescript` the way the Go side is, and is not - so a
+contract change means editing that file too, and nothing fails the build if you
+forget.
 
 Tasks: `task webapp:dev`, `task webapp:build` (`tsc --noEmit` then Vite),
 `task webapp:deploy`, `task e2e` (arguments after `--`, for example

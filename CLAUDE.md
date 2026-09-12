@@ -1,4 +1,4 @@
-# CLAUDE.md — working in this repo
+# CLAUDE.md - working in this repo
 
 bank0 is a **core-banking backend**: a double-entry ledger where correctness is a
 property of the database, fronted by a thin Go API. Read this before editing; it
@@ -15,13 +15,13 @@ same workflow at human pace; the design rationale is
    "is this allowed?" in Go.
 2. **The ledger is the source of truth.** `accounts.balance_minor` is a
    trigger-maintained cache of `SUM(ledger_entries)`. Nothing does
-   `UPDATE accounts SET balance = …`. Corrections are new reversing entries
+   `UPDATE accounts SET balance = ...`. Corrections are new reversing entries
    (append-only; an `UPDATE`/`DELETE` on `ledger_entries` is rejected by trigger).
 3. **Contract-first.** `api/openapi.yaml` is the source of truth for the HTTP API;
    `oapi-codegen` generates the server interfaces and drift is a **build error**.
-   Edit the spec → regenerate → implement → `go build`.
+   Edit the spec -> regenerate -> implement -> `go build`.
 4. **Idempotency & money.** Money moves carry an `Idempotency-Key`; replays return
-   the original result. All amounts are **int64 minor units** — never floats.
+   the original result. All amounts are **int64 minor units** - never floats.
 5. **`mapDBError` is the only place HTTP status meets business meaning.** It
    translates SQLSTATEs raised by DB functions into status codes. Add a case there;
    don't scatter business checks into handlers.
@@ -39,8 +39,8 @@ same workflow at human pace; the design rationale is
 `/openapi.yaml`, `/docs`. The client public auth routes
 (`/auth/login,/refresh,/logout`) are registered on the **parent** router ahead of
 the JWT-guarded subrouter so they aren't shadowed; in `all` mode the one admin
-route that collides with the client's `/transfers/{id}` — `GET /transfers/pending`
-— is registered first behind the session guard.
+route that collides with the client's `/transfers/{id}` - `GET /transfers/pending`
+- is registered first behind the session guard.
 
 ## Where things live
 
@@ -62,7 +62,7 @@ web/app/                    customer PWA (Preact + Vite + TS)
 worker/                     Cloudflare Worker (static host + /api proxy)
 ```
 
-## Build · run · test · generate
+## Build  and  run  and  test  and  generate
 
 Use the Taskfile (`task --list`). Key targets:
 
@@ -84,14 +84,14 @@ go install github.com/a-h/templ/cmd/templ@v0.3.1020
 ```
 
 After regenerating, **commit the generated files** (`internal/db/sqlc/*`,
-`internal/api/gen*/*.gen.go`, `web/template/*_templ.go`) — the repo builds without
+`internal/api/gen*/*.gen.go`, `web/template/*_templ.go`) - the repo builds without
 the tools installed.
 
 ## Testing against PostgreSQL 18
 
 The integration tests (DB + HTTP) are **DSN-gated**: they skip unless
 `TEST_DATABASE_DSN` is set, and `TestMain` migrates the target DB fresh.
-**Postgres 18 is the only supported version** — the schema's `DEFAULT uuidv7()`
+**Postgres 18 is the only supported version** - the schema's `DEFAULT uuidv7()`
 uses the PG18 built-in and there is no polyfill for older servers.
 
 ```bash
@@ -108,32 +108,32 @@ CI runs `postgres:18` in every job that touches a DB (`test`, `e2e-go`,
 
 If Docker Hub is rate-limited in your environment, pull PG18 from the GCR mirror:
 `docker run -d --name pg18 -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=bank0_test -p 5544:5432 mirror.gcr.io/library/postgres:18-alpine`,
-then point `TEST_DATABASE_DSN` at `:5544`. Always run **migrate up → down → up** on
+then point `TEST_DATABASE_DSN` at `:5544`. Always run **migrate up -> down -> up** on
 a throwaway DB to confirm a new migration is reversible.
 
 ## Common tasks (the patterns to copy)
 
-- **New client endpoint:** add the op to `api/openapi.yaml` (tag `client`) →
-  `task generate:oapi` → implement the method on `*Server` (it won't build until you
-  do) → scope to the subject with `clientSubject(r.Context())`. Keep ops that need
+- **New client endpoint:** add the op to `api/openapi.yaml` (tag `client`) ->
+  `task generate:oapi` -> implement the method on `*Server` (it won't build until you
+  do) -> scope to the subject with `clientSubject(r.Context())`. Keep ops that need
   query/body params **client-only**: an op shared by both tags must be path-param
   only, else the two generated packages produce conflicting `Params` types.
-- **New DB logic:** the 17 domain migration files are **frozen** — they are the
+- **New DB logic:** the 17 domain migration files are **frozen** - they are the
   `v1.0.0` baseline. Every change since the tag, schema or a one-line PL/pgSQL
   fix, goes in a **new** `db/migrations/NNNN_*.sql` with a reversible
   `-- +goose Down` (`TestMigrationsReversible` gates this). Never edit a frozen
   file: goose will NOT re-run an edited version on a DB that already applied it,
-  and the Helm pre-upgrade migrate Job makes that skip silent — a green deploy
+  and the Helm pre-upgrade migrate Job makes that skip silent - a green deploy
   whose schema quietly diverges from a fresh install. (Incubation mode, which
   allowed in-place edits, ended when `v1.0.0` was tagged and a published chart
   became installable.) Either way: add a query in `db/queries/*.sql`
   and `task generate:sqlc`. **sqlc cannot expand set-returning functions**
-  (`RETURNS TABLE`) — hand-write those with pgx in `internal/db/bank.go` or
+  (`RETURNS TABLE`) - hand-write those with pgx in `internal/db/bank.go` or
   `auth.go` (see `ClientTransfer`, `ResolveAccountByIban`, `RotateRefreshToken`).
 - **Raising inside a function that must persist a side effect:** a PL/pgSQL `RAISE`
   rolls back that function's own writes. If you need a write to survive the error
   (e.g. refresh-token reuse revoking the family), do the write in a **separate
-  statement from Go** after catching the SQLSTATE — see `RotateRefreshToken` +
+  statement from Go** after catching the SQLSTATE - see `RotateRefreshToken` +
   `revoke_refresh_family`.
 - **Console action:** handler in `console_handlers.go` (gate with
   `s.requireRole`), route in `console.go`, button in the relevant `*.templ`, then

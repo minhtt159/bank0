@@ -496,7 +496,7 @@ END;
 $$;
 ```
 
-The sweep now has **three arms** off the one set of expired holds: a lapsed
+The sweep has **three arms** off the one set of expired holds: a lapsed
 `pending` -> `failed` (unchanged), a lapsed `held` -> `canceled`
 (`'confirmation window expired'`), and a lapsed `under_review` -> `canceled`
 (`'review window expired'`). A parked transfer is always cancelled, never posted,
@@ -607,7 +607,7 @@ The three read-only helpers behind it:
   `block > review > step_up > warn > allow`. `STABLE`, read-only, and it
   `assert_caller_owns(caller, debit)` first (`42501` -> `403`) so it is safe to expose
   on the client intent endpoint. **The numeric risk score is never surfaced.** The
-  `warning_rules` table also ships **empty** - with no rules it degrades to today's
+  `warning_rules` table is **empty** by default - with no rules it degrades to the
   `allow`/`step_up` behaviour.
 - **`assert_warning_ack(user, category, debit, credit, amount, cooling_off)`** -
   enforces that the caller already recorded the required warning acknowledgement for
