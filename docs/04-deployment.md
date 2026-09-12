@@ -33,7 +33,7 @@ same-origin (no CORS) and tokens never traverse a third origin.
 ```mermaid
 graph LR
     Op([Operator]) -->|HTTPS| Portal[portal.bank0.hnimn.art<br/>Go portal]
-    Cust([Customer browser]) -->|HTTPS| CFW[bank0.hnimn.art<br/>Cloudflare Worker | PWA]
+    Cust([Customer browser]) -->|HTTPS| CFW["bank0.hnimn.art<br/>Cloudflare Worker + PWA"]
     CFW -->|/api/* proxy| CF[Cloudflare proxy]
     CF --> API[api.bank0.hnimn.art<br/>Go api mode]
     Portal --> PG[(Postgres)]
@@ -156,8 +156,8 @@ graph TD
       RtP["HTTPRoute portal<br/>portal.bank0.hnimn.art"] -.parentRef.-> GW
       GW --> SvcA[Service bank0-api]
       GW --> SvcP[Service bank0-portal]
-      SvcA --> DepA["Deployment bank0-api<br/>mode=api | HPA 3-10"]
-      SvcP --> DepP["Deployment bank0-portal<br/>mode=portal | 2 replicas | maintenance"]
+      SvcA --> DepA["Deployment bank0-api<br/>mode=api, HPA 3-10"]
+      SvcP --> DepP["Deployment bank0-portal<br/>mode=portal, 2 replicas, maintenance"]
       Job["pre-install/pre-upgrade Job: bank0 migrate up"] --> PG[(PostgreSQL)]
       DepA --> PG
       DepP --> PG
