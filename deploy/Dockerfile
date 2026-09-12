@@ -2,7 +2,7 @@
 # --platform=$BUILDPLATFORM keeps the compiler on the runner's native arch and
 # cross-compiles via GOARCH — CGO is off, so Go does this for free and a two-arch
 # manifest costs a second `go build`, not a QEMU-emulated toolchain.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download

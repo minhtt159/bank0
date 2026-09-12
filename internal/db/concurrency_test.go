@@ -19,8 +19,7 @@ import (
 
 // sqlState returns the Postgres SQLSTATE of err, or "" if it isn't a PgError.
 func sqlState(err error) string {
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) {
+	if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return pg.Code
 	}
 	return ""
@@ -47,9 +46,7 @@ func TestConcurrentSameIdempotencyKey(t *testing.T) {
 	var posted, replayed, inProgress, other int
 
 	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			res, err := testTransfer(ctx, pg, key, a, b, amount, "same-key race", sqlc.TransferKindTransfer)
 			mu.Lock()
 			defer mu.Unlock()
@@ -66,7 +63,7 @@ func TestConcurrentSameIdempotencyKey(t *testing.T) {
 				other++
 				t.Errorf("unexpected error under same-key race: %v (sqlstate %q)", err, sqlState(err))
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -109,11 +106,9 @@ func TestConcurrentTransfersSharedDebit(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, n)
 	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			_, errs[i] = testTransfer(ctx, pg, uuid.NewString(), src, dests[i], amount, "fan-out", sqlc.TransferKindTransfer)
-		}(i)
+		})
 	}
 	wg.Wait()
 

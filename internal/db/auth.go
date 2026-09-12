@@ -53,8 +53,7 @@ var ErrLoginDenied = errors.New("login denied")
 // staffLoginSQLStates are the SQLSTATEs create_staff_session raises for the
 // three denial reasons; all collapse to ErrLoginDenied.
 func isLoginDenied(err error) bool {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		switch pgErr.Code {
 		case "28P01", "28000", "42501":
 			return true
@@ -181,8 +180,7 @@ func (p *Postgres) RotateRefreshToken(ctx context.Context, oldHash, newHash stri
 	if err != nil {
 		// Reuse detected (28000): rotate only RAISEd (its own UPDATE would roll
 		// back), so revoke the family here in a separate, committing statement.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "28000" {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "28000" {
 			// WithoutCancel: this is the theft response. If the client hangs up (or
 			// the request deadline fires) between the RAISE and this statement, the
 			// compromised family must still be revoked. A failure here is invisible
