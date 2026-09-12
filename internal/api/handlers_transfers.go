@@ -37,7 +37,7 @@ func validTransferKind(k sqlc.TransferKind) bool {
 // transfer history, newest first. Ownership (caller owns debit OR credit) and paging
 // live in SQL; the response is a bare array with a composite (requested_at, id)
 // keyset cursor — pass the last row's requested_at as cursor + its id as cursor_id.
-// Read-only, no idempotency. See docs/specs/spec-list-my-transfers.md.
+// Read-only, no idempotency. See docs/06 §1.
 func (s *Server) ListMyTransfers(w http.ResponseWriter, r *http.Request, params genclient.ListMyTransfersParams) {
 	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {

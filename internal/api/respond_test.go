@@ -21,7 +21,7 @@ import (
 )
 
 // A list endpoint must emit `[]` not `null` even when the DB returns a nil slice;
-// non-slice values are untouched. (docs/09-fraudbank-integration.md §0.2)
+// non-slice values are untouched. (docs/09-fraudbank-integration.md §2)
 func TestWriteJSONNilSliceIsEmptyArray(t *testing.T) {
 	cases := []struct {
 		name string

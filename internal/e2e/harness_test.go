@@ -3,7 +3,7 @@
 // Package e2e is a black-box, cross-surface end-to-end test of the REAL deployed
 // two-binary topology: one compiled binary run twice — once as APP_SERVER_MODE=portal
 // (admin API + operator console) and once as APP_SERVER_MODE=api (client JSON API) —
-// both pointed at one throwaway Postgres. It is Tier A of docs/specs/spec-e2e-harness.md.
+// both pointed at one throwaway Postgres. See docs/08 §7.
 //
 // Everything here is behind `//go:build e2e`, so a plain `go test ./...`,
 // `go build ./...`, and `go vet ./...` never compile this package. Run it with:

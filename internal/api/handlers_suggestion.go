@@ -10,7 +10,7 @@ import (
 )
 
 // SuggestTransferDestinations implements genclient.ServerInterface: the guided-
-// transfer "mule menu" (spec-guided-transfer-mule-menu.md). Read-only — it only
+// transfer "mule menu" (docs/09 §4). Read-only — it only
 // NAMES up to 3 candidate destinations (other users', random, optionally including a
 // short-listed mule); the transfer itself still goes through POST /transfers
 // (idempotency-key) unchanged. It never leaks more than /beneficiaries/resolve

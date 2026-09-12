@@ -13,7 +13,7 @@ import (
 )
 
 // uniq returns a short, process-unique token for building collision-free usernames
-// (the suite shares one DB without truncation, as docs/specs/spec-e2e-harness.md asks).
+// (the suite shares one DB without truncation; see docs/08 §7).
 func uniq() string {
 	return strings.ToLower(strings.ReplaceAll(uuid.NewString(), "-", ""))[:12]
 }

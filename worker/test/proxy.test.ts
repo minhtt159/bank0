@@ -1,5 +1,5 @@
 // Worker /api proxy-contract test (Tier B "cheaper intermediate" from
-// docs/specs/spec-e2e-harness.md). Runs the REAL worker (../index.ts) in
+// docs/08 §7). Runs the REAL worker (../index.ts) in
 // workerd via @cloudflare/vitest-pool-workers, stubs the upstream API by
 // swapping globalThis.fetch (vitest-pool-workers v0.13+ removed the old
 // cloudflare:test fetchMock), and asserts the four proxy invariants:

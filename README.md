@@ -5,60 +5,61 @@
 [![Image](https://img.shields.io/badge/ghcr.io-bank0-blue?logo=docker&logoColor=white)](https://github.com/minhtt159/bank0/pkgs/container/bank0)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-A **core-banking backend**: a double-entry ledger where correctness is a property of
-the database, fronted by a thin Go API, an operator console, and a customer PWA. It
-holds account balances and moves money between them without ever losing a cent,
+A core-banking backend: a double-entry ledger where correctness is a property of
+the database, fronted by a thin Go API, an operator console, and a customer PWA.
+It holds account balances and moves money between them without losing a cent,
 double-spending, or double-posting on a retry.
 
-Four invariants shape everything (see [`docs/01-overview.md`](docs/01-overview.md)):
+The unusual part is where the logic lives. Every money movement and every auth
+transition is a PL/pgSQL function holding explicit row locks; the Go handlers
+parse a request, call exactly one of those functions, and map its result to an
+HTTP status. A second client, a cron job or a `psql` session all get the same
+guarantees, because the guarantees are in the schema.
+[`docs/01-overview.md`](docs/01-overview.md) explains why.
 
-1. **The ledger is the source of truth.** `accounts.balance_minor` is a
-   trigger-maintained cache of `SUM(ledger_entries)`, always reconcilable; money is
-   never created from nowhere.
-2. **Money/auth logic lives in the database.** PL/pgSQL functions + triggers own every
-   money movement and auth transition; the API is thin transport.
-3. **Idempotency is enforced by the database.** Replays return the original result;
-   they never double-post.
-4. **Append-only and auditable.** The ledger can't be updated or deleted — corrections
-   are new reversing entries.
-
-## Three surfaces, three hosts
-
-Two surfaces are the same Go binary in different `server.mode`s (separated in the app,
-not just at the edge); the third is a Cloudflare Worker.
-
-| Host | Surface | Tech | Auth |
-|------|---------|------|------|
-| `portal.bank0.hnimn.art` | admin API + operator console | Go `mode=portal` (Templ/HTMX) | DB cookie session (staff roles, 30-min idle) |
-| `api.bank0.hnimn.art` | customer JSON API | Go `mode=api`, behind Cloudflare | JWT bearer + rotating refresh tokens (ownership-scoped) |
-| `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite) | proxies `/api/*` to the client API |
-
-`server.mode=all` serves both Go surfaces in one container for local development.
-
-## Quick start (local)
+## Run it
 
 ```bash
-docker compose -f deploy/docker-compose.dev.yml up --build -d   # Postgres + migrate + admin (:8080) + client (:8090)
-task seed                                                       # load the dev seed (db/seed.sql); migrate ran above
-open http://localhost:8080/        # operator console (Templ + HTMX)
-open http://localhost:8090/docs    # client API reference (Scalar)
+docker compose -f deploy/docker-compose.dev.yml up --build -d
+task seed
+open http://localhost:8080/        # operator console
+open http://localhost:8090/docs    # client API reference
 ```
 
-Seeded logins (dev passwords): staff `admin`/`admin`, `operator1`/`operator`,
-`auditor1`/`auditor`; customers `alice`/`password` … (no console access). The default
-seed (`db/seed.sql`, idempotent) loads 98 customers / 242 accounts (valid NL IBANs) /
-741 transfers, with pending/canceled/reversed lifecycle coverage and a randomized
-10-user / 30-account guided-transfer "mule" pool; `task seed:demo` loads a larger
-randomized set, and `task dev:reset` rebuilds the stack from a clean DB and seeds it in
-one step. The seeded `admin` account is forced to change its password at first
-login (`/console/password`) — the console will not let it do anything else first.
+Compose brings up Postgres 18, runs the migrations, and starts both Go surfaces:
+the operator console on `:8080` and the customer API on `:8090`. `task seed`
+loads the dev data - 98 customers, 242 accounts with valid NL IBANs, 741
+transfers covering the pending, canceled and reversed paths.
 
-Without Docker: `task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
+Sign in to the console as `admin` / `admin`. It will make you change that
+password before it lets you do anything else, because the seeded one is
+published in this repository. Customers sign in to the PWA with
+`alice` / `password` and have no console access. `task seed:demo` loads a much
+larger randomized set; `task dev:reset` rebuilds from a clean database in one
+step.
 
-## Deploy
+Prefer no Docker:
+`task install && task generate && task migrate:up && psql "$APP_DATABASE_DSN" -f db/seed.sql && task run`.
+Working on the code rather than running it:
+[`docs/08-development.md`](docs/08-development.md).
 
-Self-hosted Kubernetes is the primary path — one image, one Helm chart, both
-published to GHCR. Nothing needs to be built locally:
+## The three surfaces
+
+| Host | Surface | Auth |
+|---|---|---|
+| `portal.bank0.hnimn.art` | admin API + operator console | cookie session, staff roles |
+| `api.bank0.hnimn.art` | customer JSON API | JWT bearer + rotating refresh tokens |
+| `bank0.hnimn.art` | customer PWA | the Worker proxies `/api/*` to the client API |
+
+The first two are the same Go binary in different `server.mode`s - separated in
+the application, not just at the edge, so an `api` pod never registers an admin
+route. The third is a Cloudflare Worker. `server.mode=all` serves both Go
+surfaces from one container for local work.
+
+## Deploy it
+
+Self-hosted Kubernetes is the primary path. One image and one chart, both
+published to GHCR, so nothing is built locally:
 
 ```bash
 helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
@@ -66,46 +67,41 @@ helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
   --set auth.existingSecret=bank0-auth
 ```
 
-creates `bank0-api` (mode=api, HPA) and `bank0-portal` (mode=portal) behind Gateway
-API/Envoy, with a pre-upgrade migrate job ([`docs/04-deployment.md`](docs/04-deployment.md)).
+That creates `bank0-api` (mode=api, with an HPA) and `bank0-portal` behind
+Gateway API, with migrations as a pre-upgrade job. The image is multi-arch
+(`linux/amd64` + `linux/arm64`) at `ghcr.io/minhtt159/bank0`, tagged
+`sha-<commit>` on every `main` push and `X.Y.Z` + `X.Y` on version tags - never
+`latest`. CI publishes but never deploys: `helm upgrade` stays an operator
+command. Details in [`docs/04-deployment.md`](docs/04-deployment.md).
 
-| Artifact | Where |
-|---|---|
-| Image (multi-arch: `linux/amd64` + `linux/arm64`) | `ghcr.io/minhtt159/bank0:1.0.2` — `sha-<commit>` on every `main` push, `X.Y.Z` + `X.Y` on `v*` tags. Never `latest`. |
-| Chart | `oci://ghcr.io/minhtt159/charts/bank0` — published on `v*` tags |
+## Built with
 
-CI publishes; it never deploys — `helm upgrade` stays an operator command
-([`docs/04-deployment.md`](docs/04-deployment.md) §6). Per-surface Gateway attachment
-and in-cluster PWA hosting are still open in
-[`docs/specs/spec-container-helm-pivot.md`](docs/specs/spec-container-helm-pivot.md).
-
-## Tech stack
-
-Go 1.26 · PostgreSQL 18 (native `uuidv7()`; 18 is the floor) ·
-pgx/v5 + sqlc · goose migrations · slog · BIGINT minor units · bcrypt (pgcrypto) ·
-Templ + HTMX (console) · OpenAPI 3.1 contract-first (oapi-codegen + Scalar) · Helm.
+Go 1.27, PostgreSQL 18 (the floor - the schema uses the native `uuidv7()`),
+pgx/v5 with sqlc, goose migrations, BIGINT minor units, bcrypt via pgcrypto,
+Templ and HTMX for the console, an OpenAPI 3.1 contract with oapi-codegen and
+Scalar, Preact for the PWA, Helm for delivery.
 
 ## Documentation
 
-Start at [`docs/01-overview.md`](docs/01-overview.md) — it frames the design and walks
-through how you use bank0 (the customer money-move and the operator journeys). The
-reference docs ([`docs/02`](docs/02-data-model.md)–[`docs/12`](docs/12-rail-readiness.md), no `08`)
-cover the data model, ledger lifecycle, deployment, the two surfaces, the PWA, fraudbank
-integration, security, IBAN handling, and the closed-core-to-rail readiness seam. The
-product roadmap is in [`docs/specs/`](docs/specs/).
+Start at [`docs/01-overview.md`](docs/01-overview.md): it explains the four
+invariants everything else follows from, and carries the map of which document
+answers which question. Contributors want
+[`docs/08-development.md`](docs/08-development.md). Integrating a client against
+the API: [`docs/09-fraudbank-integration.md`](docs/09-fraudbank-integration.md).
 
 ## Releases
 
-Versions are semver git tags; each one publishes the image and the chart, and the
-GitHub Release carries the notes. There is no `CHANGELOG.md` by convention — the
-release notes and the PRs behind them are the record, which is also what
-dependency bots (Renovate et al.) surface when they propose a bump.
+Versions are semver git tags; each publishes the image and the chart, and the
+GitHub Release carries the notes. There is deliberately no `CHANGELOG.md` - the
+release notes and the pull requests behind them are the record, and they are
+what dependency bots surface when they propose a bump.
 
 ## License
 
 [Apache License 2.0](LICENSE). Copyright 2026 Minh Tran.
 
-bank0 is a portfolio/demonstration core-banking backend. It is not a licensed
-financial institution, holds no real money, and connects to no payment rail — the
-IBANs it mints are internally valid but not routable ([`docs/12`](docs/12-rail-readiness.md)
-covers what real-rail readiness would take).
+bank0 is a portfolio and demonstration core-banking backend. It is not a
+licensed financial institution, holds no real money, and connects to no payment
+rail - the IBANs it mints are internally valid but not routable.
+[`docs/12-rail-readiness.md`](docs/12-rail-readiness.md) covers what connecting
+one would take.

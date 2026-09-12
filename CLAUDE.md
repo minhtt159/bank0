@@ -2,8 +2,10 @@
 
 bank0 is a **core-banking backend**: a double-entry ledger where correctness is a
 property of the database, fronted by a thin Go API. Read this before editing; it
-encodes the conventions that keep the code coherent. Deep detail is in
-[`docs/`](docs/) (start at [`docs/01-overview.md`](docs/01-overview.md)).
+encodes the conventions that keep the code coherent. This file is the condensed
+version of [`docs/08-development.md`](docs/08-development.md), which explains the
+same workflow at human pace; the design rationale is
+[`docs/01-overview.md`](docs/01-overview.md).
 
 ## The five rules (don't violate without saying so)
 
@@ -44,11 +46,11 @@ route that collides with the client's `/transfers/{id}` — `GET /transfers/pend
 
 ```
 api/openapi.yaml            HTTP contract (client+admin tags) -> genclient/genadmin
-db/migrations/*.sql         goose migrations — 17 domain files (foundation, iban,
+db/migrations/*.sql         goose migrations - 17 frozen domain files (foundation, iban,
                             users, auth_tokens, onboarding, mfa, accounts,
                             transfers, maker_checker, maintenance, beneficiaries,
                             guided_scenarios, disputes, events, fraud, system_seed,
-                            iban_minting; schema + ALL PL/pgSQL)
+                            iban_minting; schema + ALL PL/pgSQL) + NNNN_* on top
 db/queries/*.sql            sqlc queries  -> internal/db/sqlc/*.sql.go
 internal/db/bank.go         hand-written pgx for set-returning fns sqlc can't expand
 internal/db/auth.go         sessions + refresh-token DB calls (hand-written pgx)

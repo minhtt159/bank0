@@ -101,7 +101,7 @@ func looksLikeEmail(e string) bool {
 // to the JWT subject (no user_id is accepted, so it's IDOR-proof by construction).
 // It reuses update_user_info with password+status pinned nil, so the client surface
 // can never change a password (use POST /me/password), unlock an account, or
-// escalate role. See docs/specs/spec-self-service-profile.md.
+// escalate role. See docs/06 §1.
 func (s *Server) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	subj, ok := s.clientSubjectOr401(w, r)
 	if !ok {

@@ -12,7 +12,7 @@ import (
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
 )
 
-// Public self-registration & contact verification (spec-self-registration.md).
+// Public self-registration & contact verification (docs/06 §1).
 // All three endpoints are pre-auth (security: []) and registered on the parent
 // router ahead of requireJWT, like /auth/login. The whole signup (idempotency
 // gate + locked user + first challenge) is ONE DB call — register_user.

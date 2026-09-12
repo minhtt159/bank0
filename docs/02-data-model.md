@@ -1,4 +1,10 @@
-# bank0 — Data Model
+# bank0 - Data Model
+
+**TL;DR.** Fifteen-ish tables around one append-only `ledger_entries`. Money is
+`BIGINT` minor units in a single currency; primary keys are UUIDv7, native in
+Postgres 18. `accounts.balance_minor` is a trigger-maintained cache of the
+entries and never a thing you write to directly. The invariants in §4 are the
+contract - if a change would break one of them, it is the wrong change.
 
 > Consolidated ERD and schema rationale.
 > Money is **BIGINT minor units**, single currency **EUR**. PKs are **UUIDv7**
@@ -10,11 +16,11 @@
 
 Money lives in exactly one place that is authoritative: the ledger.
 
-- **`accounts.balance_minor` is a cache**, writable only by the ledger trigger —
+- **`accounts.balance_minor` is a cache**, writable only by the ledger trigger -
   never by application code.
 - **`ledger_entries`** is the append-only, authoritative record of every money
   movement.
-- **`transfers`** is the one operation table — one row per requested money
+- **`transfers`** is the one operation table - one row per requested money
   movement, carrying its lifecycle state. Supporting tables cover holds and
   idempotency. The `enriched_ledger` view supplies human-readable joins for reads.
 
@@ -47,7 +53,14 @@ erDiagram
         varchar phone_number UK "nullable"
         user_role role "customer | operator | admin | auditor"
         user_status status "active | locked | closed"
+        onboarding_status onboarding_status "pending_verification | verified | active | rejected"
         int invites_remaining "lifetime invite quota, default 10"
+        timestamptz email_verified_at "nullable"
+        timestamptz phone_verified_at "nullable"
+        bool must_change_password "forced rotation, 00018"
+        smallint failed_login_attempts "per-account throttle, 00018"
+        timestamptz login_locked_until "nullable, 00018"
+        timestamptz password_changed_at "credential age, 00018"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -148,7 +161,7 @@ erDiagram
 ## 3. Tables in detail
 
 > The DDL below communicates intent. The canonical definitions live in
-> `db/migrations/` — types and enums in [`00001_foundation.sql`](../db/migrations/00001_foundation.sql),
+> `db/migrations/` - types and enums in [`00001_foundation.sql`](../db/migrations/00001_foundation.sql),
 > `users` in [`00003_users.sql`](../db/migrations/00003_users.sql) (sessions/refresh
 > tokens in [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), the
 > ledger core in [`00008_transfers.sql`](../db/migrations/00008_transfers.sql) (accounts/holds live in [`00007_accounts.sql`](../db/migrations/00007_accounts.sql)),
@@ -183,10 +196,21 @@ CREATE TABLE users (
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (email IS NULL OR email ~* '^[^@\s]+@[^@\s]+\.[^@\s]{2,}$')
 );
+
+-- Added by 00018_operator_password_rotation.sql, after the frozen baseline.
+ALTER TABLE users ADD COLUMN must_change_password  BOOLEAN     NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN failed_login_attempts SMALLINT    NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN login_locked_until    TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN password_changed_at   TIMESTAMPTZ NOT NULL DEFAULT now();
 ```
 
+`must_change_password` is the forced-rotation flag: an operator raises it, and
+until the customer changes their password their access token reaches only
+`POST /me/password` ([`06-client-api.md`](06-client-api.md) §2.1). The login
+throttle columns are per account, behind the per-IP rate limiter.
+
 `password_hash` holds a bcrypt hash, never plaintext. `role` drives the operator
-console; `status` locks or closes an account without deleting it — banks don't
+console; `status` locks or closes an account without deleting it - banks don't
 hard-delete people. `CITEXT` makes `Alice` == `alice` for login and email.
 Optional `email`/`phone` are genuinely `NULL` (not `''`), so the unique
 constraints behave: distinct NULLs never collide.
@@ -197,17 +221,17 @@ constraints behave: distinct NULLs never collide.
 are born `active` on both axes. The companion **`verification_challenges`**
 table (with `register_user` itself, in
 [`00005_onboarding.sql`](../db/migrations/00005_onboarding.sql)) holds one row per
-(user, channel) code dispatch — token and
-code stored as sha256 only, ≤5 attempts, 15-min TTL, 60-s resend cooldown, and a
+(user, channel) code dispatch - token and
+code stored as sha256 only, <=5 attempts, 15-min TTL, 60-s resend cooldown, and a
 partial unique index allowing one *pending* challenge per (user, channel).
 
 Registration is **invitation-gated**. The **`invitations`** table (also
 [`00005`](../db/migrations/00005_onboarding.sql), with `create_invitation`)
 records each issued code: `id uuidv7`, `code` (UNIQUE, stored **plaintext by
-design** — it must be redisplayable to the inviter), `inviter_id`, `invitee_id`
+design** - it must be redisplayable to the inviter), `inviter_id`, `invitee_id`
 (set on consume), `created_at`, `expires_at` (14-day), `consumed_at`; the
 `pending`/`consumed`/`expired` status is *derived*, not stored. `/auth/register`
-requires a valid pending code (empty → 422, unknown → 404, used/expired → 409),
+requires a valid pending code (empty -> 422, unknown -> 404, used/expired -> 409),
 and the code is single-use and **not** email-bound. Minting a code
 (`create_invitation`) is gated on the inviter being active + verified and on the
 per-user `invites_remaining` quota (`INT NOT NULL DEFAULT 10 CHECK >= 0`,
@@ -257,7 +281,7 @@ CREATE UNIQUE INDEX uq_accounts_one_default
 
 Key points:
 - **`balance_minor` is a cache.** No application code writes it; only the ledger
-  trigger does (§4). The `>= 0` check is *belt-and-suspenders* — funds are
+  trigger does (§4). The `>= 0` check is *belt-and-suspenders* - funds are
   actually guarded by the `available` check in `request_transfer`, but the
   constraint guarantees the database can never persist a negative customer
   balance even if a function is buggy.
@@ -265,12 +289,12 @@ Key points:
   identified by `system_code`: `EXTERNAL_CLEARING` (the boundary where money
   enters/leaves the bank), `CASH`, `FEES` (seeded in
   [`00016_system_seed.sql`](../db/migrations/00016_system_seed.sql)).
-  They have no `user_id`/`iban` and **may** go negative — that's
+  They have no `user_id`/`iban` and **may** go negative - that's
   how a deposit works without minting money (§4 in `03-...md`).
-- **One default account** is enforced by a partial unique index, not a trigger —
+- **One default account** is enforced by a partial unique index, not a trigger -
   cheaper, race-free, and declarative.
 
-### 3.3 `transfers` — the operation/intent
+### 3.3 `transfers` - the operation/intent
 
 ```sql
 CREATE TYPE transfer_status AS ENUM
@@ -312,7 +336,7 @@ CREATE TABLE transfers (
 ```
 
 `transfers` is the **intent**: one row per requested money movement, carrying its
-lifecycle state. It is *not* the ledger — the ledger entries are written only when
+lifecycle state. It is *not* the ledger - the ledger entries are written only when
 a transfer reaches `posted`. A normal customer transfer has
 `debit_account_id`/`credit_account_id` both being customer accounts; a deposit has
 `debit_account_id = external_clearing` (system) and `credit_account_id =`
@@ -320,11 +344,11 @@ customer; a withdrawal is the reverse.
 
 The two **rail-ready identifiers** exist so the contract already speaks
 ISO 20022 before any real rail is attached: `uetr` is minted by the bank at
-insert (stable across idempotent replays — a replay never re-inserts), and
+insert (stable across idempotent replays - a replay never re-inserts), and
 `end_to_end_id` is the customer's own reference, folded into the idempotency
 fingerprint so the same key with a different reference is a 422 mismatch.
 
-There is also a parallel **`status_iso`** on the transfer *contract* (Rec 20) —
+There is also a parallel **`status_iso`** on the transfer *contract* -
 an ISO-20022 ExternalPaymentTransactionStatus (`PDNG`/`ACSC`/`RJCT`/`CANC`)
 **computed by `iso_status(status)`, never stored**: it is not a column on
 `transfers`, only a projection surfaced on the read endpoints. The native
@@ -332,7 +356,7 @@ an ISO-20022 ExternalPaymentTransactionStatus (`PDNG`/`ACSC`/`RJCT`/`CANC`)
 [`03-ledger-lifecycle-idempotency.md`](03-ledger-lifecycle-idempotency.md) §1 and
 [`12-rail-readiness.md`](12-rail-readiness.md) §4 for the mapping.
 
-### 3.4 `ledger_entries` — the append-only source of truth
+### 3.4 `ledger_entries` - the append-only source of truth
 
 ```sql
 CREATE TYPE entry_direction AS ENUM ('debit', 'credit');
@@ -361,12 +385,12 @@ CREATE INDEX idx_ledger_transfer       ON ledger_entries (transfer_id);
 - **Append-only**: a trigger (§4) raises an exception on any `UPDATE` or `DELETE`.
 - **`signed_amount`** is a stored generated column so balance sums and
   reconciliation are trivial and index-friendly.
-- **`balance_after`** gives every entry a running balance → instant account
+- **`balance_after`** gives every entry a running balance -> instant account
   statements without window functions at read time.
 - The `(account_id, posted_at DESC, id DESC)` index drives statement pagination;
   `id` (UUIDv7, time-ordered) is the stable tiebreaker within the same millisecond.
 
-### 3.5 `holds` — authorization reservations
+### 3.5 `holds` - authorization reservations
 
 ```sql
 CREATE TYPE hold_status AS ENUM ('active', 'captured', 'released', 'expired');
@@ -395,16 +419,16 @@ CREATE INDEX idx_holds_expiry
 A hold reserves funds on the debit account **without** moving the ledger balance.
 The defining concept of the two-phase lifecycle:
 
-> **`available_minor = balance_minor − held_minor`**
+> **`available_minor = balance_minor - held_minor`**
 
 That is `account_available()` (`00007`): an O(1) two-column read of the
 trigger-maintained `held_minor` cache, and what every *display* path (account
 lists, the console) uses. The money-*authorizing* check inside `request_transfer`
-deliberately does not trust the cache — it recomputes a fresh
+deliberately does not trust the cache - it recomputes a fresh
 `SUM(holds.amount_minor WHERE status='active')` under the debit-account row lock.
 
-Posting a transfer converts its hold `active → captured` and writes the ledger
-entries; canceling/failing/expiring converts it `active → released/expired` and
+Posting a transfer converts its hold `active -> captured` and writes the ledger
+entries; canceling/failing/expiring converts it `active -> released/expired` and
 returns the funds to `available`.
 
 ### 3.6 `idempotency_keys`
@@ -427,19 +451,19 @@ CREATE TABLE idempotency_keys (
 ```
 
 `owner_id` namespaces the raw client key to the owning principal (the customer user id
-on client money/account paths; the all-zero sentinel `…0000` for system/money/operator
-ops; a **dedicated registration sentinel `…0001`** for `/auth/register`, so a
+on client money/account paths; the all-zero sentinel `...0000` for system/money/operator
+ops; a **dedicated registration sentinel `...0001`** for `/auth/register`, so a
 self-chosen registration key can't squat a deterministic system key like
 `dispute-reimburse-<id>`), so the same raw key from two different owners is two
 independent claims. How this
 guarantees no double-post and keeps business logic out of the API is the subject of
 [`03-...md`](03-ledger-lifecycle-idempotency.md) §3. In short: the DB function does
-`INSERT ... ON CONFLICT (owner_id, key) DO NOTHING`; a conflict means "seen before" →
+`INSERT ... ON CONFLICT (owner_id, key) DO NOTHING`; a conflict means "seen before" ->
 return the stored result; a conflict with a *different* `request_hash` raises (the
-client reused a key for a different request — surfaced loudly rather than silently
+client reused a key for a different request - surfaced loudly rather than silently
 mis-handled).
 
-### 3.7 `admin_actions` — operator audit
+### 3.7 `admin_actions` - operator audit
 
 Table and the maker-checker functions in
 [`00009_maker_checker.sql`](../db/migrations/00009_maker_checker.sql), alongside the
@@ -461,9 +485,9 @@ Note this logs the *act of an operator deciding something*. The financial effect
 is still the ledger. Together they answer both "what moved?" (ledger) and "who
 authorized it and why?" (admin_actions).
 
-### 3.8 `guided_scenarios` — "Guided transaction" demo config
+### 3.8 `guided_scenarios` - "Guided transaction" demo config
 
-Demo/config only — **no money state** (table and functions in
+Demo/config only - **no money state** (table and functions in
 [`00012_guided_scenarios.sql`](../db/migrations/00012_guided_scenarios.sql)). One row maps an active
 named scenario to a target ("mule") `accounts(id)` that `GET /transfers/suggestion`
 short-lists: optionally per-user (`target_user_id`), gated by `min_amount_minor`.
@@ -471,14 +495,14 @@ The resolver (`suggest_transfer_destinations()`) returns a **menu of up to 3**
 candidates owned by *other* users, ordered by `random()`; `priority` (with per-user
 targeting and recency) only breaks ties inside the `DISTINCT ON` that collapses
 several scenarios pointing at one account. The table is empty by default, so the
-resolver returns **no rows** — "no stranger eligible" — and the *client* falls back
+resolver returns **no rows** - "no stranger eligible" - and the *client* falls back
 to the caller's own other active account. The response never exposes more
 than confirmation-of-payee (masked owner name + iban via `mask_name()`).
 
-### 3.9 `disputes` — customer "I don't recognise this" cases
+### 3.9 `disputes` - customer "I don't recognise this" cases
 
 A dispute against a `transfers(id)` the raiser is a party to (table and functions in
-[`00013_disputes.sql`](../db/migrations/00013_disputes.sql)). **Not money state** — the
+[`00013_disputes.sql`](../db/migrations/00013_disputes.sql)). **Not money state** - the
 ledger stays append-only; the remedy is the operator's `reverse_transfer`. Only this
 row's own fields mutate: `status` (`open` / `under_review` / `resolved` /
 `rejected`) + `resolution_note` / `resolver_user_id` (state machine in
@@ -486,8 +510,8 @@ row's own fields mutate: `status` (`open` / `under_review` / `resolved` /
 `decision`, `reimbursed_amount_minor`, `vulnerable_flag` (`decide_dispute`), and the
 simulated-recall pair `recall_status` / `recall_reason` (`set_dispute_recall`). A
 partial unique index on `(transfer_id, raised_by_user_id) WHERE status IN
-('open','under_review')` enforces one open dispute per raiser (→ 409). Raising
-(`raise_dispute`) emits an `admin_actions` `dispute_raised` row — the flag-only
+('open','under_review')` enforces one open dispute per raiser (-> 409). Raising
+(`raise_dispute`) emits an `admin_actions` `dispute_raised` row - the flag-only
 fraud-engine seam.
 
 ---
@@ -504,12 +528,12 @@ check the `reconcile()` function and the admin dashboard run.
 | I3 | **Global**: `SUM(signed_amount)` over all posted entries == 0 (no money created/destroyed) | follows from I2; `reconcile()` asserts directly |
 | I4 | `accounts.held_minor == SUM(amount_minor)` of that account's `active` holds | `holds_maintain_held()` trigger; `reconcile()` (`held_drift`) |
 | I5 | A parked transfer (`held`/`under_review`) still owns an `active` hold | `place_transfer_hold` stretches rather than releases; `reconcile()` (`missing_hold`) |
-| I6 | An account with a non-zero `balance_minor` has at least one ledger entry | `reconcile()` (`balance_without_ledger`) — the I1 join can't see an entry-less account |
+| I6 | An account with a non-zero `balance_minor` has at least one ledger entry | `reconcile()` (`balance_without_ledger`) - the I1 join can't see an entry-less account |
 | I7 | `available_minor >= 0` for customer accounts | `request_transfer` checks before creating a hold; `CHECK` on balance |
 | I8 | `ledger_entries` is append-only | immutability trigger (rejects UPDATE/DELETE) |
 | I9 | At most one `is_default` account per user | partial unique index |
 | I10 | At most one `active` hold per in-flight transfer | partial unique index |
-| I11 | A transfer has `posted_at` ⟺ its status is `posted` or `reversed` | CHECK on `transfers`; `post_transfer` sets it |
+| I11 | A transfer has `posted_at` <=> its status is `posted` or `reversed` | CHECK on `transfers`; `post_transfer` sets it |
 | I12 | Replaying an idempotency key never creates a second transfer | `idempotency_keys` PK + ON CONFLICT logic |
 
 > I3 is the single most reassuring line on the dashboard: if the bank's books
@@ -524,7 +548,7 @@ check the `reconcile()` function and the admin dashboard run.
 |-------|---------|
 | `ledger_entries (account_id, posted_at DESC, id DESC)` | account statement pagination |
 | `ledger_entries (transfer_id)` | fetch both legs of a transfer |
-| `holds (account_id) WHERE status='active'` | `request_transfer`'s fresh `SUM(active holds)` under the debit-account lock, and the sweep — display `available` reads the `held_minor` cache instead |
+| `holds (account_id) WHERE status='active'` | `request_transfer`'s fresh `SUM(active holds)` under the debit-account lock, and the sweep - display `available` reads the `held_minor` cache instead |
 | `holds (expires_at) WHERE status='active'` | `expire_holds()` batch scan |
 | `transfers (requested_at) WHERE status='pending'` | operator "pending queue" |
 | `transfers (debit_account_id, created_at DESC)` / `(credit_account_id, created_at DESC)` | per-account transfer history (a `UNION ALL` over both legs) |
@@ -533,7 +557,7 @@ check the `reconcile()` function and the admin dashboard run.
 | `transfers (reverses_id) WHERE reverses_id IS NOT NULL` | idempotent re-reverse: find the existing reversal of a posted transfer |
 | `accounts (user_id)` | list a user's accounts |
 | `idempotency_keys (expires_at)` | TTL cleanup job |
-| trigram GINs on `users` (`username`, `full_name`, `email`), `accounts` (`iban`), `transfers` (`description`) | operator fuzzy search; exact-match lookup needs no extra index — the `UNIQUE` constraints (CITEXT `username`/`email`, `iban`) already serve it |
+| trigram GINs on `users` (`username`, `full_name`, `email`), `accounts` (`iban`), `transfers` (`description`) | operator fuzzy search; exact-match lookup needs no extra index - the `UNIQUE` constraints (CITEXT `username`/`email`, `iban`) already serve it |
 
 ---
 
@@ -544,13 +568,13 @@ check the `reconcile()` function and the admin dashboard run.
 - **Time**: always `TIMESTAMPTZ`, default `now()`. `updated_at` is maintained by
   `BEFORE UPDATE` triggers on `users`, `accounts`, `transfers`, `disputes` and
   `warning_rules` (the shared `set_updated_at()`); `bank_settings.updated_at` has
-  **no** trigger — `update_bank_settings` sets it explicitly, and that table's only
+  **no** trigger - `update_bank_settings` sets it explicitly, and that table's only
   trigger (`trg_bank_settings_singleton`) is a DELETE guard.
-- **IDs**: `UUID` PKs, `DEFAULT uuidv7()` (time-ordered → index-friendly inserts;
-  the PG18 built-in — PG18 is the floor, there is no polyfill).
+- **IDs**: `UUID` PKs, `DEFAULT uuidv7()` (time-ordered -> index-friendly inserts;
+  the PG18 built-in - PG18 is the floor, there is no polyfill).
 - **Enums**: PostgreSQL `ENUM` types, named `<noun>_<attr>` (e.g. `transfer_status`).
-- **No hard deletes** of financial data: the money-path FKs (`transfers` →
-  `accounts`, `ledger_entries` → `accounts`/`transfers`) are `ON DELETE RESTRICT`.
+- **No hard deletes** of financial data: the money-path FKs (`transfers` ->
+  `accounts`, `ledger_entries` -> `accounts`/`transfers`) are `ON DELETE RESTRICT`.
   Peripheral FKs differ deliberately: `guided_scenarios.target_account_id` is
   `CASCADE` (demo config dies with its account); `events.related_*` and
   `warning_acks.debit_account_id` are `SET NULL` (notifications/acks outlive what
@@ -560,15 +584,3 @@ check the `reconcile()` function and the admin dashboard run.
 
 ---
 
-## 7. Future extensions (non-breaking)
-
-- **Multi-currency**: add `currency` per ledger entry (already present), drop the
-  `currency = 'EUR'` checks, introduce an FX `transfer_kind` that posts 4 legs via
-  an `fx_clearing` system account + an `exchange_rates` table. The double-entry
-  core does not change.
-- **Overdraft / credit lines**: relax the customer `balance >= 0` check for
-  flagged accounts; `available` already centralizes the funds check.
-- **Statements**: `balance_after` is already materialized — a statement is a date
-  range over `ledger_entries`.
-- **Interest**: a scheduled job that posts `fee`/`adjustment` transfers against a
-  system interest account.

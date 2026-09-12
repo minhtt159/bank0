@@ -1,126 +1,132 @@
-# bank0 — fraudbank client integration
+# bank0 - integrating an external client
 
-> How the fraudbank clients (web, Android, iOS) integrate with bank0's client API.
-> They run against the API as-is — auth (login / refresh / rotation), accounts,
-> ledger, beneficiaries, transfers, disputes, and the guided-transfer suggestion
-> all work with no bank0-specific backend changes. **Now also shipped:**
-> invitation-gated self-registration + contact verification (`/auth/register`
-> takes a single-use `invitation_code`; `/auth/verify-contact`,
-> `/auth/resend-code`; issue codes via `/me/invitations`), customer account opening
-> (`POST /me/accounts`, server-minted IBAN), transfer-limit requests
-> (`POST /accounts/{id}/limit-requests` + the operator queue), and rail-ready
-> transfer ids (`uetr`, `end_to_end_id`) — see [`06-client-api.md`](06-client-api.md) §1.
-> Notifications (the `events` feed behind `GET /me/events`, `/me/events/unread`,
-> `/me/events/read`) and step-up MFA (`/auth/mfa/*` plus `evaluate_transfer`'s
-> `step_up` decision) have shipped since — as have server-side CoP/VOP and SCA.
-> The remaining backlog is the **open half of the banking-grade roadmap** — RFC
-> 9457 (re-deferred P0→P3 at 1.0.0) and Recs 16/24/26–28 — and the P3 product
-> domains; both live in
-> [`docs/specs/`](specs/) — see
-> [`specs/spec-banking-grade-hardening.md`](specs/spec-banking-grade-hardening.md)
-> (open recommendations only) and
-> [`specs/spec-p3-roadmap.md`](specs/spec-p3-roadmap.md).
-> Companion on the client side: fraudbank `docs/02-api-contract.md`.
+**TL;DR.** External clients - the fraudbank web, Android and iOS apps - call
+`api.bank0.hnimn.art` exactly as bank0's own PWA does. There is no client-specific
+backend. Read [`06-client-api.md`](06-client-api.md) for the full contract; this
+page covers the five things client teams get wrong.
+
+Written for a developer building against the API who has never seen this
+repository. You need to know HTTP and JSON; banking terms are explained where
+they appear.
+
+```mermaid
+flowchart LR
+    W[fraudbank web] -->|same-origin /api/*| CFW[Cloudflare Worker]
+    CFW --> API[api.bank0.hnimn.art]
+    A[Android app] -->|bearer, direct| API
+    I[iOS app] -->|bearer, direct| API
+    API --> DB[(Postgres ledger)]
+```
+
+Diagram: the web client reaches the API through a same-origin Worker proxy; the
+native apps call the API directly with a bearer token. All paths end at the same
+ledger.
 
 ---
 
-## 1. Auth & token handling
+## 1. Tokens
 
-fraudbank web and the native apps authenticate against the client API exactly as
-the bank0 PWA does ([`06-client-api.md`](06-client-api.md) §2–3):
+Login returns a short-lived access token (15 minutes) and a refresh token. Send
+the access token as `Authorization: Bearer <token>`. Rotate at
+`POST /auth/refresh` before it expires.
 
-- `POST /auth/login` → short (15m) HS256 access token **+ refresh token**.
-  When the user has MFA enrolled, login instead returns `mfa_required: true` +
-  a short-lived (5m) `mfa_token` and **no tokens at all** — exchange the
-  `mfa_token` + code at `POST /auth/mfa/verify` to get the pair.
-- `POST /auth/refresh` rotates the pair, with reuse detection: a replayed refresh
-  token revokes the whole family.
-- `POST /auth/logout` revokes one session; `POST /auth/logout-all` revokes all.
+Four responses to `POST /auth/login` are possible, and a client that handles only
+the first one will break:
 
-**Web should hold tokens server-side via a Worker BFF — planned, not built.**
-Today `worker/index.ts` is a pass-through proxy, so the browser holds the refresh
-token; that same-origin proxy is the seam the BFF slots into. The cookie mechanics
-(strip `refresh_token` on login, cookie-driven refresh, logout clears it) are
-spelled out once in [`07-client-web-app.md`](07-client-web-app.md) §§2,9 — not
-repeated here. "BFF" is an architecture term; it never appears in a client URL.
+| Response | What it means | What to do |
+|---|---|---|
+| `token` + `refresh_token` | normal sign-in | proceed |
+| `mfa_required: true` + `mfa_token` | the user has MFA enrolled; **no** access token was issued | collect a code, `POST /auth/mfa/verify` with the `mfa_token` |
+| `password_change_required: true`, no `refresh_token` | an operator requires a password change | route to a change-password screen; the token you got reaches only `POST /me/password` and `POST /auth/logout-all`, everything else is 403 |
+| `401` | wrong credentials, or the account is locked | show one generic message - the API deliberately does not distinguish them |
 
-**Native apps use direct API access** — JWT + refresh held in
-Keystore/Keychain. A BFF adds nothing for them and only an extra hop, so they call
-`api.bank0.hnimn.art` directly.
+Two rules that bite:
 
-### 1.1 Local dev: opt-in CORS on `mode=api`
+- **A replayed refresh token revokes the entire family.** Rotation is
+  single-use. If two threads race the same refresh token, one of them gets a
+  401 and the user is signed out everywhere. Serialize refreshes.
+- **`POST /me/password` revokes every session, including the caller's.** After a
+  204 your tokens are dead. Clear local state and send the user to sign-in; do
+  not keep using the token you made the call with.
 
-For local development without the Vite proxy, an opt-in CORS middleware (config
-`server.cors_origins`, default empty = no CORS) unblocks direct
-browser → `:8090` calls:
+`POST /auth/logout` revokes one session; `POST /auth/logout-all` revokes every
+one.
+
+**Where the tokens live.** Native apps hold them in Keystore or Keychain and call
+the API directly - a proxy would add a hop and nothing else. Web holds them in
+the browser today, because `worker/index.ts` is a pass-through proxy. Moving them
+into httpOnly cookies at that same-origin seam is described in
+[`07-client-web-app.md`](07-client-web-app.md) §§2, 9. It is not built.
+
+---
+
+## 2. Lists are bare arrays
+
+Every list endpoint returns a JSON array, and an empty one is `[]`, never `null`.
+There is no `{items, next_cursor, has_more}` envelope anywhere in this API -
+client API, admin surface and disputes all agree.
+
+Pagination is a keyset cursor plus `limit`; you have reached the end when a page
+comes back shorter than `limit`. The ledger uses a composite cursor of
+`(posted_at, id)` rather than a timestamp alone, so entries sharing a timestamp
+are never skipped between pages. Pass both `cursor` and `cursor_id` back.
+
+---
+
+## 3. Errors
+
+Every non-2xx response is `{"error": <code>, "message": <text>}` with a JSON
+content type - including errors minted by the Worker proxy. Branch on the
+`error` token and the HTTP status. Never branch on `message`: it is display
+text and changes without notice.
+
+The token set is a registry. Existing tokens are never renamed or removed within
+1.x, new ones may appear at any time, and an unknown token should be treated as a
+generic failure for its status class. The envelope is additive the same way - new
+top-level members may appear and must be ignored if unrecognised.
+
+---
+
+## 4. Guided transfers
+
+`GET /transfers/suggestion?from_account&amount_minor` powers the guided-transfer
+demo. It returns `{"options": [...]}` with up to three third-party candidates
+drawn at random from the active scenario short-list, or `{"options": []}` when
+none are configured - in which case the client picks a payee itself or falls back
+to the caller's own account. It is read-only and exposes no more than
+confirmation of payee: a masked owner name and an IBAN.
+
+---
+
+## 5. Disputes feed the fraud engine
+
+Raising a dispute writes a `dispute_raised` audit row. It does **not** freeze
+anything, and no auto-freeze is planned - freezing on an accusation is a product
+decision, not a missing feature.
+
+It is not inert either. `assess_transfer_risk` adds a `destination_flagged`
+score to any account on the receiving side of an open or under-review dispute
+categorised as fraud or unrecognised
+([`00015_fraud.sql`](../db/migrations/00015_fraud.sql)). Later payments to that
+same destination can therefore escalate to a warning, a step-up, or a review
+hold.
+
+---
+
+## 6. Local development: opt-in CORS
+
+Production web is same-origin through the Worker, so CORS never applies. For
+local work without the Vite proxy, `server.cors_origins` (default empty, meaning
+disabled) unblocks direct browser calls to `:8090`:
 
 ```
-Access-Control-Allow-Origin: <matched origin>          # exact match from the list, no *
+Access-Control-Allow-Origin: <matched origin>   # exact match from the list, never *
 Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Headers: Authorization, Content-Type, Idempotency-Key
 Access-Control-Max-Age: 600
 Vary: Origin
 ```
 
-`OPTIONS` preflight returns 204. `Idempotency-Key` is in `Allow-Headers` (else
-`POST /transfers` fails preflight); no `Allow-Credentials` (bearer header, no
-cookies). This is a dev convenience — production web ships same-origin via the
-Worker.
-
----
-
-## 2. List shape & pagination
-
-Every list endpoint returns a **bare JSON array** and always `[]`, never `null` —
-consistent across the client API, the admin/HTML surface, and disputes. There is
-**no `{items, next_cursor, has_more}` envelope.** Pagination is a keyset cursor +
-`limit`; end-of-data is a short page (`len < limit`). The ledger uses a
-**composite keyset cursor `(posted_at, id)`** (`WHERE (posted_at, id) < ($1,$2)`),
-the same pattern as the console (`AccountStatement`, `SearchTransfers`), so rows
-sharing a timestamp are never skipped.
-
----
-
-## 3. Guided-transfer "mule menu"
-
-`GET /transfers/suggestion?from_account&amount_minor` powers the guided-transfer
-demo flow. It returns `{"options":[…]}` with up to 3 third-party candidates drawn
-at random from the active `guided_scenarios` short-list (`source=scenario`), or
-`{"options":[]}` when none configured — in which case the client picks one at
-random or falls back to the caller's own account. It is read-only and never
-exposes more than confirmation-of-payee (a masked owner name + IBAN). Full design:
-[`specs/spec-banking-grade-hardening.md`](specs/spec-banking-grade-hardening.md) §5.
-
----
-
-## 4. Disputes fraud hook — flag only
-
-`raise_dispute` emits the `admin_actions` `dispute_raised` audit row — the
-fraud-engine seam. There is **no auto-freeze**, and none is specced — freezing on
-a raised dispute would be a product decision, not a missing implementation.
-
-It is not inert, though: `assess_transfer_risk` scores **+3 `destination_flagged`**
-for any account on the **credit side** of an `open`/`under_review` dispute whose
-category is `fraud` or `unrecognised`
-([`00015_fraud.sql`](../db/migrations/00015_fraud.sql)). So raising a dispute
-raises the risk band for **later payments to that same destination** — which can
-escalate them to `warn`/`review`/`step_up` via `evaluate_transfer`.
-
----
-
-## 5. Dashboard composition (Worker-side)
-
-The cold start of a fraudbank client is three sequential round trips: `GET /me` →
-`GET /users/{id}/accounts` → `GET /accounts/{id}/ledger` (default account). On
-mobile latency that is the visible "skeleton screen" second. The Worker can
-compose them into one call:
-
-- `GET /me/dashboard` → `{user, accounts: [...], recent: {account_id, entries: [...first ledger page]}}`
-  — the Worker fans the three upstream calls out in parallel with the caller's
-  bearer and merges. No new core surface, no new authority (everything stays
-  ownership-scoped upstream), pure latency optimization.
-- It is **read-only composition**. Writes (transfers) stay 1:1 pass-through —
-  idempotency and error semantics never acquire a translation layer.
-
-The path is `GET /me/dashboard` — consistent with the `/me/*` namespace, with no
-`/bff` URL segment. Native apps can call it too, or keep their parallel fetches.
+Preflight `OPTIONS` returns 204. `Idempotency-Key` has to be in the allowed
+headers or `POST /transfers` fails preflight. There is no `Allow-Credentials`,
+because authentication is a bearer header and not a cookie.

@@ -1,33 +1,39 @@
-# bank0 — Deployment, Scaling & API Contract
+# bank0 - Deployment and scaling
 
-> How bank0 runs: three public surfaces, one Go image (run modes `api`/`portal`/`all`),
-> in-cluster migrations, and a contract-first OpenAPI surface.
->
-> **This is the deployment path** — self-hosted Postgres 18 + Kubernetes/Helm +
-> Gateway API. It is the only one; there is no managed/serverless variant. The
-> image and chart now publish to GHCR (§6); what remains — per-surface Gateway
-> attachment and PWA hosting — is
-> [`specs/spec-container-helm-pivot.md`](specs/spec-container-helm-pivot.md).
+**TL;DR.** One Go image runs both server surfaces (`mode=api`, `mode=portal`);
+the PWA is a Cloudflare Worker. Install the published chart from GHCR against a
+Postgres 18 you provision yourself; migrations run as a pre-upgrade job.
+Liveness is DB-blind and readiness is DB-aware, deliberately. CI publishes the
+image and chart but never deploys - `helm upgrade` is an operator command.
+
+> Self-hosted Postgres 18, Kubernetes, Helm and Gateway API is the only
+> deployment path; there is no managed or serverless variant. Per-surface
+> Gateway attachment and in-cluster PWA hosting are still open: issues
+> [#117](https://github.com/minhtt159/bank0/issues/117),
+> [#118](https://github.com/minhtt159/bank0/issues/118) and
+> [#119](https://github.com/minhtt159/bank0/issues/119).
+> The API contract and the code generators moved to
+> [`08-development.md`](08-development.md).
 
 ---
 
-## 0. Topology — three surfaces, three hosts
+## 0. Topology - three surfaces, three hosts
 
 | Host | Surface | Tech | Served by |
 |------|---------|------|-----------|
-| `portal.bank0.hnimn.art` | **Admin UI** — operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal` ([`05-admin-ui.md`](05-admin-ui.md)) |
-| `api.bank0.hnimn.art` | **Client API** — customer JSON API | Go (same binary), `mode=api` | bank0 binary, **behind a Cloudflare proxy** ([`06-client-api.md`](06-client-api.md)) |
-| `bank0.hnimn.art` | **Client web app** — customer PWA | TypeScript (Preact/Vite) | **Cloudflare Worker** (static assets + `/api/*` proxy) ([`07-client-web-app.md`](07-client-web-app.md)) |
+| `portal.bank0.hnimn.art` | **Admin UI** - operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal` ([`05-admin-ui.md`](05-admin-ui.md)) |
+| `api.bank0.hnimn.art` | **Client API** - customer JSON API | Go (same binary), `mode=api` | bank0 binary, **behind a Cloudflare proxy** ([`06-client-api.md`](06-client-api.md)) |
+| `bank0.hnimn.art` | **Client web app** - customer PWA | TypeScript (Preact/Vite) | **Cloudflare Worker** (static assets + `/api/*` proxy) ([`07-client-web-app.md`](07-client-web-app.md)) |
 
 The two Go surfaces are the *same* binary in different modes (§1). The PWA is not
-served by Go at all — it lives on a Cloudflare Worker that also proxies the
+served by Go at all - it lives on a Cloudflare Worker that also proxies the
 browser's `/api/*` calls to `api.bank0.hnimn.art`, so the browser stays
 same-origin (no CORS) and tokens never traverse a third origin.
 
 ```mermaid
 graph LR
     Op([Operator]) -->|HTTPS| Portal[portal.bank0.hnimn.art<br/>Go portal]
-    Cust([Customer browser]) -->|HTTPS| CFW[bank0.hnimn.art<br/>Cloudflare Worker · PWA]
+    Cust([Customer browser]) -->|HTTPS| CFW[bank0.hnimn.art<br/>Cloudflare Worker | PWA]
     CFW -->|/api/* proxy| CF[Cloudflare proxy]
     CF --> API[api.bank0.hnimn.art<br/>Go api mode]
     Portal --> PG[(Postgres)]
@@ -36,15 +42,15 @@ graph LR
 
 ### Edge: Gateway API
 
-The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster —
+The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster -
 TLS, routing, and rate-limiting are the Gateway's job. The PWA is still built and
 served as a Cloudflare Worker today; moving it in-cluster (and what that means for
 the same-origin `/api/*` proxy) is planned in
-[`specs/spec-container-helm-pivot.md`](specs/spec-container-helm-pivot.md) §5.
+issue [#118](https://github.com/minhtt159/bank0/issues/118).
 
 ---
 
-## 1. One image, run modes (`api` · `portal` · `all`)
+## 1. One image, run modes (`api` | `portal` | `all`)
 
 The binary serves different route surfaces based on `server.mode`
 (`APP_SERVER_MODE`):
@@ -88,14 +94,14 @@ Set the JWT key via `APP_AUTH_JWT_SECRET` (Helm: `auth.existingSecret` or
 **fails closed** when `app.env != development`: `Config.Validate()` returns an error
 and `cmd/app/main.go` logs `invalid configuration` and exits non-zero. Only in
 `development` does it fall back to an insecure dev value with a startup warning.
-The check runs on the **serve** path only — `migrate` and `maintenance` serve no
+The check runs on the **serve** path only - `migrate` and `maintenance` serve no
 surface, so the pre-upgrade migrate Job runs on `app.env=production` with the DSN
 alone and no JWT secret.
 
 > **`all`-mode note:** when one container serves both surfaces (local dev), the
 > client and admin route sets overlap. Shared reads resolve to the client (JWT)
 > surface; the one static admin route that would be shadowed by the client's
-> `/transfers/{id}` — `GET /transfers/pending` — is registered ahead of it behind
+> `/transfers/{id}` - `GET /transfers/pending` - is registered ahead of it behind
 > the session guard, so both work. In production the surfaces are separate
 > deployments (`mode=api` / `mode=portal`) with no overlap.
 
@@ -114,10 +120,10 @@ rather than collapsing into `mode=all`:
 |---------|------|-------|
 | `db` | `postgres:18` | exposes `:5432` |
 | `migrate` | one-shot `migrate up`, then exits | runs after `db` is healthy |
-| `admin` | `APP_SERVER_MODE=portal` → `:8080` | console + admin API; auto-migrate **off**, maintenance loop on |
-| `client` | `APP_SERVER_MODE=api` → `:8090` | client JSON API; auto-migrate **off** |
+| `admin` | `APP_SERVER_MODE=portal` -> `:8080` | console + admin API; auto-migrate **off**, maintenance loop on |
+| `client` | `APP_SERVER_MODE=api` -> `:8090` | client JSON API; auto-migrate **off** |
 
-No container runs `mode=all` or `APP_SERVER_AUTO_MIGRATE=true` — migrations are
+No container runs `mode=all` or `APP_SERVER_AUTO_MIGRATE=true` - migrations are
 applied by the dedicated `migrate` job. The stack comes up migrated but
 **unseeded**: load data with `task seed` (or `task dev:reset` for a fresh seeded
 stack), then visit `http://localhost:8080/` (console) and
@@ -129,7 +135,7 @@ stack), then visit `http://localhost:8080/` (console) and
 
 ```bash
 # database secret has key "dsn"; auth secret has key "jwt-secret"
-# (api pods fail closed without a JWT secret — see §1)
+# (api pods fail closed without a JWT secret - see §1)
 helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
@@ -137,7 +143,7 @@ helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
 
 Both the chart and the image are published to GHCR by
 [`publish.yml`](../.github/workflows/publish.yml) (§6). Swap the OCI reference for
-a local path (`helm install bank0 deploy/helm/bank0 …`) to install the working
+a local path (`helm install bank0 deploy/helm/bank0 ...`) to install the working
 tree instead.
 
 What the chart creates:
@@ -150,8 +156,8 @@ graph TD
       RtP["HTTPRoute portal<br/>portal.bank0.hnimn.art"] -.parentRef.-> GW
       GW --> SvcA[Service bank0-api]
       GW --> SvcP[Service bank0-portal]
-      SvcA --> DepA["Deployment bank0-api<br/>mode=api · HPA 3–10"]
-      SvcP --> DepP["Deployment bank0-portal<br/>mode=portal · 2 replicas · maintenance"]
+      SvcA --> DepA["Deployment bank0-api<br/>mode=api | HPA 3-10"]
+      SvcP --> DepP["Deployment bank0-portal<br/>mode=portal | 2 replicas | maintenance"]
       Job["pre-install/pre-upgrade Job: bank0 migrate up"] --> PG[(PostgreSQL)]
       DepA --> PG
       DepP --> PG
@@ -160,19 +166,19 @@ graph TD
 
 | Concern | How |
 |---|---|
-| **HA / scaling** | `bank0-api` is a Deployment behind an HPA (CPU-based, 3–10 replicas). Stateless — all state is in Postgres. |
+| **HA / scaling** | `bank0-api` is a Deployment behind an HPA (CPU-based, 3-10 replicas). Stateless - all state is in Postgres. |
 | **Routing / two domains** | **Gateway API on Envoy Gateway.** One `Gateway` with a per-host HTTPS listener; two `HTTPRoute`s (api/portal) attach by `parentRef`/`sectionName` and fan out to the two Services. Same image, different `mode`, scaled independently. The chart can create the Gateway (`gateway.create=true`) or attach to a shared one. |
 | **Migrations** | A `pre-install,pre-upgrade` hook Job runs `bank0 migrate up` (embedded migrations) before new pods roll. |
-| **Maintenance** | `expire_holds` + cleanup **and `reconcile()`** run **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. A non-zero `reconcile()` result (ledger/cache drift) is logged at WARN — page on it. |
+| **Maintenance** | `expire_holds` + cleanup **and `reconcile()`** run **in-process on portal pods only** (`run_maintenance=true`), each tick guarded by a Postgres **advisory lock** (`pg_try_advisory_xact_lock`) so multiple replicas never duplicate the sweep. A non-zero `reconcile()` result (ledger/cache drift) is logged at WARN - page on it. |
 | **DB credentials** | `APP_DATABASE_DSN` from a Secret (`existingSecret` recommended; chart can create one from `database.dsn` for dev). |
-| **Probes** | **liveness → `/health`** (cheap, DB-blind — a DB blip must not kill the pod); **readiness → `/readyz`** (pings Postgres with a 1s deadline, 503 when the pool can't serve, so a pod with a dead/exhausted pool leaves the Service rotation). Both deployments. |
-| **Metrics** | `/metrics` — a real Prometheus **histogram** (`bank0_http_request_duration_seconds`, labelled by method/route-template/status → `histogram_quantile` p50/p95/p99 + rate + error-rate) plus a live pgxpool gauge and the Go/process collectors (`client_golang`). Optional, off by default: a **ServiceMonitor** (`metrics.serviceMonitor.enabled`, needs the Prometheus Operator) and a **Grafana dashboard** ConfigMap auto-discovered by the kube-prometheus-stack sidecar (`metrics.dashboard.enabled`). |
-| **Logging** | `logging.level` (default `info`) and `logging.encoding` (default `json`) are set on both Deployments and the migrate Job. The image's baked `config.yaml` also defaults to `info` — only the local compose stack opts into `debug` — so an unconfigured pod never logs at debug. Raise `logging.level` to troubleshoot a live release without rebuilding the image. |
+| **Probes** | **liveness -> `/health`** (cheap, DB-blind - a DB blip must not kill the pod); **readiness -> `/readyz`** (pings Postgres with a 1s deadline, 503 when the pool can't serve, so a pod with a dead/exhausted pool leaves the Service rotation). Both deployments. |
+| **Metrics** | `/metrics` - a real Prometheus **histogram** (`bank0_http_request_duration_seconds`, labelled by method/route-template/status -> `histogram_quantile` p50/p95/p99 + rate + error-rate) plus a live pgxpool gauge and the Go/process collectors (`client_golang`). Optional, off by default: a **ServiceMonitor** (`metrics.serviceMonitor.enabled`, needs the Prometheus Operator) and a **Grafana dashboard** ConfigMap auto-discovered by the kube-prometheus-stack sidecar (`metrics.dashboard.enabled`). |
+| **Logging** | `logging.level` (default `info`) and `logging.encoding` (default `json`) are set on both Deployments and the migrate Job. The image's baked `config.yaml` also defaults to `info` - only the local compose stack opts into `debug` - so an unconfigured pod never logs at debug. Raise `logging.level` to troubleshoot a live release without rebuilding the image. |
 | **Hardening** | Image is `distroless:nonroot`; pods run with `runAsNonRoot`, a **read-only root filesystem**, all capabilities dropped, `seccompProfile: RuntimeDefault` (values: `podSecurityContext` / `securityContext`), and a hardcoded `automountServiceAccountToken: false`. |
-| **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here) makes the auth rate limiter key on the real client IP instead of `RemoteAddr`: `CF-Connecting-IP` when present, else `X-Forwarded-For` read **right-to-left**, `trustedProxyHops` entries in (default 1 — count every proxy between client and pod). Right-to-left because an `use_remote_address` Gateway **appends** rather than replaces, so only the right-most entries are proxy-authored ([`10`](10-security-review.md)). |
-| **First login** | The seeded `admin` account (from `00016`) is flagged `must_change_password`, so the console holds it on `/console/password` until it is rotated and the admin JSON API answers `403` meanwhile ([`05`](05-admin-ui.md) §4.6a). The flag is set only while the account still holds the seeded password. |
+| **Request timeout / proxy trust** | `server.request_timeout` (default 15s) bounds each request so a stuck query can't pin a pool connection. `trustProxyHeaders` (values; **true** here) makes the auth rate limiter key on the real client IP instead of `RemoteAddr`: `CF-Connecting-IP` when present, else `X-Forwarded-For` read **right-to-left**, `trustedProxyHops` entries in (default 1 - count every proxy between client and pod). Right-to-left because an `use_remote_address` Gateway **appends** rather than replaces, so only the right-most entries are proxy-authored ([`10`](10-security-review.md)). |
+| **First login** | The seeded `admin` account (from `00016`) is flagged `must_change_password`, so the console holds it on `/console/password` until it is rotated and the admin JSON API answers `403` meanwhile ([`05`](05-admin-ui.md) §4.6a). The same flag binds the client API: a flagged customer's token reaches only `POST /me/password` ([`06`](06-client-api.md) §2.1). It is set only while the account still holds the seeded password. |
 | **JWT secret** | The `api` deployment mounts `APP_AUTH_JWT_SECRET` (Helm `auth.existingSecret`); the `portal` deployment doesn't need one (cookie sessions), and `Config.Validate` only requires it when the served mode includes the api surface. |
-| **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP→HTTPS. |
+| **TLS** | Per-host HTTPS listeners on the Gateway, `mode: Terminate`. cert-manager's gateway-shim provisions a cert per listener when the Gateway is annotated with `gateway.tls.clusterIssuer`. An optional `RequestRedirect` HTTPRoute on the `:80` listener forces HTTP->HTTPS. |
 
 ### Gateway modes
 
@@ -181,20 +187,20 @@ platform-owned Gateways wants.
 
 | Mode | Values | Renders |
 |---|---|---|
-| **Chart owns the Gateway** (default) | `gateway.create=true` | a `Gateway` (per-host HTTPS listeners, cert-manager annotation), both HTTPRoutes, and the HTTP→HTTPS redirect route |
-| **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace` | both HTTPRoutes only, parented to that Gateway. `sectionName` is the chart's own listener naming (`https-api`/`https-portal`/`http`), so the shared Gateway must use those names — otherwise use the mode below. TLS and redirect are the platform's business here. |
-| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all — just Deployments/Services. Write the HTTPRoutes yourself, which is also how you give api and portal *different* parentRefs (two platform Gateways, e.g. external + internal) until per-surface attachment lands. |
+| **Chart owns the Gateway** (default) | `gateway.create=true` | a `Gateway` (per-host HTTPS listeners, cert-manager annotation), both HTTPRoutes, and the HTTP->HTTPS redirect route |
+| **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace` | both HTTPRoutes only, parented to that Gateway. `sectionName` is the chart's own listener naming (`https-api`/`https-portal`/`http`), so the shared Gateway must use those names - otherwise use the mode below. TLS and redirect are the platform's business here. |
+| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all - just Deployments/Services. Write the HTTPRoutes yourself, which is also how you give api and portal *different* parentRefs (two platform Gateways, e.g. external + internal) until per-surface attachment lands. |
 
 **Two releases in one cluster:** the chart's object names are release-scoped
 (`{{ .Release.Name }}-api`), but if you write your own HTTPRoutes for a staging and a
-production namespace, give them names — or discovery labels — that differ across
+production namespace, give them names - or discovery labels - that differ across
 namespaces. Anything that indexes routes cluster-wide by name alone (Gatus's endpoint
 registry, for one) rejects the duplicate and can take the whole watcher down, not just
 the colliding entry.
 
 The redirect route renders only in the first mode: it hardcodes `sectionName: http`,
 which a platform Gateway may not have, and an unexposed release would otherwise emit
-it with an empty `hostnames` list — matching every host on that listener.
+it with an empty `hostnames` list - matching every host on that listener.
 
 ### Gateway API objects (rendered)
 
@@ -226,70 +232,35 @@ state to share between replicas.
 
 ---
 
-## 4. API contract (contract-first, OpenAPI 3.1)
-
-`api/openapi.yaml` is the **source of truth**. `oapi-codegen` generates a Go
-`ServerInterface` per surface (filtered by tag), and `*Server` implements both:
-
-```
-api/openapi.yaml ──oapi-codegen──> internal/api/genclient (tag: client)
-                 └────────────────> internal/api/genadmin  (tag: admin)
-internal/api/server.go:  var _ genclient.ServerInterface = (*Server)(nil)
-                         var _ genadmin.ServerInterface  = (*Server)(nil)
-```
-
-Those compile-time assertions mean **spec/handler drift is a build error**: add an
-operation to the spec, regenerate, and the code won't compile until you implement
-it (and vice-versa for signatures/params).
-
-Workflow:
-
-```bash
-# edit api/openapi.yaml, then:
-task generate:oapi      # regenerate both interfaces
-task lint:openapi       # Spectral audit (needs node/npx)
-go build ./...          # drift surfaces here
-```
-
-The spec is served at `/openapi.yaml` and rendered at `/docs` (Scalar UI) on
-every surface.
-
-> **Tag/codegen constraint:** an operation shared by both surfaces must be
-> path-param-only (no generated `Params` struct), otherwise the two packages
-> produce conflicting types. That's why `getAccountLedger` (query params) is
-> `client`-only; the console reads the ledger directly from the DB instead.
-
----
-
-## 5. CI generation checklist
-
-Generated code is committed (so `go build` works without tools). After changing a
-source, regenerate and commit:
-
-| Change | Regenerate |
-|--------|-----------|
-| `db/queries/*.sql` or migrations | `task generate:sqlc` |
-| `api/openapi.yaml` | `task generate:oapi` |
-| `web/template/*.templ` | `task generate:templ` |
-| any of the above | or just `task generate` |
-
----
-
 ## 6. Publishing artifacts (`publish.yml`)
 
 CI publishes; it never deploys. The cluster sits behind a tunnel and Actions has
 no path to it, so `helm upgrade` stays an operator command.
 
-| Trigger | Artifact |
-|---|---|
-| push to `main` | `ghcr.io/minhtt159/bank0:sha-<shortsha>` — the "deploy whatever main is" handle (`helm upgrade … --set image.tag=sha-…`) |
-| push tag `vX.Y.Z` | the same image as `:X.Y.Z` + `:X.Y` (unprefixed — the chart defaults `image.tag` to `.Chart.AppVersion`), **and** the chart at `oci://ghcr.io/minhtt159/charts/bank0` |
+```mermaid
+flowchart LR
+    M[push to main] --> I1["image ghcr.io/minhtt159/bank0:sha-abc1234"]
+    T["push tag vX.Y.Z"] --> I2["image :X.Y.Z and :X.Y"]
+    T --> C["chart oci://ghcr.io/minhtt159/charts/bank0"]
+    I2 --> R[GitHub Release]
+    C --> R
+    R -.notes from.-> N["docs/releases/vX.Y.Z.md"]
+```
+
+Diagram: a push to main publishes one image tagged by commit sha. A version tag
+publishes the same image under its semver tags and the Helm chart, and a third
+job cuts the GitHub Release once both exist, taking the notes from the matching
+file in `docs/releases/`.
+
+The `sha-<shortsha>` tag is the "deploy whatever main is" handle
+(`helm upgrade ... --set image.tag=sha-...`). The semver tags are unprefixed
+because the chart defaults `image.tag` to `.Chart.AppVersion`.
 
 Both images are multi-arch (`linux/amd64` + `linux/arm64`): the Dockerfile's build
 stage pins `--platform=$BUILDPLATFORM` and cross-compiles with `GOARCH`, so the
 second arch costs a `go build`, not a QEMU-emulated toolchain.
 
-There is **no `latest` tag** — the cluster's admission control rejects an unpinned
+There is **no `latest` tag** - the cluster's admission control rejects an unpinned
 image, and an unpinned tag defeats "what exactly is running?".
 
 Tagging a release means bumping `Chart.yaml`'s `version` **and** `appVersion` to
@@ -297,13 +268,13 @@ the same `X.Y.Z` in the release commit: the chart job refuses to publish a chart
 whose versions disagree with the tag. The only credential is the ambient
 `GITHUB_TOKEN`.
 
-A third job then cuts the **GitHub Release**, gated on both artifacts existing —
+A third job then cuts the **GitHub Release**, gated on both artifacts existing -
 announcing an image and a chart before they are pushed is the same half-release
 failure the chart job's `needs: image` prevents. Its notes are assembled from:
 
 | Part | Source |
 |---|---|
-| the "why" | `docs/releases/<tag>.md`, hand-written in the version-bump PR (optional — a missing file only warns) |
+| the "why" | `docs/releases/<tag>.md`, hand-written in the version-bump PR (optional - a missing file only warns) |
 | artifact refs + install snippet | generated, so a release is never published without them |
 | the PR list | `--generate-notes` |
 

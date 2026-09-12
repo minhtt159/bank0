@@ -122,7 +122,7 @@ func (s *Server) timeout(next http.Handler) http.Handler {
 // credentials (bearer header, no cookies). It answers the preflight OPTIONS itself
 // so an unmatched method doesn't fall through to mux's 405; for that reason it is
 // wrapped OUTSIDE the mux (see Router). Idempotency-Key is allow-listed or
-// POST /transfers preflight would fail. See docs/09-fraudbank-integration.md §1.1.
+// POST /transfers preflight would fail. See docs/09-fraudbank-integration.md §6.
 func (s *Server) cors(next http.Handler) http.Handler {
 	allowed := s.cfg.Server.CORSOrigins
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
