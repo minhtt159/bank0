@@ -78,24 +78,3 @@ func shortID(id *uuid.UUID) string {
 	}
 	return id.String()[:8]
 }
-
-// themeScript runs inline in <head> before first paint: it stamps the stored
-// Catppuccin flavour on <html data-theme=…> (no attribute = follow the OS) so
-// there is no flash of the wrong theme, and exposes setTheme() for themeSelect.
-const themeScript = `<script>
-(function () {
-  var flavours = ['latte', 'frappe', 'macchiato', 'mocha'], t = '';
-  try { t = localStorage.getItem('bank0-theme') || ''; } catch (e) {}
-  if (flavours.indexOf(t) < 0) t = '';
-  if (t) document.documentElement.dataset.theme = t;
-  window.setTheme = function (n) {
-    if (flavours.indexOf(n) < 0) n = '';
-    if (n) document.documentElement.dataset.theme = n; else delete document.documentElement.dataset.theme;
-    try { if (n) localStorage.setItem('bank0-theme', n); else localStorage.removeItem('bank0-theme'); } catch (e) {}
-  };
-  document.addEventListener('DOMContentLoaded', function () {
-    var s = document.getElementById('theme-select');
-    if (s) s.value = t;
-  });
-})();
-</script>`

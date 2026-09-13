@@ -57,7 +57,7 @@ database function, and `mapDBError` turns a SQLSTATE into a status code.
 | **CSRF on the cookie console** | The session cookie is `SameSite=Strict`, and a `csrfGuard` Origin/Referer same-origin check runs on every portal (console + admin JSON) mutation. A missing Origin/Referer (non-browser caller) is allowed - not a CSRF vector. Tested: `TestCSRFGuard`, `TestSecurityCSRFOnPortal`. |
 | **Rate limiting + trusted-proxy IP** | An in-app sliding-window limiter keys per client IP on every public `/auth/*` path (login, refresh, logout, register, verify-contact, resend-code, mfa/verify), config `server.rate_limit_per_min` (default 60; `0` disables). Forwarded headers are trusted only when `server.trust_proxy_headers=true`. Then `CF-Connecting-IP` wins (Cloudflare **replaces** it), and `X-Forwarded-For` is read **right-to-left**, `server.trusted_proxy_hops` entries in (default 1). Right-to-left is the load-bearing part: a proxy running with `use_remote_address` (Envoy, nginx, Traefik) **appends** the true downstream address rather than replacing the header, so the left-most entry is whatever the client sent - reading it let an attacker rotate the limiter key per request even with trust enabled. Untrusted mode keys on `RemoteAddr`. 429 + `Retry-After`. Tested: `TestRateLimiterAllow`, `TestRateLimitMiddleware429`, `TestClientIP` (forged leading entries, multi-hop, short chains). |
 | **Bounded request bodies** | `decodeJSON` wraps the body in `http.MaxBytesReader` (1 MiB). |
-| **Security headers** | A `securityHeaders` middleware sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and a `frame-ancestors 'none'; base-uri 'self'; object-src 'none'` CSP on every surface. The PWA additionally gets a full CSP + HSTS from its Worker. |
+| **Security headers** | A `securityHeaders` middleware sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and a `script-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'` CSP on every surface. `script-src 'self'` means the console runs only script it served itself: htmx is vendored under `/static` and the console carries no inline `<script>` and no inline event attributes - `theme-boot.js` and `console.js` own what used to be `onchange=`/`onclick=`. Both failure modes are silent in the browser, so `TestHTMXSelfHosted` and `TestConsoleHasNoInlineScript` fail the build instead. No `default-src`: this locks down script, the injection vector that matters, without enumerating every img/style/font source. The PWA additionally gets a full CSP + HSTS from its Worker. |
 | **DB errors don't leak** | `mapDBError` returns curated, stable messages for raw constraint trips (unique violation, generic `23514`, restrict violation, auth) rather than echoing Postgres text. It still surfaces developer-authored business `RAISE`s (`P0001`, crafted `insufficient`/idempotency messages) since those are meaningful and caller-scoped. An **unmapped** error returns a generic `500 internal` to the client while the raw error + SQLSTATE are logged server-side (`s.mapDBError` -> `s.logFor`, correlated by `request_id`), so it stays debuggable without leaking. |
 | **Parameterized queries** | All DB access is parameterized via sqlc / PL/pgSQL functions; free text (`dispute.reason`, beneficiary search, IBAN) is stored/compared as a bound value, never concatenated. |
 
@@ -139,9 +139,11 @@ the lockout is trivially defeated.
 ### Open work
 
 Tracked in the issue tracker rather than here, so there is one queue and not two:
-a [breached-password check](https://github.com/minhtt159/bank0/issues/120) on set and change, [TOTP on the portal](https://github.com/minhtt159/bank0/issues/116)
-(the customer surface already has it), and the
-[stricter console CSP](https://github.com/minhtt159/bank0/issues/122).
+a [breached-password check](https://github.com/minhtt159/bank0/issues/120) on set and change, and
+[TOTP on the portal](https://github.com/minhtt159/bank0/issues/116) (the customer
+surface already has it).
+The [stricter console CSP](https://github.com/minhtt159/bank0/issues/122) is done -
+see below.
 [Bcrypt cost 10 -> 12](https://github.com/minhtt159/bank0/issues/121) is done
 (`00020_bcrypt_cost_12.sql`): new hashes are written at 12, and a login re-costs
 an older one in place, so the table converges as people sign in rather than in a
@@ -155,15 +157,6 @@ These describe what the system does not do, rather than work queued to do.
   A global limit across replicas needs a shared store - the Cloudflare edge (the
   primary control) or a DB/Redis-backed counter. `/me/password` is not yet rate
   limited: it sits behind a valid JWT, so it is a lower-priority oracle.
-- **Stricter console CSP.** The prerequisite is **done** - htmx is vendored,
-  embedded and served same-origin from `/static/htmx.min.js`
-  ([`web/static/htmx.min.js`](../web/static/htmx.min.js), `htmxSrc` in
-  [`web/template/components.templ`](../web/template/components.templ); regression
-  test `TestHTMXSelfHosted`). What remains is adding the `script-src 'self'`
-  directive to the `securityHeaders` CSP (`internal/api/middleware.go`) - which
-  first needs the console's remaining inline handlers (`onclick=` in
-  `shell.templ`/`layout.templ`, `hx-on:click` in `pending.templ`) moved into
-  `console.js`, since `script-src 'self'` blocks them.
 - **No distributed tracing.** `/metrics` covers RED + pool saturation, and
   request-scoped logs carry `request_id`, but OpenTelemetry spans across the
   proxy -> api -> DB hops are not in place.

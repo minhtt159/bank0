@@ -7,6 +7,7 @@ const htmxSrc = "/static/htmx.min.js"
 
 // consoleHead is the shared <head> for the operator console (Shell + layout): meta,
 // the pinned htmx script, the pre-paint theme bootstrap, and the stylesheet.
+// Every script is a same-origin file: the CSP is script-src 'self' (#122).
 templ consoleHead(title string) {
 	<head>
 		<meta charset="utf-8"/>
@@ -14,7 +15,7 @@ templ consoleHead(title string) {
 		<title>{ title }</title>
 		<link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
 		<script src={ htmxSrc }></script>
-		@templ.Raw(themeScript)
+		<script src="/static/theme-boot.js"></script>
 		<link rel="stylesheet" href="/static/console.css"/>
 	</head>
 }
@@ -85,7 +86,7 @@ templ flashBar(flash string) {
 // keyboard and screen-reader support for free. themeScript (helpers.go) applies
 // the stored choice before first paint and re-selects it here on load.
 templ themeSelect() {
-	<select id="theme-select" class="theme-select" aria-label="Colour theme" onchange="setTheme(this.value)">
+	<select id="theme-select" class="theme-select" aria-label="Colour theme">
 		<option value="">System</option>
 		<option value="latte">Latte</option>
 		<option value="frappe">Frappé</option>

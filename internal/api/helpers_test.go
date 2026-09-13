@@ -36,6 +36,49 @@ func TestHTMXSelfHosted(t *testing.T) {
 	}
 }
 
+// The console's CSP is script-src 'self' (#122): no inline <script>, no inline
+// event attributes. Both are silent failures — the browser refuses to run them and
+// Go never notices — so the rendered shell is checked here instead. The theme
+// bootstrap and the rail-close handler live in /static/*.js for this reason; if one
+// creeps back into a .templ, this fails rather than the console half-working.
+func TestConsoleHasNoInlineScript(t *testing.T) {
+	for _, name := range []string{"theme-boot.js", "console.js"} {
+		if _, err := fs.Stat(webstatic.FS, name); err != nil {
+			t.Fatalf("%s must be embedded to be servable under script-src 'self': %v", name, err)
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := template.Shell("op", "admin", 0, "/console/dashboard").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render shell: %v", err)
+	}
+	html := buf.String()
+
+	// Every <script> must carry a src=; an inline block is what CSP kills.
+	for rest := html; ; {
+		i := strings.Index(rest, "<script")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("<script"):]
+		tag, _, ok := strings.Cut(rest, ">")
+		if !ok {
+			t.Fatal("unterminated <script> tag in the rendered shell")
+		}
+		if !strings.Contains(tag, "src=") {
+			t.Errorf("inline <script> in the console shell: script-src 'self' blocks it (move it to web/static/)")
+		}
+	}
+
+	// on*= event attributes are equally blocked. hx-on: is htmx's own inline-handler
+	// attribute and evaluates script the same way.
+	for _, attr := range []string{"onclick=", "onchange=", "onsubmit=", "onload=", "onerror=", "hx-on"} {
+		if strings.Contains(html, attr) {
+			t.Errorf("inline handler %q in the console shell: script-src 'self' blocks it (delegate from console.js)", attr)
+		}
+	}
+}
+
 func TestRoleGates(t *testing.T) {
 	cases := []struct {
 		role                  string
