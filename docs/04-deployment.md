@@ -330,12 +330,19 @@ needs to leave the LAN.
    [#121](https://github.com/minhtt159/bank0/issues/121) and the breached-password
    check [#120](https://github.com/minhtt159/bank0/issues/120) are both worth more
    once the login endpoint is public.
-7. **Consider gating the hostname to the Worker.** One client ever calls this
-   host - the Worker's `/api/*` proxy ([`07`](07-client-web-app.md) §1) - so a
-   Cloudflare Access policy with a service token the Worker presents shrinks the
-   public surface to the Worker itself. The same-origin design buys that; a direct
-   browser-to-`api.` origin could not. Not a substitute for steps 4-6: the Worker
-   forwards whatever the browser sent.
+7. **Gate the hostname to the Worker.** One client ever calls this host - the
+   Worker's `/api/*` proxy ([`07`](07-client-web-app.md) §1) - so a Cloudflare
+   Access policy in Service Auth mode shrinks the public surface to the Worker
+   itself. The same-origin design buys that; a direct browser-to-`api.` origin
+   could not. **The Worker side is built**: it sends `CF-Access-Client-Id` /
+   `CF-Access-Client-Secret` from secrets of those names and strips any the client
+   sent, so all that is left is creating the Access app + service token and
+   running `wrangler secret put` for both halves. Unset, it proxies without them
+   (correct until the policy is live); half-set, it answers `500 misconfigured`
+   rather than leaving you to debug an Access 403. Note the policy covers the
+   whole hostname - `/health`, `/readyz`, `/metrics` and `/docs` included - so
+   anything probing those from outside the LAN breaks. Not a substitute for steps
+   4-6: the Worker forwards whatever the browser sent.
 
 No Worker change is needed: `API_ORIGIN` already points at the api hostname, so
 the PWA starts working when the name resolves publicly (and, with step 7, when the

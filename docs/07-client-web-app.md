@@ -198,6 +198,18 @@ returns a masked owner name and is rate limited, so it cannot be walked to
 enumerate account holders. The confirm step always shows the resolved payee and
 IBAN before anything is sent.
 
+**Access service token.** Exactly one client ever calls `api.bank0.hnimn.art` -
+this Worker's `/api/*` proxy - so the hostname can be gated to it with a
+Cloudflare Access policy in Service Auth mode. The Worker sets
+`CF-Access-Client-Id` / `CF-Access-Client-Secret` from secrets of the same name on
+every proxied request; a browser aimed straight at `api.` carries no token and is
+turned away at the edge, before the tunnel. Both secrets or neither: half-set, the
+Worker answers `500 misconfigured` instead of letting Access return a 403 that
+points at nothing. Whatever the client sent under `CF-Access-*` is stripped first,
+so those headers are never client-authored. The token is not a substitute for the
+WAF and rate-limit work in [`04-deployment.md`](04-deployment.md) §3 - the Worker
+forwards whatever the browser sent, and it stays a fraud demo behind the gate.
+
 Two hardening steps are designed but not built. The refresh token could live in
 an httpOnly cookie terminated at the Worker, so the SPA only ever holds a
 short-lived access token - a Worker-only change, invisible to the SPA. And
