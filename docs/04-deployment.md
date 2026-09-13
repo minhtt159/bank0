@@ -302,9 +302,30 @@ yet ([#116](https://github.com/minhtt159/bank0/issues/116)), and nothing about i
 needs to leave the LAN.
 
 1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`
-   (`namespace: network`, `sectionName: https`) - one line in the platform repo.
-   That Gateway's https listener already accepts routes from all namespaces and
-   the wildcard cert already covers the hostname. Staging stays internal.
+   (`namespace: network`, `sectionName: https`). That Gateway's https listener
+   already accepts routes from all namespaces and the wildcard cert already covers
+   the hostname. The portal stays internal - it is the admin surface and has no
+   MFA yet ([#116](https://github.com/minhtt159/bank0/issues/116)). Staging stays
+   internal too.
+
+   **Where that edit lands depends on who owns the route**, and on the home
+   cluster it is not the chart. There, `api.exposed`/`portal.exposed` are `false`
+   and the HTTPRoutes are hand-written Flux manifests, deliberately: Kargo
+   promotes chart versions, and a promotion must not be able to move a hostname or
+   a parentRef. So it is a one-line edit to the platform repo's own
+   `httproute.yaml`.
+
+   For an install that *does* let the chart render its routes, the chart takes the
+   same thing as a value - either surface can be parented independently:
+
+   ```yaml
+   api:
+     parentRef: { name: envoy-external, namespace: network, sectionName: https }
+   ```
+
+   A re-parented surface also drops out of the chart's HTTP->HTTPS redirect route:
+   port 80 on someone else's Gateway is theirs to decide. CI renders this case
+   (`chart` job, "Render (api re-parented to the external Gateway)").
 2. **DNS follows the Gateway.** It is annotated
    `external-dns.../target: external.<domain>`, so external-dns writes the public
    record at the tunnel CNAME. The tunnel's *public hostname* entry is
@@ -320,7 +341,15 @@ needs to leave the LAN.
    Add a `DetectionOnly` per-authority directive for the api hostname first (the
    `flux-webhook` carve-out in the platform's `waf.yaml` is the pattern), run a
    real login + transfer + dispute, read the match log, then enforce.
-5. **Know what the edge limit does not do.** ~3000 req/min per distinct client
+5. **Move the `/auth/*` limit to the Gateway.** The in-app limiter is a
+   *per-replica* sliding window, so 3-10 api pods mean 3-10x the configured limit
+   against a public login endpoint - and HPA makes the real ceiling move on its
+   own. `envoy-external` already runs Envoy Gateway's **global** rate limit backed
+   by Valkey, so the counters are shared across every pod and the limit means what
+   it says. Add a `BackendTrafficPolicy` targeting the api HTTPRoute with a
+   per-client-IP rule on the `/auth/*` paths; keep autoscaling on. The in-app
+   limiter stays as defence in depth for anything that reaches a pod without
+   passing the Gateway. **Know what the edge limit does not do.** ~3000 req/min per distinct client
    IP, fail-open: flood protection, not an auth-abuse control. The
    credential-stuffing backstop is the in-app per-IP `/auth/*` limiter, and it is
    **per replica** (§3) - 3-10 api pods means 3-10x the configured limit. Pin
@@ -330,12 +359,19 @@ needs to leave the LAN.
    [#121](https://github.com/minhtt159/bank0/issues/121) and the breached-password
    check [#120](https://github.com/minhtt159/bank0/issues/120) are both worth more
    once the login endpoint is public.
-7. **Consider gating the hostname to the Worker.** One client ever calls this
-   host - the Worker's `/api/*` proxy ([`07`](07-client-web-app.md) §1) - so a
-   Cloudflare Access policy with a service token the Worker presents shrinks the
-   public surface to the Worker itself. The same-origin design buys that; a direct
-   browser-to-`api.` origin could not. Not a substitute for steps 4-6: the Worker
-   forwards whatever the browser sent.
+7. **Gate the hostname to the Worker.** One client ever calls this host - the
+   Worker's `/api/*` proxy ([`07`](07-client-web-app.md) §1) - so a Cloudflare
+   Access policy in Service Auth mode shrinks the public surface to the Worker
+   itself. The same-origin design buys that; a direct browser-to-`api.` origin
+   could not. **The Worker side is built**: it sends `CF-Access-Client-Id` /
+   `CF-Access-Client-Secret` from secrets of those names and strips any the client
+   sent, so all that is left is creating the Access app + service token and
+   running `wrangler secret put` for both halves. Unset, it proxies without them
+   (correct until the policy is live); half-set, it answers `500 misconfigured`
+   rather than leaving you to debug an Access 403. Note the policy covers the
+   whole hostname - `/health`, `/readyz`, `/metrics` and `/docs` included - so
+   anything probing those from outside the LAN breaks. Not a substitute for steps
+   4-6: the Worker forwards whatever the browser sent.
 
 No Worker change is needed: `API_ORIGIN` already points at the api hostname, so
 the PWA starts working when the name resolves publicly (and, with step 7, when the
