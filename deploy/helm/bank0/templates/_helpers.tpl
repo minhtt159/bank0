@@ -38,3 +38,28 @@ imagePullSecrets:
       key: {{ .Values.auth.secretKey }}
 {{- end }}
 {{- end -}}
+
+{{/*
+  parentRef for one surface's HTTPRoute.
+
+  Both surfaces attach to the chart's `gateway` by default. A surface can override
+  any of name/namespace/sectionName via `<surface>.parentRef` — which is what
+  exposing the api to the internet needs: the api route re-parented to the
+  platform's external Gateway (cloudflared in front of it) while the portal stays
+  on the internal one. See docs/04-deployment.md §3, "Exposing the client API".
+
+  Call with a dict: (dict "root" $ "surface" .Values.api "listener" "https-api")
+*/}}
+{{- define "bank0.parentRef" -}}
+{{- $gw := .root.Values.gateway -}}
+{{- $ref := .surface.parentRef | default dict -}}
+- name: {{ $ref.name | default $gw.name }}
+  namespace: {{ $ref.namespace | default $gw.namespace | default .root.Release.Namespace }}
+  sectionName: {{ $ref.sectionName | default (ternary .listener "http" $gw.tls.enabled) }}
+{{- end -}}
+
+{{/* True when a surface attaches to a Gateway other than the chart's own. */}}
+{{- define "bank0.hasForeignParent" -}}
+{{- $ref := .parentRef | default dict -}}
+{{- if or $ref.name $ref.namespace }}true{{ end }}
+{{- end -}}

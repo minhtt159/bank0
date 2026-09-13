@@ -106,6 +106,23 @@ gateway:
 api:
   exposed: true
   host: api.bank0.hnimn.art
+  # Attach this route to a DIFFERENT Gateway than `gateway` above. Empty = the
+  # chart's own. This is how the api goes public while the portal stays on the LAN
+  # (docs/04-deployment.md §3, "Exposing the client API to the internet"):
+  #
+  #   api:
+  #     parentRef: { name: envoy-external, namespace: network, sectionName: https }
+  #
+  # A re-parented surface also drops out of the chart's HTTP->HTTPS redirect route:
+  # port 80 on someone else's Gateway is theirs to decide, not ours.
+  #
+  # Going public, set these in the SAME change:
+  #   trustedProxyHops: 2      (cloudflared + Envoy; see the note above)
+  #   api.autoscaling.enabled: false + a pinned replicaCount, because the in-app
+  #     /auth/* rate limiter is PER REPLICA — 3-10 pods means 3-10x the configured
+  #     limit against a public login endpoint. Or put a per-route limit on the
+  #     Gateway, where the counters are shared.
+  parentRef: {}
   replicaCount: 3
   runMaintenance: false     # maintenance runs on portal only (advisory-locked)
   resources:
@@ -117,10 +134,12 @@ api:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
 
-# Admin portal + operator console.
+# Admin portal + operator console. Keep this one internal: it is the admin surface
+# and has no MFA yet (#116). Nothing about it needs to leave the LAN.
 portal:
   exposed: true
   host: portal.bank0.hnimn.art
+  parentRef: {}             # same override as api.parentRef; leave empty
   replicaCount: 2
   runMaintenance: true
   resources:

@@ -301,10 +301,23 @@ Expose **the api surface only**. The portal is the admin surface, it has no MFA
 yet ([#116](https://github.com/minhtt159/bank0/issues/116)), and nothing about it
 needs to leave the LAN.
 
-1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`
-   (`namespace: network`, `sectionName: https`) - one line in the platform repo.
+1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`. The
+   chart takes this as `api.parentRef`, so it is production values, not a template
+   change:
+
+   ```yaml
+   api:
+     parentRef: { name: envoy-external, namespace: network, sectionName: https }
+   ```
+
    That Gateway's https listener already accepts routes from all namespaces and
-   the wildcard cert already covers the hostname. Staging stays internal.
+   the wildcard cert already covers the hostname. `portal.parentRef` stays empty -
+   the portal is the admin surface, has no MFA yet
+   ([#116](https://github.com/minhtt159/bank0/issues/116)), and stays on the
+   internal Gateway. Staging stays internal too. A re-parented surface also drops
+   out of the chart's HTTP->HTTPS redirect route: port 80 on the platform's
+   Gateway is the platform's to decide. CI renders this exact case
+   (`chart` job, "Render (api re-parented to the external Gateway)").
 2. **DNS follows the Gateway.** It is annotated
    `external-dns.../target: external.<domain>`, so external-dns writes the public
    record at the tunnel CNAME. The tunnel's *public hostname* entry is
@@ -320,7 +333,10 @@ needs to leave the LAN.
    Add a `DetectionOnly` per-authority directive for the api hostname first (the
    `flux-webhook` carve-out in the platform's `waf.yaml` is the pattern), run a
    real login + transfer + dispute, read the match log, then enforce.
-5. **Know what the edge limit does not do.** ~3000 req/min per distinct client
+5. **Pin the replica count while the limiter is per-replica.** Set
+   `api.autoscaling.enabled: false` with a fixed `api.replicaCount` in the same
+   change, or add a per-route rate limit at the Gateway where the counters are
+   shared. **Know what the edge limit does not do.** ~3000 req/min per distinct client
    IP, fail-open: flood protection, not an auth-abuse control. The
    credential-stuffing backstop is the in-app per-IP `/auth/*` limiter, and it is
    **per replica** (§3) - 3-10 api pods means 3-10x the configured limit. Pin

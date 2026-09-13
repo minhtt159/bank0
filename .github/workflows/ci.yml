@@ -251,3 +251,36 @@ jobs:
                   assert ':latest' not in c['image'], f'{kind}/{name}/{c["name"]}: unpinned image tag'
           print(f'{len(pods)} pod specs OK')
           EOF
+
+      - name: Render (api re-parented to the external Gateway)
+        # The exposure path in docs/04 §3: the api route moves to the platform's
+        # external Gateway while the portal stays internal. Rendered here because
+        # getting it wrong is invisible until traffic is already public — and a
+        # redirect route that still claims the api host would hijack :80 for a
+        # hostname this Gateway no longer serves.
+        run: |
+          helm template deploy/helm/bank0 \
+            --set database.existingSecret=x --set auth.existingSecret=y \
+            --set api.parentRef.name=envoy-external \
+            --set api.parentRef.namespace=network \
+            --set api.parentRef.sectionName=https \
+            --show-only templates/httproute.yaml > /tmp/exposed.yaml
+          python3 - <<'EOF'
+          import yaml
+          routes = {d['metadata']['name']: d for d in yaml.safe_load_all(open('/tmp/exposed.yaml')) if d}
+
+          api = routes['release-name-api']['spec']['parentRefs'][0]
+          assert api == {'name': 'envoy-external', 'namespace': 'network',
+                         'sectionName': 'https'}, api
+
+          # The portal must NOT follow the api out of the LAN.
+          portal = routes['release-name-portal']['spec']['parentRefs'][0]
+          assert portal['name'] == 'bank0', portal
+          assert portal['sectionName'] == 'https-portal', portal
+
+          # The redirect route lives on the chart's own :80 listener, so it may
+          # only claim hostnames still parented there.
+          hosts = routes['release-name-https-redirect']['spec']['hostnames']
+          assert hosts == ['portal.bank0.hnimn.art'], hosts
+          print('exposure render OK')
+          EOF
