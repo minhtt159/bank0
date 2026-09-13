@@ -3,8 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b3d2e" />
+    <!-- Catppuccin Latte crust; theme-boot.js rewrites it to match the chosen flavour. -->
+    <meta name="theme-color" content="#dce0e8" />
     <title>bank0</title>
+    <!-- Must run before the stylesheet paints, hence render-blocking in <head>. -->
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
     <div id="app"></div>

@@ -1,24 +1,78 @@
+/* bank0 customer PWA — Catppuccin tokens (github.com/catppuccin/palette).
+   Same token names and role mapping as the operator console (web/static/console.css)
+   so the two surfaces stay one design system: base = page, mantle = cards, crust =
+   topbar, surface0/1 = fills and borders, subtext0 = muted text, overlay0 = faint,
+   blue = the single accent; green/yellow/red only ever mean status.
+   Flavour comes from html[data-theme=latte|frappe|macchiato|mocha]; no attribute
+   means "system": Latte, or Mocha when the OS prefers dark (see lib/theme.ts).
+   --warn-ink is the one contrast exception: Latte yellow on base is ~2.6:1, so the
+   light flavour sets warning text in `text` and keeps yellow for border and tint. */
 :root {
-  --bg: #f5f7f6;
-  --card: #ffffff;
-  --ink: #14201b;
-  --muted: #6b7a73;
-  --brand: #0b3d2e;
-  --brand-ink: #e9f5ef;
-  --accent: #1c7d5a;
-  --danger: #b3261e;
-  --line: #e3e9e6;
-  --radius: 14px;
+  --bg:#eff1f5; --surface:#e6e9ef; --crust:#dce0e8; --surface-2:#ccd0da; --line:#bcc0cc; --line-soft:#ccd0da;
+  --ink:#4c4f69; --muted:#6c6f85; --faint:#9ca0b0; --sel:#7c7f93;
+  --accent:#1e66f5; --accent-ink:#eff1f5; --lavender:#7287fd;
+  --ok:#40a02b; --warn:#df8e1d; --warn-ink:#4c4f69; --bad:#d20f39;
+  --shadow:0 1px 2px rgba(76,79,105,.08), 0 8px 24px -12px rgba(76,79,105,.18);
+  --shadow-sm:0 1px 2px rgba(76,79,105,.08);
+  --ring:0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+  --r-sm:8px; --r-md:10px; --r-lg:14px; --radius:var(--r-lg);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg:#1e1e2e; --surface:#181825; --crust:#11111b; --surface-2:#313244; --line:#45475a; --line-soft:#313244;
+    --ink:#cdd6f4; --muted:#a6adc8; --faint:#6c7086; --sel:#9399b2;
+    --accent:#89b4fa; --accent-ink:#1e1e2e; --lavender:#b4befe;
+    --ok:#a6e3a1; --warn:#f9e2af; --warn-ink:#f9e2af; --bad:#f38ba8;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+:root[data-theme=frappe] {
+  --bg:#303446; --surface:#292c3c; --crust:#232634; --surface-2:#414559; --line:#51576d; --line-soft:#414559;
+  --ink:#c6d0f5; --muted:#a5adce; --faint:#737994; --sel:#949cbb;
+  --accent:#8caaee; --accent-ink:#303446; --lavender:#babbf1;
+  --ok:#a6d189; --warn:#e5c890; --warn-ink:#e5c890; --bad:#e78284;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 8px 24px -12px rgba(0,0,0,.45);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  color-scheme:dark;
+}
+:root[data-theme=macchiato] {
+  --bg:#24273a; --surface:#1e2030; --crust:#181926; --surface-2:#363a4f; --line:#494d64; --line-soft:#363a4f;
+  --ink:#cad3f5; --muted:#a5adcb; --faint:#6e738d; --sel:#939ab7;
+  --accent:#8aadf4; --accent-ink:#24273a; --lavender:#b7bdf8;
+  --ok:#a6da95; --warn:#eed49f; --warn-ink:#eed49f; --bad:#ed8796;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+:root[data-theme=mocha] {
+  --bg:#1e1e2e; --surface:#181825; --crust:#11111b; --surface-2:#313244; --line:#45475a; --line-soft:#313244;
+  --ink:#cdd6f4; --muted:#a6adc8; --faint:#6c7086; --sel:#9399b2;
+  --accent:#89b4fa; --accent-ink:#1e1e2e; --lavender:#b4befe;
+  --ok:#a6e3a1; --warn:#f9e2af; --warn-ink:#f9e2af; --bad:#f38ba8;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+  color-scheme:dark;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
   background: var(--bg);
   color: var(--ink);
+  -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color .25s ease, color .25s ease;
 }
+::selection { background: color-mix(in srgb, var(--sel) 30%, transparent); }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
+
+/* One focus style everywhere. :focus-visible keeps the ring off pointer taps —
+   which matters more on a phone, where every card is tappable. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
 
 .shell { max-width: 560px; margin: 0 auto; min-height: 100vh; }
 main { padding: 16px 16px 96px; }
@@ -26,59 +80,87 @@ main { padding: 16px 16px 96px; }
 .topbar {
   position: sticky; top: 0; z-index: 5;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 16px; background: var(--brand); color: var(--brand-ink);
+  padding: 14px 16px; color: var(--ink);
+  background: color-mix(in srgb, var(--crust) 85%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
   padding-top: max(14px, env(safe-area-inset-top));
 }
-.topbar .brand { color: var(--brand-ink); font-weight: 700; font-size: 20px; text-decoration: none; }
+/* The mark: same blue -> lavender gradient as the console logo and the favicon. */
+.topbar .brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--ink); font-weight: 700; font-size: 18px; text-decoration: none; letter-spacing: -.01em;
+}
+.topbar .brand::before {
+  content: "b0"; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px; flex: none;
+  background: linear-gradient(135deg, var(--accent), var(--lavender));
+  color: var(--accent-ink); font-weight: 800; font-size: 13px; letter-spacing: -.05em;
+  box-shadow: var(--shadow-sm);
+}
 .topbar nav { display: flex; gap: 14px; align-items: center; }
-.topbar nav a { color: var(--brand-ink); text-decoration: none; opacity: 0.85; font-size: 15px; }
-.topbar nav a.active { opacity: 1; text-decoration: underline; }
+.topbar nav a { color: var(--muted); text-decoration: none; font-size: 15px; }
+.topbar nav a.active { color: var(--accent); font-weight: 600; }
 
 button, .btn {
-  font: inherit; cursor: pointer; border: 0; border-radius: 10px;
-  padding: 12px 16px; background: var(--accent); color: #fff; font-weight: 600;
+  font: inherit; cursor: pointer; border: 1px solid transparent; border-radius: var(--r-md);
+  padding: 12px 16px; background: var(--accent); color: var(--accent-ink); font-weight: 600;
+  transition: filter .15s, transform .05s;
 }
-button:disabled { opacity: 0.55; cursor: default; }
+button:hover, .btn:hover { filter: brightness(1.06); }
+button:active, .btn:active { transform: translateY(1px); }
+button:disabled { opacity: 0.55; cursor: default; filter: none; transform: none; }
 button.link, .topbar .link {
-  background: none; color: var(--brand-ink); padding: 0; font-weight: 500; border-radius: 0;
+  background: none; color: var(--muted); padding: 0; font-weight: 500; border-radius: 0; border: 0;
+  font-size: 15px; /* match the nav links either side of it */
 }
-button.ghost { background: #eef3f0; color: var(--brand); }
+button.link:hover { color: var(--ink); filter: none; }
+button.ghost { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
 button.block { width: 100%; }
 
 .fab {
   position: fixed; right: 16px; bottom: 20px; bottom: max(20px, env(safe-area-inset-bottom));
-  border-radius: 999px; padding: 14px 20px; box-shadow: 0 6px 20px rgba(11,61,46,.3);
+  border-radius: 999px; padding: 14px 20px; box-shadow: var(--shadow);
   font-size: 16px;
 }
 
 .card {
-  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 16px; margin-bottom: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow-sm);
 }
-.card.tappable { display: block; text-decoration: none; color: inherit; }
-.card.tappable:active { background: #f0f5f2; }
+.card.tappable { display: block; text-decoration: none; color: inherit; transition: border-color .15s, background-color .1s; }
+.card.tappable:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.card.tappable:active { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
-h1 { font-size: 22px; margin: 4px 0 16px; }
-h2 { font-size: 16px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+h1 { font-size: 22px; margin: 4px 0 16px; letter-spacing: -.015em; }
+h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .07em; }
 .muted { color: var(--muted); }
 .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.amount { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
-.amount.neg { color: var(--danger); }
-.amount.pos { color: var(--accent); }
+.amount { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+.amount.neg, .neg { color: var(--bad); }
+.amount.pos, .pos { color: var(--ok); }
 .iban { font-variant-numeric: tabular-nums; letter-spacing: 0.4px; }
-.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef3f0; color: var(--brand); }
+.badge {
+  font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
 
 label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px; }
 input, select {
   font: inherit; width: 100%; padding: 12px; border: 1px solid var(--line);
-  border-radius: 10px; background: #fff; color: var(--ink);
+  border-radius: var(--r-md); background: var(--surface); color: var(--ink);
 }
-input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 
-.list-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.list-item { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
 .list-item:last-child { border-bottom: 0; }
-.pick { display: block; padding: 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; cursor: pointer; background:#fff; }
-.pick.sel { border-color: var(--accent); background: #f0f8f4; }
+.pick {
+  display: block; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md);
+  margin-bottom: 8px; cursor: pointer; background: var(--surface); transition: border-color .15s, background-color .15s;
+}
+.pick.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 /* The pick is a <label> wrapping a visually-hidden radio (native keyboard/SR
    semantics); show the focus ring on the card when that radio is focused. */
 .pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -91,12 +173,16 @@ input:focus, select:focus { outline: 2px solid var(--accent); border-color: tran
 /* main is focused on route change for screen-reader/keyboard users; suppress the ring. */
 main:focus { outline: none; }
 
-.error { background: #fdecea; color: var(--danger); padding: 10px 12px; border-radius: 10px; margin: 10px 0; font-size: 14px; }
+.error {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent);
+  color: var(--bad); padding: 10px 12px; border-radius: var(--r-md); margin: 10px 0; font-size: 14px;
+}
 
 /* Fraud-warning / hold card. Severity is conveyed by a text tag AND colour (never
-   colour alone): info = neutral, warning = amber, critical = danger. */
+   colour alone): info = neutral, warning = yellow, critical = red. */
 .warn-card {
-  background: var(--card); border: 1px solid var(--line); border-left-width: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-left-width: 4px;
   border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; font-size: 15px;
 }
 .warn-card .warn-tag {
@@ -105,10 +191,17 @@ main:focus { outline: none; }
 }
 .warn-card.info { border-left-color: var(--muted); }
 .warn-card.info .warn-tag { color: var(--muted); }
-.warn-card.warning { border-left-color: #b7791f; background: #fdf7ec; }
-.warn-card.warning .warn-tag { color: #8a5a00; }
-.warn-card.critical { border-left-color: var(--danger); background: #fdecea; }
-.warn-card.critical .warn-tag { color: var(--danger); }
+.warn-card.warning {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  color: var(--warn-ink);
+}
+.warn-card.warning .warn-tag { color: var(--warn-ink); }
+.warn-card.critical {
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, var(--surface));
+}
+.warn-card.critical .warn-tag { color: var(--bad); }
 /* Acknowledgement checkbox row: overrides the block-label + full-width-input defaults. */
 .ack-row {
   display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0;
@@ -118,4 +211,20 @@ main:focus { outline: none; }
 .center { text-align: center; padding: 40px 0; color: var(--muted); }
 
 .login-wrap { max-width: 360px; margin: 0 auto; padding: 48px 20px; }
-.login-wrap .logo { text-align: center; font-size: 32px; font-weight: 800; color: var(--brand); margin-bottom: 24px; }
+.login-wrap .logo {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 32px; font-weight: 800; color: var(--ink); margin-bottom: 24px; letter-spacing: -.02em;
+}
+.login-wrap .logo::before {
+  content: "b0"; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 13px;
+  background: linear-gradient(135deg, var(--accent), var(--lavender));
+  color: var(--accent-ink); font-size: 20px; letter-spacing: -.05em; box-shadow: var(--shadow-sm);
+}
+
+/* Appearance picker (Profile). Same five options and same localStorage key as the
+   console's selector, so a flavour chosen on one surface reads familiar on the other. */
+.theme-select {
+  font: inherit; font-size: 15px; color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px; cursor: pointer;
+}
