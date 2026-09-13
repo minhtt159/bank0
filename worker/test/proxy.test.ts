@@ -4,12 +4,14 @@
 // swapping globalThis.fetch (vitest-pool-workers v0.13+ removed the old
 // cloudflare:test fetchMock), and asserts the four proxy invariants:
 //   1. path rewrite (+ query preservation)
-//   2. header forwarding (Authorization / Idempotency-Key survive; Host dropped)
+//   2. header forwarding (Authorization / Idempotency-Key survive; Host and
+//      client-authored CF-Access-* dropped)
 //   3. method + body forwarding
 //   4. SPA fallback / static asset handling (+ security headers on HTML)
+//   6. Cloudflare Access service token injection (docs/04 §3 step 7)
 // SELF (not exports.default) is kept deliberately: the SPA-fallback tests need
 // the ASSETS binding, which exports.default.fetch does not expose.
-import { SELF } from "cloudflare:test";
+import { SELF, env } from "cloudflare:test";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // API_ORIGIN configured in vitest.config.ts.
@@ -214,6 +216,69 @@ describe("worker /api proxy contract", () => {
       expect(res.status).toBe(502);
       expect(res.headers.get("content-type")).toContain("application/json");
       expect((await res.json()).error).toBe("bad_gateway");
+    });
+  });
+
+  describe("6. Access service token", () => {
+    // Set per test and cleared afterwards: the bindings object is shared with the
+    // worker running in the same isolate, so a leaked value would bleed into the
+    // tests above (which assert the headers are absent).
+    afterEach(() => {
+      delete (env as Record<string, unknown>).CF_ACCESS_CLIENT_ID;
+      delete (env as Record<string, unknown>).CF_ACCESS_CLIENT_SECRET;
+    });
+
+    it("sends no CF-Access headers while Access is not configured", async () => {
+      const up = captureUpstream("/transfers");
+      const res = await SELF.fetch("https://bank0.test/api/transfers");
+      expect(res.status).toBe(200);
+
+      // The failure this pins: forwarding empty strings rather than nothing.
+      // Access reads an empty CF-Access-Client-Id as a bad token, so the whole
+      // API would 403 the moment the policy goes live.
+      const h = up.get().headers;
+      expect(h["cf-access-client-id"]).toBeUndefined();
+      expect(h["cf-access-client-secret"]).toBeUndefined();
+    });
+
+    it("injects both halves of the service token when configured", async () => {
+      env.CF_ACCESS_CLIENT_ID = "svc-id.access";
+      env.CF_ACCESS_CLIENT_SECRET = "svc-secret";
+
+      const up = captureUpstream("/transfers");
+      const res = await SELF.fetch("https://bank0.test/api/transfers");
+      expect(res.status).toBe(200);
+
+      const h = up.get().headers;
+      expect(h["cf-access-client-id"]).toBe("svc-id.access");
+      expect(h["cf-access-client-secret"]).toBe("svc-secret");
+    });
+
+    it("fails closed with a 500 when only one half is set", async () => {
+      env.CF_ACCESS_CLIENT_ID = "svc-id.access";
+
+      // No interceptor registered: the worker must not reach the upstream at all
+      // (the stub throws on any un-intercepted outbound fetch).
+      const res = await SELF.fetch("https://bank0.test/api/transfers");
+      expect(res.status).toBe(500);
+      expect((await res.json()).error).toBe("misconfigured");
+    });
+
+    it("strips CF-Access headers the client tried to author", async () => {
+      const up = captureUpstream("/transfers");
+      const res = await SELF.fetch("https://bank0.test/api/transfers", {
+        headers: {
+          "cf-access-client-id": "attacker-id",
+          "cf-access-client-secret": "attacker-secret",
+          "cf-access-jwt-assertion": "forged.jwt.value",
+        },
+      });
+      expect(res.status).toBe(200);
+
+      const h = up.get().headers;
+      expect(h["cf-access-client-id"]).toBeUndefined();
+      expect(h["cf-access-client-secret"]).toBeUndefined();
+      expect(h["cf-access-jwt-assertion"]).toBeUndefined();
     });
   });
 });

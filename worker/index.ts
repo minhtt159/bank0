@@ -6,7 +6,20 @@
 export interface Env {
   ASSETS: Fetcher;
   API_ORIGIN: string;
+  // Cloudflare Access service token, set with `wrangler secret put`. Optional:
+  // absent until Access is put in front of the API hostname (docs/04 §3 step 7).
+  CF_ACCESS_CLIENT_ID?: string;
+  CF_ACCESS_CLIENT_SECRET?: string;
 }
+
+// Access credentials are ours to author, never the browser's. A client that sends
+// its own CF-Access-* headers would otherwise have them forwarded verbatim, so
+// they are stripped on every proxied request whether or not we add our own.
+const CLIENT_AUTHORED_ACCESS_HEADERS = [
+  "cf-access-client-id",
+  "cf-access-client-secret",
+  "cf-access-jwt-assertion",
+];
 
 const SECURITY_HEADERS: Record<string, string> = {
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
@@ -29,6 +42,25 @@ export default {
 
       const headers = new Headers(req.headers);
       headers.delete("host");
+      for (const h of CLIENT_AUTHORED_ACCESS_HEADERS) headers.delete(h);
+
+      // Both halves of the service token or neither — a half-configured Worker
+      // would otherwise send one empty header and every request would come back
+      // as an Access 403 with nothing to point at. Fail here instead, loudly.
+      const id = env.CF_ACCESS_CLIENT_ID?.trim();
+      const secret = env.CF_ACCESS_CLIENT_SECRET?.trim();
+      if (id && secret) {
+        headers.set("CF-Access-Client-Id", id);
+        headers.set("CF-Access-Client-Secret", secret);
+      } else if (id || secret) {
+        return new Response(
+          JSON.stringify({
+            error: "misconfigured",
+            message: "access service token incomplete",
+          }),
+          { status: 500, headers: { "content-type": "application/json" } },
+        );
+      }
 
       const hasBody = req.method !== "GET" && req.method !== "HEAD";
       const init: RequestInit = {

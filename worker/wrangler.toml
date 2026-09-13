@@ -17,3 +17,10 @@ not_found_handling = "single-page-application"
 # same-origin (no CORS) — and this is the seam for a future token-holding BFF.
 [vars]
 API_ORIGIN = "https://api.bank0.hnimn.art"
+
+# Cloudflare Access service token for the API hostname (docs/04 §3 step 7) is NOT
+# configured here — it is a secret, set out of band and both halves together:
+#   wrangler secret put CF_ACCESS_CLIENT_ID
+#   wrangler secret put CF_ACCESS_CLIENT_SECRET
+# Unset, the Worker proxies without them, which is correct until the Access policy
+# is live. Half-set, every /api/* call returns a 500 rather than a puzzling 403.

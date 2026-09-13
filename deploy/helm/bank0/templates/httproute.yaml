@@ -1,5 +1,7 @@
 {{- $gwNs := .Values.gateway.namespace | default .Release.Namespace -}}
 {{- $tls := .Values.gateway.tls.enabled -}}
+{{- $apiForeign := include "bank0.hasForeignParent" .Values.api -}}
+{{- $portalForeign := include "bank0.hasForeignParent" .Values.portal -}}
 {{- if .Values.api.exposed }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -11,9 +13,7 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   parentRefs:
-    - name: {{ .Values.gateway.name }}
-      namespace: {{ $gwNs }}
-      sectionName: {{ if $tls }}https-api{{ else }}http{{ end }}
+    {{- include "bank0.parentRef" (dict "root" $ "surface" .Values.api "listener" "https-api") | nindent 4 }}
   hostnames:
     - {{ .Values.api.host | quote }}
   rules:
@@ -33,9 +33,7 @@ metadata:
     app.kubernetes.io/component: portal
 spec:
   parentRefs:
-    - name: {{ .Values.gateway.name }}
-      namespace: {{ $gwNs }}
-      sectionName: {{ if $tls }}https-portal{{ else }}http{{ end }}
+    {{- include "bank0.parentRef" (dict "root" $ "surface" .Values.portal "listener" "https-portal") | nindent 4 }}
   hostnames:
     - {{ .Values.portal.host | quote }}
   rules:
@@ -46,10 +44,13 @@ spec:
 {{/*
   Redirect route: only when the chart OWNS the Gateway (its :80 listener is named
   "http" — a platform Gateway's may not be, and its TLS/redirect policy is not ours
-  to set) AND at least one surface is exposed. Without the exposed guard this
-  rendered with an EMPTY hostnames list, which matches every host on that listener.
+  to set) AND at least one surface is exposed ON IT. Without the exposed guard this
+  rendered with an EMPTY hostnames list, which matches every host on that listener —
+  so a surface re-parented elsewhere is excluded from both the guard and the
+  hostname list, not just from the list.
 */}}
-{{- if and $tls .Values.gateway.httpsRedirect .Values.gateway.create (or .Values.api.exposed .Values.portal.exposed) }}
+{{- $ownHosts := or (and .Values.api.exposed (not $apiForeign)) (and .Values.portal.exposed (not $portalForeign)) -}}
+{{- if and $tls .Values.gateway.httpsRedirect .Values.gateway.create $ownHosts }}
 ---
 # HTTP -> HTTPS redirect on the :80 listener for the exposed bank0 hosts.
 apiVersion: gateway.networking.k8s.io/v1
@@ -65,10 +66,10 @@ spec:
       namespace: {{ $gwNs }}
       sectionName: http
   hostnames:
-    {{- if .Values.api.exposed }}
+    {{- if and .Values.api.exposed (not $apiForeign) }}
     - {{ .Values.api.host | quote }}
     {{- end }}
-    {{- if .Values.portal.exposed }}
+    {{- if and .Values.portal.exposed (not $portalForeign) }}
     - {{ .Values.portal.host | quote }}
     {{- end }}
   rules:
