@@ -7,13 +7,11 @@ Liveness is DB-blind and readiness is DB-aware, deliberately. CI publishes the
 image and chart but never deploys - `helm upgrade` is an operator command.
 
 > Self-hosted Postgres 18, Kubernetes, Helm and Gateway API is the only
-> supported deployment path - there is no managed or serverless variant. Per-surface
-> Gateway attachment and in-cluster PWA hosting are still open: issues
-> [#117](https://github.com/minhtt159/bank0/issues/117),
-> [#118](https://github.com/minhtt159/bank0/issues/118) and
-> [#119](https://github.com/minhtt159/bank0/issues/119).
-> The API contract and the code generators moved to
-> [`08-development.md`](08-development.md).
+> supported deployment path - there is no managed or serverless variant. §3
+> records the as-built install (two envs on one home cluster, both LAN-only) and
+> the checklist for putting the client API on the internet, which the hosted
+> Worker needs before it can reach the API at all. The API contract and the code
+> generators moved to [`08-development.md`](08-development.md).
 
 ---
 
@@ -21,32 +19,46 @@ image and chart but never deploys - `helm upgrade` is an operator command.
 
 | Host | Surface | Tech | Served by |
 |------|---------|------|-----------|
-| `portal.bank0.hnimn.art` | **Admin UI** - operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal` ([`05-admin-ui.md`](05-admin-ui.md)) |
-| `api.bank0.hnimn.art` | **Client API** - customer JSON API | Go (same binary), `mode=api` | bank0 binary, **behind a Cloudflare proxy** ([`06-client-api.md`](06-client-api.md)) |
+| `portal.bank0.hnimn.art` | **Admin UI** - operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal`, behind the cluster's internal Gateway - LAN-only ([`05-admin-ui.md`](05-admin-ui.md)) |
+| `api.bank0.hnimn.art` | **Client API** - customer JSON API | Go (same binary), `mode=api` | bank0 binary, same internal Gateway - **LAN-only today**, see "Exposing the client API" in §3 ([`06-client-api.md`](06-client-api.md)) |
 | `bank0.hnimn.art` | **Client web app** - customer PWA | TypeScript (Preact/Vite) | **Cloudflare Worker** (static assets + `/api/*` proxy) ([`07-client-web-app.md`](07-client-web-app.md)) |
 
 The two Go surfaces are the *same* binary in different modes (§1). The PWA is not
 served by Go at all - it lives on a Cloudflare Worker that also proxies the
-browser's `/api/*` calls to `api.bank0.hnimn.art`, so the browser stays
-same-origin (no CORS) and tokens never traverse a third origin.
+browser's `/api/*` calls to `API_ORIGIN` (`https://api.bank0.hnimn.art`), so the
+browser stays same-origin (no CORS) and tokens never traverse a third origin.
+
+That proxy is the one hard dependency between the halves: the Worker runs on
+Cloudflare's edge, so it can only reach an API the internet can reach. Both Go
+surfaces sit on the internal Gateway today, so the deployed Worker has nothing to
+proxy to and the PWA runs against a local dev API or a LAN host. Closing that gap
+is the checklist at the end of §3.
 
 ```mermaid
 graph LR
-    Op([Operator]) -->|HTTPS| Portal[portal.bank0.hnimn.art<br/>Go portal]
+    Op([Operator]) -->|LAN HTTPS| GWi["shared internal Gateway<br/>envoy-internal, LAN"]
     Cust([Customer browser]) -->|HTTPS| CFW["bank0.hnimn.art<br/>Cloudflare Worker + PWA"]
-    CFW -->|/api/* proxy| CF[Cloudflare proxy]
-    CF --> API[api.bank0.hnimn.art<br/>Go api mode]
+    CFW -.->|"/api/* proxy - needs exposure"| GWx["cloudflared -> envoy-external"]
+    GWx -.not routed yet.-> API
+    GWi --> Portal["portal.bank0.hnimn.art<br/>Go mode=portal"]
+    GWi --> API["api.bank0.hnimn.art<br/>Go mode=api"]
     Portal --> PG[(Postgres)]
     API --> PG
 ```
 
+Diagram: solid edges run today - both surfaces on the internal Gateway, LAN only.
+The dotted path is the Worker's `/api/*` proxy; it starts working when the api
+route is re-parented to the external Gateway.
+
 ### Edge: Gateway API
 
-The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster -
-TLS, routing, and rate-limiting are the Gateway's job. The PWA is built and
-served as a Cloudflare Worker; moving it in-cluster (and what that means for
-the same-origin `/api/*` proxy) is planned in
-issue [#118](https://github.com/minhtt159/bank0/issues/118).
+The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster:
+TLS, routing and rate-limiting are the Gateway's job. The front end stays at the
+edge - the cluster runs Go and Postgres. In-cluster PWA hosting was
+[declined](https://github.com/minhtt159/bank0/issues/118); the Worker is also the
+seam for a token-holding BFF ([`07-client-web-app.md`](07-client-web-app.md) §6).
+It would not have meant running Node either way: `web/app/dist` is static files,
+so a static server or a Go `embed`, with Vite staying a CI-only build step.
 
 ---
 
@@ -190,7 +202,7 @@ platform-owned Gateways wants.
 |---|---|---|
 | **Chart owns the Gateway** (default) | `gateway.create=true` | a `Gateway` (per-host HTTPS listeners, cert-manager annotation), both HTTPRoutes, and the HTTP->HTTPS redirect route |
 | **Attach to a shared Gateway** | `gateway.create=false` + `gateway.name`/`namespace` | both HTTPRoutes only, parented to that Gateway. `sectionName` is the chart's own listener naming (`https-api`/`https-portal`/`http`), so the shared Gateway must use those names - otherwise use the mode below. TLS and redirect are the platform's business here. |
-| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all - just Deployments/Services. Write the HTTPRoutes yourself, which is also how you give api and portal *different* parentRefs (two platform Gateways, e.g. external + internal) until per-surface attachment lands. |
+| **Bring your own routes** | `gateway.create=false`, `api.exposed=false`, `portal.exposed=false` | **no** Gateway API objects at all - just Deployments/Services. Write the HTTPRoutes yourself. This is also how you give api and portal *different* parentRefs - two platform Gateways, external + internal - and it is what the home cluster runs (see "As built" below); the chart deliberately gained no per-surface `gateway` values, because a cluster that owns two Gateways owns its routing anyway. |
 
 **Two releases in one cluster:** the chart's object names are release-scoped
 (`{{ .Release.Name }}-api`), but if you write your own HTTPRoutes for a staging and a
@@ -230,6 +242,108 @@ Every money operation is a single DB function with row locks + idempotency keys
 safe by construction**: concurrent duplicate requests dedup on the idempotency
 key, and concurrent transfers serialize on `FOR UPDATE`. There is no in-memory
 state to share between replicas.
+
+
+### As built: the home cluster
+
+Both environments run on one self-hosted Talos cluster (the `infra-talos` repo),
+with ownership split down the middle of the release:
+
+| Piece | Owner | Where |
+|---|---|---|
+| namespace, per-env CNPG Postgres cluster, JWT `ExternalSecret`, the HTTPRoutes | **Flux** | `kubernetes/apps/bank0-{staging,production}/` |
+| the Helm release itself (this chart) | **Argo CD** - one `Application` per env from a file generator | `kubernetes/argocd/envs/bank0/{staging,production}.yaml` |
+| promoting a chart version staging -> production | **Kargo** - rewrites `chartVersion` in the production file | `kubernetes/apps/kargo/bank0/` |
+
+Flux owns nothing inside the Helm release and Argo CD owns nothing outside it,
+which is why the platform Kustomization runs `wait: false`: the HTTPRoutes exist
+before Argo CD has made the Services they point at.
+
+The values that shape the install:
+
+| Value | Setting | Why |
+|---|---|---|
+| `gateway.create`, `api.exposed`, `portal.exposed` | all `false` | **Bring-your-own-routes.** Routing is the platform's, on the shared `envoy-internal` Gateway with its wildcard cert - the same shape as every other app in the cluster. |
+| `database.existingSecret` | `bank0-<env>-app`, key `uri` | CNPG generates it for the env's own `Cluster`; `uri` is already a DSN. |
+| `trustProxyHeaders` / `trustedProxyHops` | `true` / `1` | One proxy between client and pod. `envoy-internal` runs `use_remote_address`, so it *appends* the real client IP as the right-most XFF entry - proxy-authored, unforgeable, and what lets the per-IP auth limiter key on a real client (§3, "Request timeout / proxy trust"). |
+| replicas | staging 1 api / 1 portal; production 3-10 api (HPA) + 2 portal | staging is a canary, not an SLO. |
+| `logging.level` | staging `debug`, production default `info` | |
+| `metrics.serviceMonitor` / `metrics.dashboard` | both `true` | kube-prometheus-stack scrapes the Services and sideloads the dashboard ConfigMap. |
+
+Staging auto-syncs; **production does not** (`autoSync: false`) - Kargo writes the
+promotion commit, applying it stays a human's decision.
+
+Both surfaces in both envs attach to `envoy-internal` (`sectionName: https`), so
+**everything is LAN-only today, production included**. Hosts are `api.bank0`,
+`portal.bank0` and the `*.staging.bank0` pair under the cluster domain; the
+platform wildcard cert carries explicit `*.bank0` and `*.staging.bank0` SANs,
+because one wildcard label does not cover a nested one.
+
+Health checks ride annotations on those HTTPRoutes, not on anything in this
+chart: Gatus probes `/readyz` for `200` on api, and the portal's `/` for
+**`401`** - an unauthenticated portal answering 401 *is* the healthy signal, and
+`/health` is DB-blind by design.
+
+One Argo CD wrinkle: the chart's migrate Job is a Helm `pre-install,pre-upgrade`
+hook, which Argo CD maps onto its own **PreSync** phase. It runs on syncs rather
+than on `helm upgrade`, and a failed migration fails the sync before any new pod
+rolls - the intended behaviour, reached by a different mechanism.
+
+### Exposing the client API to the internet
+
+The PWA is hosted on Cloudflare and the API is not reachable from there, so the
+hosted PWA cannot work until this is done. The cluster already has the edge for
+it: a `cloudflared` tunnel (no open ports) in front of an `envoy-external`
+Gateway carrying Coraza/OWASP-CRS WAF, a Valkey-backed per-IP rate limit, HSTS
+and ECS-shaped access logs.
+
+Expose **the api surface only**. The portal is the admin surface, it has no MFA
+yet ([#116](https://github.com/minhtt159/bank0/issues/116)), and nothing about it
+needs to leave the LAN.
+
+1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`
+   (`namespace: network`, `sectionName: https`) - one line in the platform repo.
+   That Gateway's https listener already accepts routes from all namespaces and
+   the wildcard cert already covers the hostname. Staging stays internal.
+2. **DNS follows the Gateway.** It is annotated
+   `external-dns.../target: external.<domain>`, so external-dns writes the public
+   record at the tunnel CNAME. The tunnel's *public hostname* entry is
+   dashboard-side, because the tunnel is token-managed - the one manual step.
+3. **Re-check the hop count.** Internet traffic is two hops (cloudflared, then
+   Envoy). `CF-Connecting-IP` covers the common case - Cloudflare *replaces* it
+   and `clientIP` prefers it outright - and the XFF fallback clamps to the chain
+   it actually got. Still set `trustedProxyHops: 2` in the production values in
+   the same change, so a request arriving without the Cloudflare header keys on a
+   proxy-authored entry.
+4. **Tune the WAF before flipping.** CRS is *enforcing* on that Gateway, and this
+   API posts exactly what CRS scores: passwords, free-text descriptions, IBANs.
+   Add a `DetectionOnly` per-authority directive for the api hostname first (the
+   `flux-webhook` carve-out in the platform's `waf.yaml` is the pattern), run a
+   real login + transfer + dispute, read the match log, then enforce.
+5. **Know what the edge limit does not do.** ~3000 req/min per distinct client
+   IP, fail-open: flood protection, not an auth-abuse control. The
+   credential-stuffing backstop is the in-app per-IP `/auth/*` limiter, and it is
+   **per replica** (§3) - 3-10 api pods means 3-10x the configured limit. Pin
+   `api.replicaCount` for the first public window, or add a per-route rate limit
+   at the Gateway, where counters are shared.
+6. **Ship the auth hardening that assumed a private API.** Bcrypt cost
+   [#121](https://github.com/minhtt159/bank0/issues/121) and the breached-password
+   check [#120](https://github.com/minhtt159/bank0/issues/120) are both worth more
+   once the login endpoint is public.
+7. **Consider gating the hostname to the Worker.** One client ever calls this
+   host - the Worker's `/api/*` proxy ([`07`](07-client-web-app.md) §1) - so a
+   Cloudflare Access policy with a service token the Worker presents shrinks the
+   public surface to the Worker itself. The same-origin design buys that; a direct
+   browser-to-`api.` origin could not. Not a substitute for steps 4-6: the Worker
+   forwards whatever the browser sent.
+
+No Worker change is needed: `API_ORIGIN` already points at the api hostname, so
+the PWA starts working when the name resolves publicly (and, with step 7, when the
+Worker carries the token).
+
+**Done when** a browser off the LAN completes login and a transfer through
+`bank0.hnimn.art`; the Envoy access log shows real client IPs in `source.ip`; the
+WAF logs no matches on those flows; and Gatus stays green on `/readyz`.
 
 ---
 

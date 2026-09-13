@@ -74,7 +74,7 @@ write one Postgres ledger.
 | Host | Surface | Tech | Auth |
 |---|---|---|---|
 | `portal.bank0.hnimn.art` | admin API + operator console | Go `mode=portal`, Templ and HTMX | DB cookie session, staff roles |
-| `api.bank0.hnimn.art` | customer JSON API | Go `mode=api`, behind Cloudflare | JWT bearer + rotating refresh tokens, ownership-scoped |
+| `api.bank0.hnimn.art` | customer JSON API | Go `mode=api`, behind the cluster Gateway (LAN-only today) | JWT bearer + rotating refresh tokens, ownership-scoped |
 | `bank0.hnimn.art` | customer PWA | Cloudflare Worker, Preact and Vite | proxies `/api/*` to the client API |
 
 ```mermaid

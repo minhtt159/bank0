@@ -11,7 +11,8 @@ on the message.
 
 > The customer-facing JSON API: the same Go binary as the portal, run in
 > `server.mode=api`. JWT bearer auth, ownership-scoped to the token subject, and
-> **fronted by a Cloudflare proxy** (see [`04-deployment.md`](04-deployment.md)).
+> fronted by the cluster's Envoy Gateway - LAN-only today, see
+> [`04-deployment.md`](04-deployment.md).
 > The browser never calls this host directly - the PWA's Worker proxies `/api/*`
 > here ([`07-client-web-app.md`](07-client-web-app.md)). MFA and step-up auth are
 > shipped (§6).

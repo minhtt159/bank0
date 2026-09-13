@@ -36,6 +36,26 @@ and set `Content-Security-Policy`, `Strict-Transport-Security`,
 One trap: `routes` is a top-level key and must appear *before* any `[table]`
 section, or TOML folds it into `[vars]` and the Worker silently serves nothing.
 
+**Why a path slug, not a second origin.** The SPA calls `bank0.hnimn.art/api/*`,
+never `api.bank0.hnimn.art`, and that is a contract rather than an implementation
+detail. Same-origin costs no CORS middleware in the Go API and no preflight on
+every money POST (each carries `Idempotency-Key`, which forces one); it keeps the
+CSP at `connect-src 'self'`; it keeps the refresh-token-in-an-httpOnly-cookie
+option open (§6), which cross-origin would need `SameSite=None` third-party
+cookies for; and it lets the API hostname be reachable only by the proxy - a
+Cloudflare Access service token the Worker holds - which a browser could never do.
+Terminating `/api/*` elsewhere is possible in principle (one Gateway
+`URLRewrite` rule), but in-cluster hosting is
+[declined](https://github.com/minhtt159/bank0/issues/118): the cluster runs Go and
+Postgres, the front end stays at the edge. The SPA never learns a second origin.
+
+**`API_ORIGIN` must be internet-reachable.** The Worker runs on Cloudflare, and
+both Go surfaces sit on the cluster's internal Gateway today - so the deployed
+Worker has nothing to proxy to, and the PWA runs against a local dev API
+(`task webapp:dev`, Vite proxying to `:8090`) or a LAN host. The checklist for
+closing that is in [`04-deployment.md`](04-deployment.md), "Exposing the client
+API to the internet".
+
 ---
 
 ## 2. Stack
