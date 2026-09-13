@@ -1,4 +1,4 @@
-// Package webstatic embeds the operator-console static assets (CSS/JS) so the
+// Package webstatic embeds the operator-console static assets (CSS/JS/favicon) so the
 // single Go binary serves them without touching disk. Served under /static/ on
 // the portal surface (public — the login page needs the stylesheet too).
 package webstatic
@@ -11,5 +11,5 @@ import "embed"
 // guarantee (or depend on CDN availability). Bump deliberately, like the generators.
 // sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc
 //
-//go:embed console.css console.js htmx.min.js
+//go:embed console.css console.js htmx.min.js favicon.svg
 var FS embed.FS
