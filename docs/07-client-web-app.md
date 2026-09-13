@@ -45,10 +45,11 @@ middleware in the Go API and no preflight on every money POST (each one carries
 open (§6), which cross-origin would need `SameSite=None` third-party cookies for;
 and it lets the API hostname be reachable only by the proxy - a Cloudflare Access
 service token the Worker holds - instead of open to the internet, which a browser
-could never do. *Who* terminates `/api/*` is swappable: the Worker today, one
-Gateway `URLRewrite` rule if the PWA is ever hosted in-cluster
-([#118](https://github.com/minhtt159/bank0/issues/118)). The SPA never learns a
-second origin either way.
+could never do. *Who* terminates `/api/*` is swappable in principle - the Worker
+today, one Gateway `URLRewrite` rule if the PWA were hosted in-cluster - but
+in-cluster hosting is [declined](https://github.com/minhtt159/bank0/issues/118):
+the cluster runs Go and Postgres, and the front end stays at the edge. The SPA
+never learns a second origin either way.
 
 **The Worker runs on Cloudflare, so `API_ORIGIN` must be reachable from the
 internet.** It is not today - both Go surfaces sit on the cluster's internal

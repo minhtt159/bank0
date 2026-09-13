@@ -55,11 +55,13 @@ external Gateway.
 ### Edge: Gateway API
 
 The **Helm + Gateway API/Envoy** setup in §3 fronts the Go surfaces in-cluster -
-TLS, routing, and rate-limiting are the Gateway's job. The PWA stays a Cloudflare
-Worker; hosting it in-cluster instead is
-issue [#118](https://github.com/minhtt159/bank0/issues/118), and is not the
-direction being taken while the Worker is also the seam for a token-holding BFF
-([`07-client-web-app.md`](07-client-web-app.md) §6).
+TLS, routing, and rate-limiting are the Gateway's job. The cluster runs Go and
+Postgres; the front end stays at the edge. Hosting the PWA in-cluster was
+considered and [declined](https://github.com/minhtt159/bank0/issues/118) - the
+Worker is also the seam for a token-holding BFF
+([`07-client-web-app.md`](07-client-web-app.md) §6). Note that it would not have
+meant running Node: `web/app/dist` is static files, so it would have been a
+static server or a Go `embed`, with Vite staying a CI-only build step.
 
 ---
 
