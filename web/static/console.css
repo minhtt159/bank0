@@ -124,10 +124,11 @@ h1 { font-size:1.25rem; margin:.2rem 0 1rem; letter-spacing:-.015em; }
 table {
   width:100%; border-collapse:separate; border-spacing:0;
   background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md);
-  overflow:hidden; box-shadow:var(--shadow-sm);
+  overflow:clip; box-shadow:var(--shadow-sm); /* clip, not hidden: hidden would make the table the scroll container and defeat the sticky thead */
 }
 th,td { text-align:left; padding:.55rem .8rem; border-bottom:1px solid var(--line-soft); }
 th { color:var(--muted); font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.07em; background:var(--surface-2); white-space:nowrap; }
+#main-panel thead th { position:sticky; top:0; z-index:1; } /* #main-panel is the scroll container */
 tr:last-child td { border-bottom:none; }
 tbody tr { transition:background-color .1s; }
 .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -199,12 +200,19 @@ button.primary.sm { width:auto; margin-top:0; padding:.4rem .8rem; font-size:.85
    takes the full width (so wide tables aren't clipped); it opens only when a
    row/detail is loaded into it, and closes via its × button. minmax(0,..)
    keeps wide content from forcing the grid past the viewport. */
-.layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,6fr) 0; min-height:calc(100vh - 49px); }
+/* Fixed height, not min-height: #main-panel and #rail scroll internally, so the nav stays put and the sticky
+   table headers have a scroll container to stick to. 49px is the topbar. */
+.layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,6fr) 0; height:calc(100dvh - 49px); }
 .layout.rail-open { grid-template-columns:minmax(0,1fr) minmax(0,4fr) minmax(0,2fr); }
 .layout:not(.rail-open) .rail-wrap { display:none; }
+/* Under 900px the left nav collapses to an icon rail: labels hide (title= gives the tooltip), the count badge stays. */
 @media (max-width:900px) {
-  .layout { grid-template-columns:minmax(0,1fr) minmax(0,5fr) 0; }
-  .layout.rail-open { grid-template-columns:minmax(0,1fr) minmax(0,3fr) minmax(0,3fr); }
+  .layout { grid-template-columns:56px minmax(0,1fr) 0; }
+  .layout.rail-open { grid-template-columns:56px minmax(0,3fr) minmax(0,2fr); }
+  .leftnav { padding:.9rem .4rem; }
+  .navitem { justify-content:center; padding:.5rem 0; position:relative; }
+  .navitem .label { display:none; }
+  .navitem .badge-count { position:absolute; top:.15rem; right:.15rem; margin:0; }
 }
 .leftnav { border-right:1px solid var(--line); padding:.9rem .55rem; display:flex; flex-direction:column; gap:.2rem; background:var(--surface); min-width:0; }
 .navitem {
@@ -273,7 +281,14 @@ form input:disabled, form select:disabled { opacity:.55; }
 /* ---------- loading: progress bar, button states, skeletons ---------- */
 #progress { position:fixed; top:0; left:0; height:2px; width:100%; transform:scaleX(0); transform-origin:left; background:var(--accent); opacity:0; z-index:50; transition:transform .2s ease, opacity .2s ease; }
 #progress.on { opacity:1; transform:scaleX(0.85); transition:transform 8s cubic-bezier(.1,.7,.1,1), opacity .1s; }
-button.htmx-request, .btn.htmx-request, .primary.htmx-request { opacity:.55; cursor:progress; }
+/* in-flight: a spinner replaces the label. htmx puts .htmx-request on the requesting element - the button
+   itself for hx-post buttons, the form for submit buttons - so cover both. */
+.btn.htmx-request, button.primary.htmx-request, form.htmx-request button[type=submit] { position:relative; color:transparent !important; cursor:progress; pointer-events:none; }
+.btn.htmx-request::after, button.primary.htmx-request::after, form.htmx-request button[type=submit]::after {
+  content:""; position:absolute; inset:0; margin:auto; width:.9em; height:.9em; border-radius:50%;
+  border:2px solid color-mix(in srgb, var(--ink) 25%, transparent); border-top-color:var(--accent); animation:spin .7s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
 /* lazy-loaded containers show a shimmering skeleton until HTMX swaps content in */
 #main-panel:empty::before, #users-results:empty::before, #accounts-results:empty::before,
 #transfers-results:empty::before, #audit-results:empty::before, #approvals-results:empty::before {
@@ -297,3 +312,4 @@ button.htmx-request, .btn.htmx-request, .primary.htmx-request { opacity:.55; cur
 .toast.ok { border-left-color:var(--ok); }
 .toast.out { opacity:0; transform:translateX(8px); transition:opacity .25s, transform .25s; }
 @keyframes toast-in { from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:none; } }
+
