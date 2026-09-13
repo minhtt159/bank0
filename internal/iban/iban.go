@@ -117,7 +117,7 @@ func Generate(cc string) (string, error) {
 	}
 	n := total - 4
 	digits := make([]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		b, err := rand.Int(rand.Reader, big.NewInt(10))
 		if err != nil {
 			return "", err

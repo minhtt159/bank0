@@ -145,7 +145,7 @@ func TestInvitationSingleUseRace(t *testing.T) {
 	var mu sync.Mutex
 	var ok, alreadyUsed, other int
 
-	for i := 0; i < n; i++ {
+	for range n {
 		wg.Go(func() {
 			email := "race-" + uuid.NewString()[:8] + "@example.com"
 			token := "tok-" + uuid.NewString()

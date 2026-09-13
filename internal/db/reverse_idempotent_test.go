@@ -34,8 +34,8 @@ func TestReverseTwiceIsIdempotent(t *testing.T) {
 	}
 
 	key1, key2 := uuid.NewString(), uuid.NewString()
-	rev1 := reverse(key1)                 // first reversal
-	rev2 := reverse(key2)                 // second reverse, DIFFERENT key
+	rev1 := reverse(key1) // first reversal
+	rev2 := reverse(key2) // second reverse, DIFFERENT key
 	if rev2 != rev1 {
 		t.Fatalf("second reverse returned %s, want the existing reversal %s", rev2, rev1)
 	}

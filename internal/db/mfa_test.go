@@ -66,7 +66,7 @@ func TestMFALockoutWindow(t *testing.T) {
 	u := mkCustomer(t, pg)
 	const maxFail, window = 3, 900
 
-	for i := 0; i < maxFail-1; i++ {
+	for i := range maxFail - 1 {
 		if locked, err := pg.MFARecordAttempt(ctx, u, false, "1.2.3.4", maxFail, window); err != nil || locked {
 			t.Fatalf("fail #%d locked = %v/%v, want false", i+1, locked, err)
 		}

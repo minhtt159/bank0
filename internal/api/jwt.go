@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,10 +44,8 @@ type clientClaims struct {
 // freshness is per-/auth/mfa/verify and deliberately NOT preserved across
 // /auth/refresh — a rotated access token cannot satisfy a money move by itself.
 func (c *clientClaims) hasFreshOTP(maxAge time.Duration) bool {
-	for _, m := range c.AMR {
-		if m == "otp" {
-			return time.Since(time.Unix(c.AuthTime, 0)) <= maxAge
-		}
+	if slices.Contains(c.AMR, "otp") {
+		return time.Since(time.Unix(c.AuthTime, 0)) <= maxAge
 	}
 	return false
 }
@@ -55,19 +54,17 @@ func (s *Server) issueJWT(pr db.Principal, amr []string, txnLink string) (string
 	now := time.Now()
 	exp := now.Add(s.jwtTTL)
 	claims := clientClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   pr.UserID.String(),
-			Issuer:    s.cfg.Auth.JWTIssuer,
-			Audience:  jwt.ClaimStrings{s.cfg.Auth.JWTAudience},
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(exp),
-		},
-		Role:     pr.Role,
-		Username: pr.Username,
-		AMR:      amr,
-		AuthTime: now.Unix(),
-		TxnLink:  txnLink,
-		PWC:      pr.MustChangePassword,
+		Subject:   pr.UserID.String(),
+		Issuer:    s.cfg.Auth.JWTIssuer,
+		Audience:  jwt.ClaimStrings{s.cfg.Auth.JWTAudience},
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(exp),
+		Role:      pr.Role,
+		Username:  pr.Username,
+		AMR:       amr,
+		AuthTime:  now.Unix(),
+		TxnLink:   txnLink,
+		PWC:       pr.MustChangePassword,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := tok.SignedString(s.jwtSecret)
@@ -85,17 +82,15 @@ const mfaTokenAudience = "bank0-mfa"
 func (s *Server) issueMFAToken(pr db.Principal) (string, error) {
 	now := time.Now()
 	claims := clientClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   pr.UserID.String(),
-			Issuer:    s.cfg.Auth.JWTIssuer,
-			Audience:  jwt.ClaimStrings{mfaTokenAudience},
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.Auth.MFATokenTTL)),
-			ID:        uuid.NewString(),
-		},
-		Role:     pr.Role,
-		Username: pr.Username,
-		PWC:      pr.MustChangePassword,
+		Subject:   pr.UserID.String(),
+		Issuer:    s.cfg.Auth.JWTIssuer,
+		Audience:  jwt.ClaimStrings{mfaTokenAudience},
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(s.cfg.Auth.MFATokenTTL)),
+		ID:        uuid.NewString(),
+		Role:      pr.Role,
+		Username:  pr.Username,
+		PWC:       pr.MustChangePassword,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString(s.jwtSecret)

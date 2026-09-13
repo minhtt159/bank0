@@ -79,7 +79,7 @@ func TestHTTPOpenMyAccount(t *testing.T) {
 	}
 
 	// Cap -> 409 account_limit (fill to the configured cap first).
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		hdr["Idempotency-Key"] = uuid.NewString()
 		r = postJSON(t, ts.URL+"/me/accounts", hdr, nil)
 		if r.StatusCode == http.StatusConflict {

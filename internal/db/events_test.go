@@ -68,7 +68,7 @@ func TestEventEmissionIdempotentOnReplay(t *testing.T) {
 	fund(t, pg, a, 10_000)
 
 	key := uuid.NewString()
-	for i := 0; i < 2; i++ { // second call = idempotent replay
+	for i := range 2 { // second call = idempotent replay
 		if _, err := pg.Pool.Exec(ctx,
 			`SELECT transfer($1,$2,$3,$4,$5,'transfer')`, key, a, b, int64(2_000), "replayed"); err != nil {
 			t.Fatalf("transfer #%d: %v", i+1, err)

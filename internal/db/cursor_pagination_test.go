@@ -23,7 +23,7 @@ func TestListMyTransfersCursorWithoutCursorID(t *testing.T) {
 	b := mkAccount(t, pg, mkCustomer(t, pg))
 	fund(t, pg, a, 10_000)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := testTransfer(ctx, pg, uuid.NewString(), a, b, 100, "tie", sqlc.TransferKindTransfer); err != nil {
 			t.Fatalf("transfer %d: %v", i, err)
 		}

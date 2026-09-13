@@ -59,7 +59,7 @@ func pageThrough(t *testing.T, ts *httptest.Server, c *http.Client, firstURL, re
 	seen := map[uuid.UUID]bool{}
 	url := firstURL
 	sawNext := false
-	for page := 0; page < 100; page++ {
+	for page := range 100 {
 		htmlStr := body(t, get(t, c, url, nil))
 		for _, id := range rowIDs(htmlStr, linkPrefix) {
 			if seen[id] {
@@ -175,7 +175,7 @@ func seedTaggedUsers(t *testing.T, pg *db.Postgres, tag string, n int) map[uuid.
 	}
 	defer tx.Rollback(ctx)
 	ids := make(map[uuid.UUID]bool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var id uuid.UUID
 		// full_name carries the tag so ?q=<tag> matches via the ILIKE filter.
 		uname := tag + uhex(8) + "x"
@@ -212,7 +212,7 @@ func seedTaggedAccounts(t *testing.T, pg *db.Postgres, tag string, n int) map[st
 	}
 	defer tx.Rollback(ctx)
 	ibans := make(map[string]bool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		// A real, checksum-valid IBAN — the accounts table has a
 		// CHECK (iban_is_valid(iban)) backstop (00007_accounts.sql).
 		ib, err := iban.Generate("NL")

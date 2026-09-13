@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/minhtt159/bank0/internal/config"
-	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+	"github.com/minhtt159/bank0/internal/iban"
 	"github.com/minhtt159/bank0/internal/migrate"
 )
 
@@ -318,7 +318,7 @@ func TestPaginationKeysetCoversTies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var id uuid.UUID
 		if err := tx.QueryRow(ctx, `SELECT transfer_id FROM transfer($1,$2,$3,$4,$5,'transfer')`,
 			uuid.NewString(), a, b, int64(100), fmt.Sprintf("%s #%d", tag, i)).Scan(&id); err != nil {
@@ -335,7 +335,7 @@ func TestPaginationKeysetCoversTies(t *testing.T) {
 	seen := map[uuid.UUID]bool{}
 	var curTS *time.Time
 	var curID *uuid.UUID
-	for page := 0; page < 100; page++ {
+	for page := range 100 {
 		rows, err := pg.Queries.SearchTransfers(ctx, sqlc.SearchTransfersParams{
 			Q: &q, Cursor: curTS, CursorID: curID, PageLimit: 7,
 		})

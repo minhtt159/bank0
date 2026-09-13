@@ -66,13 +66,8 @@ func (s *Server) clientIP(r *http.Request) string {
 		}
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
-			hops := s.cfg.Server.TrustedProxyHops
-			if hops < 1 {
-				hops = 1
-			}
-			if hops > len(parts) {
-				hops = len(parts) // fewer hops than configured: take the left-most we have
-			}
+			// at least 1; fewer hops than configured: take the left-most we have
+			hops := min(max(s.cfg.Server.TrustedProxyHops, 1), len(parts))
 			if ip := strings.TrimSpace(parts[len(parts)-hops]); ip != "" {
 				return ip
 			}

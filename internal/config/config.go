@@ -138,8 +138,8 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("server.mode", "all")
 	v.SetDefault("server.openapi_spec_path", "api/openapi.yaml")
 	v.SetDefault("server.auto_migrate", false)
-	v.SetDefault("server.cors_origins", []string{}) // opt-in; empty = no CORS headers
-	v.SetDefault("server.rate_limit_per_min", 60)   // /auth/* per IP; 0 disables
+	v.SetDefault("server.cors_origins", []string{})   // opt-in; empty = no CORS headers
+	v.SetDefault("server.rate_limit_per_min", 60)     // /auth/* per IP; 0 disables
 	v.SetDefault("server.trust_proxy_headers", false) // key rate limits on RemoteAddr unless behind a trusted edge
 	v.SetDefault("server.trusted_proxy_hops", 1)      // proxies in front; XFF is read right-to-left
 	v.SetDefault("server.request_timeout", "15s")     // per-request deadline; 0 disables
@@ -154,7 +154,7 @@ func LoadConfig(path string) (Config, error) {
 	v.SetDefault("auth.jwt_audience", "bank0-client")
 	v.SetDefault("auth.refresh_ttl", "720h")           // 30d idle
 	v.SetDefault("auth.refresh_absolute_ttl", "2160h") // 90d hard cap
-	v.SetDefault("auth.step_up_limit_minor", 100000) // €1,000.00
+	v.SetDefault("auth.step_up_limit_minor", 100000)   // €1,000.00
 	v.SetDefault("auth.step_up_max_age", "5m")
 	v.SetDefault("auth.mfa_enc_key", "") // empty => MFA endpoints 503 with a loud warn
 	v.SetDefault("auth.mfa_token_ttl", "5m")

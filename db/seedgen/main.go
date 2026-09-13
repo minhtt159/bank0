@@ -121,7 +121,7 @@ func main() {
 	realUsed, genUsed := 0, 0
 	ui := 0
 	left := 1 + rng.Intn(4) // accounts for the current user
-	for a := 0; a < accounts; a++ {
+	for a := range accounts {
 		if left == 0 {
 			ui = (ui + 1) % users
 			left = 1 + rng.Intn(4)
@@ -173,16 +173,13 @@ func main() {
 		}
 	}
 	ts := make([]txn, 0, txns)
-	for k := 0; k < txns; k++ {
+	for range txns {
 		d := rng.Intn(accounts)
 		c := rng.Intn(accounts)
 		if d == c {
 			continue
 		}
-		maxAmt := deposit[d]
-		if maxAmt > limit[d] {
-			maxAmt = limit[d]
-		}
+		maxAmt := min(deposit[d], limit[d])
 		if maxAmt < 200 {
 			continue
 		}

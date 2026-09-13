@@ -98,14 +98,12 @@ func TestSecurityJWTForgery(t *testing.T) {
 	}
 
 	claims := clientClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   uuid.NewString(),
-			Issuer:    "bank0",
-			Audience:  jwt.ClaimStrings{"bank0-client"},
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		},
-		Role:     "admin", // attacker tries to mint an admin token
-		Username: "attacker",
+		Subject:   uuid.NewString(),
+		Issuer:    "bank0",
+		Audience:  jwt.ClaimStrings{"bank0-client"},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Role:      "admin", // attacker tries to mint an admin token
+		Username:  "attacker",
 	}
 	wrongSecret, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte("not-the-server-secret"))
 	algNone, _ := jwt.NewWithClaims(jwt.SigningMethodNone, claims).SignedString(jwt.UnsafeAllowNoneSignatureType)

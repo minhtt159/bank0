@@ -263,7 +263,7 @@ func TestHashTokenDeterministicOpaque(t *testing.T) {
 
 func TestNewSessionTokenUnique(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		tok := newSessionToken()
 		if tok == "" || seen[tok] {
 			t.Fatalf("session tokens must be non-empty and unique; dup at %d", i)

@@ -595,7 +595,7 @@ func TestPerAccountLoginLockout(t *testing.T) {
 	name, id := mkStaff(t, pg, "admin", "correct-horse-battery")
 
 	// Under the threshold, the right password still works.
-	for i := 0; i < 24; i++ {
+	for range 24 {
 		pg.NoteFailedLogin(ctx, name)
 	}
 	if _, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery",
@@ -612,7 +612,7 @@ func TestPerAccountLoginLockout(t *testing.T) {
 	}
 
 	// 25 consecutive failures lock it, and the CORRECT password is then refused.
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		pg.NoteFailedLogin(ctx, name)
 	}
 	_, err := pg.CreateStaffSession(ctx, name, "correct-horse-battery", "tok"+uniqHex(16), 60, "ua", "ip")

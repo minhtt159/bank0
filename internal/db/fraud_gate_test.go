@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,12 +38,7 @@ func assessReasons(t *testing.T, pg *Postgres, caller, debit, credit uuid.UUID, 
 }
 
 func hasReason(rs []string, want string) bool {
-	for _, r := range rs {
-		if r == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(rs, want)
 }
 
 // TestBlockRollsBackKeyFully: a 'block' decision RAISEs check_violation and rolls
@@ -229,7 +225,7 @@ func TestVelocityExcludesSelf(t *testing.T) {
 	fund(t, pg, aAcct, 1_000_000)
 
 	// 9 prior posted debits from alice (sentinel path, no gates).
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		if _, err := testTransfer(ctx, pg, uuid.NewString(), aAcct, sink, 100, "v", sqlc.TransferKindTransfer); err != nil {
 			t.Fatalf("prior debit %d: %v", i, err)
 		}

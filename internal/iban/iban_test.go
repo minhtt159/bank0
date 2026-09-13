@@ -24,10 +24,10 @@ func TestValidateKnownIBANs(t *testing.T) {
 	invalid := []string{
 		"GB82WEST12345698765431", // flipped check digit
 		"DE89370400440532013001",
-		"XX0000",                  // unknown country / too short
-		"DE8937040044053201300",   // wrong length for DE
-		"GB82WEST1234569876543!",  // non-alphanumeric
-		"1B82WEST12345698765432",  // bad structure (digit where letter expected)
+		"XX0000",                 // unknown country / too short
+		"DE8937040044053201300",  // wrong length for DE
+		"GB82WEST1234569876543!", // non-alphanumeric
+		"1B82WEST12345698765432", // bad structure (digit where letter expected)
 		"",
 	}
 	for _, s := range invalid {
@@ -58,7 +58,7 @@ func TestComputeMatchesPublishedCheckDigits(t *testing.T) {
 
 func TestGenerateRoundTrips(t *testing.T) {
 	for _, cc := range []string{"SE", "DE", "GB", "FR", "NO", "NL", "ES", "MT", "RU"} {
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			s, err := Generate(cc)
 			if err != nil {
 				t.Fatalf("Generate(%s): %v", cc, err)
