@@ -340,7 +340,8 @@ needs to leave the LAN.
    API posts exactly what CRS scores: passwords, free-text descriptions, IBANs.
    Add a `DetectionOnly` per-authority directive for the api hostname first (the
    `flux-webhook` carve-out in the platform's `waf.yaml` is the pattern), run a
-   real login + transfer + dispute, read the match log, then enforce.
+   real login + transfer + dispute, read the match log, then delete the block so
+   the hostname falls back to the enforcing default.
 5. **Move the `/auth/*` limit to the Gateway.** The in-app limiter is a
    *per-replica* sliding window, so 3-10 api pods mean 3-10x the configured limit
    against a public login endpoint - and HPA makes the real ceiling move on its
@@ -349,16 +350,18 @@ needs to leave the LAN.
    it says. Add a `BackendTrafficPolicy` targeting the api HTTPRoute with a
    per-client-IP rule on the `/auth/*` paths; keep autoscaling on. The in-app
    limiter stays as defence in depth for anything that reaches a pod without
-   passing the Gateway. **Know what the edge limit does not do.** ~3000 req/min per distinct client
-   IP, fail-open: flood protection, not an auth-abuse control. The
-   credential-stuffing backstop is the in-app per-IP `/auth/*` limiter, and it is
-   **per replica** (§3) - 3-10 api pods means 3-10x the configured limit. Pin
-   `api.replicaCount` for the first public window, or add a per-route rate limit
-   at the Gateway, where counters are shared.
-6. **Ship the auth hardening that assumed a private API.** Bcrypt cost
-   [#121](https://github.com/minhtt159/bank0/issues/121) and the breached-password
-   check [#120](https://github.com/minhtt159/bank0/issues/120) are both worth more
-   once the login endpoint is public.
+   passing the Gateway. Note the Gateway's own limit is not this control: ~3000
+   req/min per distinct client IP, fail-open, is flood protection. And a
+   route-level `BackendTrafficPolicy` **replaces** the Gateway's rather than
+   merging with it, so the policy has to restate the circuit breaker, outlier
+   ejection and retry settings it is shadowing - or the login path quietly loses
+   them.
+6. **Ship the auth hardening that assumed a private API.** Bcrypt cost is
+   **done** - `00020_bcrypt_cost_12.sql` raised every writer to 12 and re-costs a
+   stale hash on successful login ([#121](https://github.com/minhtt159/bank0/issues/121)).
+   The breached-password check
+   [#120](https://github.com/minhtt159/bank0/issues/120) is still open and is
+   worth more once the login endpoint is public.
 7. **Gate the hostname to the Worker.** One client ever calls this host - the
    Worker's `/api/*` proxy ([`07`](07-client-web-app.md) §1) - so a Cloudflare
    Access policy in Service Auth mode shrinks the public surface to the Worker

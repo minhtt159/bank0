@@ -140,8 +140,12 @@ the lockout is trivially defeated.
 
 Tracked in the issue tracker rather than here, so there is one queue and not two:
 a [breached-password check](https://github.com/minhtt159/bank0/issues/120) on set and change, [TOTP on the portal](https://github.com/minhtt159/bank0/issues/116)
-(the customer surface already has it), [bcrypt cost 10 -> 12](https://github.com/minhtt159/bank0/issues/121), and the
+(the customer surface already has it), and the
 [stricter console CSP](https://github.com/minhtt159/bank0/issues/122).
+[Bcrypt cost 10 -> 12](https://github.com/minhtt159/bank0/issues/121) is done
+(`00020_bcrypt_cost_12.sql`): new hashes are written at 12, and a login re-costs
+an older one in place, so the table converges as people sign in rather than in a
+migration that has no plaintext to work from.
 
 ## Known gaps
 
