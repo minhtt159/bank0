@@ -301,22 +301,30 @@ Expose **the api surface only**. The portal is the admin surface, it has no MFA
 yet ([#116](https://github.com/minhtt159/bank0/issues/116)), and nothing about it
 needs to leave the LAN.
 
-1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`. The
-   chart takes this as `api.parentRef`, so it is production values, not a template
-   change:
+1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`
+   (`namespace: network`, `sectionName: https`). That Gateway's https listener
+   already accepts routes from all namespaces and the wildcard cert already covers
+   the hostname. The portal stays internal - it is the admin surface and has no
+   MFA yet ([#116](https://github.com/minhtt159/bank0/issues/116)). Staging stays
+   internal too.
+
+   **Where that edit lands depends on who owns the route**, and on the home
+   cluster it is not the chart. There, `api.exposed`/`portal.exposed` are `false`
+   and the HTTPRoutes are hand-written Flux manifests, deliberately: Kargo
+   promotes chart versions, and a promotion must not be able to move a hostname or
+   a parentRef. So it is a one-line edit to the platform repo's own
+   `httproute.yaml`.
+
+   For an install that *does* let the chart render its routes, the chart takes the
+   same thing as a value - either surface can be parented independently:
 
    ```yaml
    api:
      parentRef: { name: envoy-external, namespace: network, sectionName: https }
    ```
 
-   That Gateway's https listener already accepts routes from all namespaces and
-   the wildcard cert already covers the hostname. `portal.parentRef` stays empty -
-   the portal is the admin surface, has no MFA yet
-   ([#116](https://github.com/minhtt159/bank0/issues/116)), and stays on the
-   internal Gateway. Staging stays internal too. A re-parented surface also drops
-   out of the chart's HTTP->HTTPS redirect route: port 80 on the platform's
-   Gateway is the platform's to decide. CI renders this exact case
+   A re-parented surface also drops out of the chart's HTTP->HTTPS redirect route:
+   port 80 on someone else's Gateway is theirs to decide. CI renders this case
    (`chart` job, "Render (api re-parented to the external Gateway)").
 2. **DNS follows the Gateway.** It is annotated
    `external-dns.../target: external.<domain>`, so external-dns writes the public
