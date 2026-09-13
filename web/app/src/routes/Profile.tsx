@@ -1,6 +1,37 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, ApiError } from "../api/client";
 import type { User } from "../api/types";
+import { FLAVOURS, applyFlavour, storedFlavour, type Flavour } from "../lib/theme";
+
+// Appearance lives on Profile rather than the topbar: on a 375px phone the bar
+// already carries three links and Sign out.
+function Appearance() {
+  const [flavour, setFlavour] = useState<Flavour>(storedFlavour);
+  return (
+    <>
+      <h2 style="margin-top:24px">Appearance</h2>
+      <div class="card">
+        <label for="theme">Theme</label>
+        <select
+          id="theme"
+          class="theme-select"
+          value={flavour}
+          onChange={(e) => {
+            const f = (e.target as HTMLSelectElement).value as Flavour;
+            setFlavour(f);
+            applyFlavour(f);
+          }}
+        >
+          {FLAVOURS.map((f) => (
+            <option key={f} value={f}>
+              {f === "system" ? "System default" : f[0].toUpperCase() + f.slice(1)}
+            </option>
+          ))}
+        </select>
+      </div>
+    </>
+  );
+}
 
 export function Profile() {
   const [me, setMe] = useState<User | null>(null);
@@ -100,6 +131,8 @@ export function Profile() {
       <a class="card tappable" href="/password">
         <div class="row"><span>Change password</span><span class="muted">›</span></div>
       </a>
+
+      <Appearance />
     </>
   );
 }

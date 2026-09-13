@@ -24,8 +24,10 @@ export default defineConfig({
         name: "bank0",
         short_name: "bank0",
         description: "bank0 customer app",
-        theme_color: "#0b3d2e",
-        background_color: "#0b3d2e",
+        // Catppuccin Latte crust / base — the installed splash and task-switcher
+        // card are baked at install time, so they take the light pair.
+        theme_color: "#dce0e8",
+        background_color: "#eff1f5",
         display: "standalone",
         start_url: "/",
         icons: [

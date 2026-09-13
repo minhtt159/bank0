@@ -153,7 +153,9 @@ web/app/
     routes/                  one file per route above
     components/              AddPayeePanel and friends
     hooks/useFraudGate.ts    preflight -> warning -> ack -> cooling-off state machine
-    lib/                     money, fuzzy, iban, duration, labels, onboarding, fraudGate, feedback
+    lib/                     money, fuzzy, iban, duration, labels, onboarding, fraudGate, feedback, theme
+    styles.css               Catppuccin tokens, then the component rules
+  public/theme-boot.js       pre-paint flavour bootstrap (see §5)
   vite.config.ts             preset-vite + vite-plugin-pwa; dev proxy /api -> :8090
   playwright.config.ts e2e/  browser suite; globalSetup boots Postgres, the api binary and vite
 worker/
@@ -180,6 +182,21 @@ retries with the same idempotency key, and `password_change_required`, which
 routes to `/password`. `409 ack_required` and `422 payment_blocked` go back
 through the warning card. Other `422`s are business rules shown inline
 (insufficient funds, a limit, a frozen account). `429` backs off.
+
+**Theme.** `src/styles.css` carries the same Catppuccin tokens, names and role
+mapping as the operator console (`web/static/console.css`), so the two surfaces
+are one design system: Latte or Mocha by `prefers-color-scheme`, overridden by
+`html[data-theme=latte|frappe|macchiato|mocha]`. The flavour is stored under the
+console's key, `bank0-theme`, and picked in Profile -> Appearance (the topbar is
+too narrow on a phone). `src/lib/theme.ts` owns changes made after boot.
+
+The first paint is a different problem: the attribute has to be on `<html>`
+*before* the stylesheet paints, or a dark-mode phone flashes Latte on every cold
+start. `public/theme-boot.js` does that from a render-blocking `<script src>` in
+`<head>`. It is a separate file rather than inline **because the Worker serves
+HTML under `default-src 'self'` with no `script-src`** - an inline `<script>`
+works in `vite dev` and is blocked in production. `src/index.test.ts` fails if
+one creeps back in.
 
 **Money.** Every amount is an int64 minor unit. Never a float, at any point.
 
