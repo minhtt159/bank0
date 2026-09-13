@@ -22,14 +22,14 @@ func TestHTTPConsoleSettings(t *testing.T) {
 	auditor := login(t, ts, auditorName, "pw")
 
 	// admin sees the editable form
-	if r := get(t, admin, ts.URL+"/console/settings", nil); r.StatusCode != 200 {
+	if r := get(t, admin, ts.URL+"/console/settings", hx); r.StatusCode != 200 {
 		t.Fatalf("admin settings = %d, want 200", r.StatusCode)
 	} else if b := body(t, r); !strings.Contains(b, "maker_checker_threshold") || !strings.Contains(b, "Save settings") {
 		t.Errorf("admin panel missing edit form; body=%.300s", b)
 	}
 
 	// auditor sees it read-only (no save button)
-	if r := get(t, auditor, ts.URL+"/console/settings", nil); r.StatusCode != 200 {
+	if r := get(t, auditor, ts.URL+"/console/settings", hx); r.StatusCode != 200 {
 		t.Fatalf("auditor settings = %d, want 200", r.StatusCode)
 	} else if strings.Contains(body(t, r), "Save settings") {
 		t.Error("auditor must not see the edit form")
@@ -42,7 +42,7 @@ func TestHTTPConsoleSettings(t *testing.T) {
 		t.Errorf("admin save = %d, want 200", code)
 	}
 	// the saved page size round-trips into the panel
-	if r := get(t, admin, ts.URL+"/console/settings", nil); !strings.Contains(body(t, r), `value="20"`) {
+	if r := get(t, admin, ts.URL+"/console/settings", hx); !strings.Contains(body(t, r), `value="20"`) {
 		t.Error("page size 20 did not persist into the settings panel")
 	}
 	// auditor cannot save -> 403 (canManageSettings = admin only)

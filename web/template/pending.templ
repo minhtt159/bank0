@@ -55,8 +55,8 @@ templ TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) {
 			if canAct {
 				<td class="actions">
 					if t.Status == "pending" {
-						<button class="btn ok" hx-on:click="event.stopPropagation()" hx-post={ "/console/transfers/" + t.ID.String() + "/post" } hx-target="#transfers-results" hx-disable="this" hx-confirm="Post (settle) this transfer now?">Post</button>
-						<button class="btn danger" hx-on:click="event.stopPropagation()" hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" } hx-target="#transfers-results" hx-disable="this" hx-confirm="Cancel this pending transfer and release the hold?">Cancel</button>
+						<button class="btn ok" hx-trigger="click consume" hx-post={ "/console/transfers/" + t.ID.String() + "/post" } hx-target="#transfers-results" hx-disable="this" hx-confirm="Post (settle) this transfer now?">Post</button>
+						<button class="btn danger" hx-trigger="click consume" hx-post={ "/console/transfers/" + t.ID.String() + "/cancel" } hx-target="#transfers-results" hx-disable="this" hx-confirm="Cancel this pending transfer and release the hold?">Cancel</button>
 					}
 				</td>
 			}

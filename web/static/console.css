@@ -128,7 +128,7 @@ table {
 }
 th,td { text-align:left; padding:.55rem .8rem; border-bottom:1px solid var(--line-soft); }
 th { color:var(--muted); font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.07em; background:var(--surface-2); white-space:nowrap; }
-#main-panel thead th { position:sticky; top:0; z-index:1; } /* #main-panel is the scroll container */
+#main-panel thead th { position:sticky; top:0; z-index:1; box-shadow:0 -1.2rem 0 var(--bg); } /* #main-panel scrolls; the shadow paints over rows peeking through its top padding */
 tr:last-child td { border-bottom:none; }
 tbody tr { transition:background-color .1s; }
 .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }

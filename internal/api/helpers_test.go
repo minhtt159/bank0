@@ -24,7 +24,7 @@ func TestHTMXSelfHosted(t *testing.T) {
 		t.Fatalf("htmx.min.js must be embedded for same-origin serving: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := template.Shell("op", "admin", 0).Render(context.Background(), &buf); err != nil {
+	if err := template.Shell("op", "admin", 0, "/console/dashboard").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render shell: %v", err)
 	}
 	html := buf.String()
@@ -38,8 +38,8 @@ func TestHTMXSelfHosted(t *testing.T) {
 
 func TestRoleGates(t *testing.T) {
 	cases := []struct {
-		role                          string
-		money, users, approve         bool
+		role                  string
+		money, users, approve bool
 	}{
 		{"operator", true, false, false},
 		{"admin", true, true, true},

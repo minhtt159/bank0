@@ -357,6 +357,13 @@ One handler feeds both the JSON API and HTML. The interaction patterns:
 | Auto-refresh | `hx-trigger="... every 15s"` on Dashboard, Approvals + Screenings, and Limit requests | keep ops view live |
 | Refresh on mutation | `hx-trigger="bank0:refresh from:body"` - Transfers and Reconciliation refresh **only** on this event, they don't poll | avoid churn on quiet screens |
 | Partial swap | `hx-target` + `hx-swap="outerHTML"` | update one row after an action, not the whole table |
+| Deep link | nav items carry `hx-push-url`; a panel GET without `HX-Request` (F5, pasted URL, htmx 4 history restore) returns the shell primed to load that panel (`Server.page`) | back button and shareable URLs |
+| Server toasts | console errors on htmx requests are a `<hx-partial hx-target="#toasts">` body with the mapped reason (`Server.consoleFail`); htmx 4 swaps error responses, and a pure-partial body leaves the panel alone | operator reads why, not a status code |
+| Row buttons | `hx-trigger="click consume"` on a button inside a clickable row | no inline JS, no `eval()` |
+
+htmx is **4.x**, vendored in `web/static/` and served same-origin. Inheritance is
+explicit (`:inherited`), which the templates never relied on; JS listeners read the
+request context from `e.detail.ctx`.
 
 Components live in `web/template/` as Templ files; `templ generate` compiles them.
 The recurring `...Panel` / `...Rows` split is the chrome-versus-results-fragment

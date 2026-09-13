@@ -9,8 +9,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +19,8 @@ import (
 
 	"github.com/minhtt159/bank0/internal/config"
 	"github.com/minhtt159/bank0/internal/db"
-	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+	"github.com/minhtt159/bank0/internal/iban"
 	"github.com/minhtt159/bank0/internal/migrate"
 )
 
@@ -137,6 +137,10 @@ func newClient() *http.Client {
 	return &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// hx marks a request as an htmx fragment request: panel routes answer it with the
+// bare panel instead of the full shell (see Server.page).
+var hx = map[string]string{"HX-Request": "true"}
+
 func get(t *testing.T, c *http.Client, url string, hdr map[string]string) *http.Response {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
@@ -182,7 +186,7 @@ func TestHTTPPortalAuthAndRBAC(t *testing.T) {
 
 	admin := login(t, ts, adminName, "pw")
 	// panel is the chrome (search + lazy results container)...
-	if r := get(t, admin, ts.URL+"/console/users", nil); r.StatusCode != 200 {
+	if r := get(t, admin, ts.URL+"/console/users", hx); r.StatusCode != 200 {
 		t.Errorf("admin /console/users = %d, want 200", r.StatusCode)
 	}
 	// ...the rows (and usernames) come from the results fragment
@@ -338,4 +342,46 @@ func acctBalance(t *testing.T, pg *db.Postgres, acct uuid.UUID) (int64, int64) {
 		t.Fatalf("get account: %v", err)
 	}
 	return a.BalanceMinor, a.AvailableMinor
+}
+
+// Panel routes are deep-linkable: a plain GET (F5, a pasted URL, an htmx 4
+// history restore) returns the shell primed to load that panel, while an htmx
+// request returns the panel itself. Console errors on htmx requests come back as
+// a Toast partial aimed at #toasts, not JSON, so the operator sees the reason.
+func TestHTTPConsoleDeepLinkAndToast(t *testing.T) {
+	ts, pg := newTestServer(t)
+	_, adminName := mkUser(t, pg, sqlc.UserRoleAdmin)
+	_, audName := mkUser(t, pg, sqlc.UserRoleAuditor)
+	admin := login(t, ts, adminName, "pw")
+	auditor := login(t, ts, audName, "pw")
+
+	if r := get(t, admin, ts.URL+"/console/users", nil); r.StatusCode != 200 {
+		t.Fatalf("deep link = %d, want 200", r.StatusCode)
+	} else if b := body(t, r); !strings.Contains(b, `id="main-panel" hx-get="/console/users"`) || !strings.Contains(b, `class="leftnav"`) {
+		t.Errorf("deep link must return the shell primed for /console/users; body=%.300s", b)
+	}
+	if r := get(t, admin, ts.URL+"/console/users", hx); r.StatusCode != 200 {
+		t.Fatalf("htmx panel = %d, want 200", r.StatusCode)
+	} else if b := body(t, r); strings.Contains(b, `class="leftnav"`) || !strings.Contains(b, `id="users-results"`) {
+		t.Errorf("htmx request must return the bare panel; body=%.300s", b)
+	}
+	// history restore carries HX-Request too but wants the full document
+	if r := get(t, admin, ts.URL+"/console/users", map[string]string{"HX-Request": "true", "HX-History-Restore-Request": "true"}); !strings.Contains(body(t, r), `class="leftnav"`) {
+		t.Error("history restore must return the shell")
+	}
+
+	// auditor may not create users: JSON without htmx, Toast partial with it
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/console/users", strings.NewReader("username=x&password=y"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	r, err := auditor.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := body(t, r); r.StatusCode != 403 || !strings.Contains(b, `<hx-partial hx-target="#toasts"`) || !strings.Contains(b, "your role cannot") {
+		t.Errorf("htmx 403 = %d %q, want a Toast partial", r.StatusCode, b)
+	}
+	if r := get(t, auditor, ts.URL+"/console/users/new", nil); r.StatusCode != 403 || !strings.Contains(body(t, r), `"forbidden"`) {
+		t.Errorf("a non-htmx request must keep the JSON 403")
+	}
 }

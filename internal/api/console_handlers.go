@@ -46,7 +46,7 @@ func canApprove(role string) bool { return role == string(sqlc.UserRoleAdmin) }
 func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, allow func(string) bool) (db.SessionUser, bool) {
 	u, ok := userFromContext(r.Context())
 	if !ok || !allow(u.Role) {
-		writeError(w, http.StatusForbidden, "forbidden", "your role cannot perform this action")
+		s.consoleFail(w, r, http.StatusForbidden, "forbidden", "your role cannot perform this action")
 		return db.SessionUser{}, false
 	}
 	return u, true
@@ -60,6 +60,48 @@ func (s *Server) html(w http.ResponseWriter) {
 
 // refresh tells the main-panel lists to reload after a rail mutation.
 func refresh(w http.ResponseWriter) { w.Header().Set("HX-Trigger", "bank0:refresh") }
+
+// isHTMX reports whether htmx asked for a fragment. An htmx 4 history restore
+// also carries HX-Request but wants the full document back.
+func isHTMX(r *http.Request) bool {
+	return r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true"
+}
+
+// consoleFail is the console's one error path (rule 5: status meets meaning
+// here). For an htmx request the body is a Toast partial aimed at #toasts, so
+// the operator reads the reason where they are and the panel is left alone. For
+// anything else (the admin JSON API shares requireRole; tests; curl) it is the
+// usual JSON error.
+func (s *Server) consoleFail(w http.ResponseWriter, r *http.Request, status int, code, msg string) {
+	if !isHTMX(r) {
+		writeError(w, status, code, msg)
+		return
+	}
+	s.html(w)
+	w.WriteHeader(status)
+	_ = template.Toast("bad", msg).Render(r.Context(), w)
+}
+
+// page serves a panel route as a full document when the request is not an htmx
+// fragment request (deep link, F5, history restore): the shell loads that panel
+// into #main-panel on load. htmx requests get the bare panel.
+func (s *Server) page(panel http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Vary", "HX-Request")
+		if isHTMX(r) {
+			panel(w, r)
+			return
+		}
+		s.shell(w, r, r.URL.RequestURI())
+	}
+}
+
+func (s *Server) shell(w http.ResponseWriter, r *http.Request, panel string) {
+	su, _ := userFromContext(r.Context())
+	pending, _ := s.pg.Queries.CountPendingApprovals(r.Context())
+	s.html(w)
+	_ = template.Shell(su.Username, su.Role, int(pending), panel).Render(r.Context(), w)
+}
 
 func strOrNil(s string) *string {
 	s = strings.TrimSpace(s)
@@ -195,10 +237,7 @@ func paginate[T any](rows []T, limit int32, cursorOf func(T) (time.Time, uuid.UU
 // ---- shell + main-panel screens ----------------------------------------
 
 func (s *Server) consoleHome(w http.ResponseWriter, r *http.Request) {
-	su, _ := userFromContext(r.Context())
-	pending, _ := s.pg.Queries.CountPendingApprovals(r.Context())
-	s.html(w)
-	_ = template.Shell(su.Username, su.Role, int(pending)).Render(r.Context(), w)
+	s.shell(w, r, "/console/dashboard")
 }
 
 func (s *Server) consoleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -206,13 +245,13 @@ func (s *Server) consoleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.pg.Queries.DashboardStats(ctx)
 	if err != nil {
 		s.log.Error("dashboard stats", "err", err)
-		http.Error(w, "dashboard error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "dashboard error")
 		return
 	}
 	issues, err := s.pg.Reconcile(ctx)
 	if err != nil {
 		s.log.Error("reconcile", "err", err)
-		http.Error(w, "reconcile error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "reconcile error")
 		return
 	}
 	screening, _ := s.pg.Queries.CountPendingScreenings(ctx) // best-effort tile
@@ -230,7 +269,7 @@ func (s *Server) consoleReconcile(w http.ResponseWriter, r *http.Request) {
 	issues, err := s.pg.Reconcile(r.Context())
 	if err != nil {
 		s.log.Error("reconcile", "err", err)
-		http.Error(w, "reconcile error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "reconcile error")
 		return
 	}
 	s.html(w)
@@ -253,7 +292,7 @@ func (s *Server) consoleAuditResults(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.log.Error("list audit", "err", err)
-		http.Error(w, "audit error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "audit error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.ListAuditLogRow) (time.Time, uuid.UUID) {

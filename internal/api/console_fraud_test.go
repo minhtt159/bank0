@@ -49,7 +49,7 @@ func TestHTTPConsoleWarningRules(t *testing.T) {
 
 	// all staff can view the panel + results.
 	for name, c := range map[string]*http.Client{"admin": admin, "operator": op, "auditor": aud} {
-		if r := get(t, c, ts.URL+"/console/warning-rules", nil); r.StatusCode != 200 {
+		if r := get(t, c, ts.URL+"/console/warning-rules", hx); r.StatusCode != 200 {
 			t.Errorf("%s warning-rules panel = %d, want 200", name, r.StatusCode)
 		}
 	}

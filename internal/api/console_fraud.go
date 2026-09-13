@@ -36,7 +36,7 @@ func (s *Server) renderWarningRules(w http.ResponseWriter, r *http.Request, flas
 	rules, err := s.pg.Queries.ListWarningRules(r.Context())
 	if err != nil {
 		s.log.Error("list warning rules", "err", err)
-		http.Error(w, "warning rules error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "warning rules error")
 		return
 	}
 	canEdit := false
@@ -128,7 +128,7 @@ func (s *Server) consoleUpdateWarningRule(w http.ResponseWriter, r *http.Request
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid rule id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid rule id")
 		return
 	}
 	p, flash := parseWarningRule(r)
@@ -167,7 +167,7 @@ func (s *Server) consoleToggleWarningRule(w http.ResponseWriter, r *http.Request
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid rule id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid rule id")
 		return
 	}
 	active := r.PostFormValue("active") == "true"
@@ -195,7 +195,7 @@ func (s *Server) renderWatchlist(w http.ResponseWriter, r *http.Request, flash s
 	entries, err := s.pg.Queries.ListWatchlistEntries(r.Context())
 	if err != nil {
 		s.log.Error("list watchlist", "err", err)
-		http.Error(w, "watchlist error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "watchlist error")
 		return
 	}
 	canEdit := false
@@ -242,7 +242,7 @@ func (s *Server) consoleToggleWatchlistEntry(w http.ResponseWriter, r *http.Requ
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid entry id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid entry id")
 		return
 	}
 	active := r.PostFormValue("active") == "true"

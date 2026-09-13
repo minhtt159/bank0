@@ -12,8 +12,6 @@ templ consoleHead(title string) {
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<title>{ title }</title>
-		<!-- htmx 4 swaps 4xx/5xx bodies by default; the console still answers errors as JSON/text, so keep the htmx 2 behaviour. -->
-		<meta name="htmx-config" content='{"noSwap":[204,304,"4xx","5xx"]}'/>
 		<script src={ htmxSrc }></script>
 		@templ.Raw(themeScript)
 		<link rel="stylesheet" href="/static/console.css"/>
@@ -93,4 +91,14 @@ templ themeSelect() {
 		<option value="macchiato">Macchiato</option>
 		<option value="mocha">Mocha</option>
 	</select>
+}
+
+// Toast is the console's error body for htmx requests (see Server.consoleFail).
+// htmx 4 swaps error responses; a response made only of <hx-partial> elements
+// skips the main swap, so the panel the operator was looking at is left alone
+// and the message lands in #toasts. console.js dismisses it after a few seconds.
+templ Toast(kind string, msg string) {
+	<hx-partial hx-target="#toasts" hx-swap="beforeend">
+		<div class={ "toast " + kind }>{ msg }</div>
+	</hx-partial>
 }

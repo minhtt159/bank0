@@ -283,27 +283,27 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) templ.Component 
 					return templ_7745c5c3_Err
 				}
 				if t.Status == "pending" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<button class=\"btn ok\" hx-on:click=\"event.stopPropagation()\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<button class=\"btn ok\" hx-trigger=\"click consume\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/transfers/" + t.ID.String() + "/post")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 58, Col: 124}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 58, Col: 113}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#transfers-results\" hx-disable=\"this\" hx-confirm=\"Post (settle) this transfer now?\">Post</button> <button class=\"btn danger\" hx-on:click=\"event.stopPropagation()\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#transfers-results\" hx-disable=\"this\" hx-confirm=\"Post (settle) this transfer now?\">Post</button> <button class=\"btn danger\" hx-trigger=\"click consume\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var16 string
 					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue("/console/transfers/" + t.ID.String() + "/cancel")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 59, Col: 130}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/template/pending.templ`, Line: 59, Col: 119}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 					if templ_7745c5c3_Err != nil {

@@ -31,7 +31,7 @@ func (s *Server) renderDisputes(w http.ResponseWriter, r *http.Request, flash st
 	})
 	if err != nil {
 		s.log.Error("list disputes", "err", err)
-		http.Error(w, "disputes error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "disputes error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(d sqlc.ListDisputesAdminRow) (time.Time, uuid.UUID) {
@@ -61,7 +61,7 @@ func (s *Server) consoleResolveDispute(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid dispute id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid dispute id")
 		return
 	}
 	status := strings.TrimSpace(r.FormValue("status"))
