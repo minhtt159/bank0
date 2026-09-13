@@ -76,7 +76,7 @@ body {
 }
 .topbar strong { font-size:1rem; letter-spacing:-.01em; }
 .topbar > span { color:var(--muted); }
-.logo {
+.topbar .logo { /* beats .topbar > span, which would paint the mark in --muted */
   display:inline-flex; align-items:center; justify-content:center;
   width:26px; height:26px; border-radius:8px; flex:none;
   background:linear-gradient(135deg, var(--accent), var(--lavender));
