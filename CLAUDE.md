@@ -103,8 +103,11 @@ export TEST_DATABASE_DSN='postgres://admin:admin@localhost:5432/bank0_test?sslmo
 go test -count=1 ./internal/db/ ./internal/api/
 ```
 
-CI runs `postgres:18` in every job that touches a DB (`test`, `e2e-go`,
-`migrations`; `e2e-browser` boots its own via the Playwright global setup).
+CI runs `postgres:18` as a service in every job that touches a DB (`test`,
+`e2e-go`; `e2e-browser` boots its own via the Playwright global setup). There is
+no separate migrations job - reversibility is gated by `TestMigrationsReversible`
+inside `test`, which sets `TEST_DATABASE_DSN` so the DB-gated tests actually run
+rather than skip.
 
 If Docker Hub is rate-limited in your environment, pull PG18 from the GCR mirror:
 `docker run -d --name pg18 -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=bank0_test -p 5544:5432 mirror.gcr.io/library/postgres:18-alpine`,
