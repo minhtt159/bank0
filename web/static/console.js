@@ -18,15 +18,25 @@
     item.classList.add('active');
   };
   document.addEventListener('click', function (e) { setActive(e.target.closest('.leftnav .navitem')); });
-  // deep link / F5 / history restore: highlight the panel the URL names (the shell loads it)
-  var here = location.pathname === '/' ? '/console/dashboard' : location.pathname;
-  setActive(document.querySelector('.leftnav .navitem[hx-get="' + here + '"]'));
+  // deep link / F5 / history restore: highlight the panel the URL names (the shell loads it).
+  // An htmx 4 history restore re-swaps the body, so this also runs after swaps that left no item active.
+  var markHere = function () {
+    if (document.querySelector('.leftnav .navitem.active')) return;
+    var here = location.pathname === '/' ? '/console/dashboard' : location.pathname;
+    setActive(document.querySelector('.leftnav .navitem[hx-get="' + here + '"]'));
+  };
+  markHere();
   var dismiss = function (t) {
     if (t.dataset.armed) return;
     t.dataset.armed = '1';
     setTimeout(function () { t.classList.add('out'); }, 3800);
     setTimeout(function () { t.remove(); }, 4200);
   };
+  // Server-rendered Toast partials land in #toasts via htmx; time them out the same way.
+  var toasts = document.getElementById('toasts');
+  if (toasts && window.MutationObserver) {
+    new MutationObserver(function () { toasts.querySelectorAll('.toast').forEach(dismiss); }).observe(toasts, { childList: true });
+  }
   window.toast = function (msg, kind) {
     var wrap = document.getElementById('toasts');
     if (!wrap) return;
@@ -47,10 +57,9 @@
     });
     htmx.on('htmx:after:request', function () { bar().classList.remove('on'); });
     htmx.on('htmx:after:swap', function (evt) {
+      markHere();
       var target = ctx(evt).target;
-      if (!target) return;
-      if (target.id === 'toasts') { target.querySelectorAll('.toast').forEach(dismiss); return; } // server-rendered Toast partials
-      if (target.id !== 'rail') return;
+      if (!target || target.id !== 'rail') return;
       window.openRail();
       var h = target.querySelector('h2'); // keyboard users land on the detail, not where they were
       if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); }
