@@ -200,7 +200,7 @@ func UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, ca
 			return templ_7745c5c3_Err
 		}
 		if canManageUsers {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<button class=\"primary sm\" type=\"submit\" hx-disabled-elt=\"this\">Save details</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<button class=\"primary sm\" type=\"submit\" hx-disable=\"this\">Save details</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -254,7 +254,7 @@ func UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, ca
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" required></label> <button class=\"primary sm\" type=\"submit\" hx-disabled-elt=\"this\">Save invitations</button></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" required></label> <button class=\"primary sm\" type=\"submit\" hx-disable=\"this\">Save invitations</button></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -319,7 +319,7 @@ func UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, ca
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" hx-target=\"#rail\"><button class=\"btn danger sm\" type=\"submit\" hx-disabled-elt=\"this\" hx-confirm=\"Revoke all of this user's refresh tokens? They will be signed out of the app everywhere and must log in again.\">Revoke app sessions</button></form><p class=\"muted\">Invalidates every active refresh token (forces re-login on the customer app).</p><form hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" hx-target=\"#rail\"><button class=\"btn danger sm\" type=\"submit\" hx-disable=\"this\" hx-confirm=\"Revoke all of this user's refresh tokens? They will be signed out of the app everywhere and must log in again.\">Revoke app sessions</button></form><p class=\"muted\">Invalidates every active refresh token (forces re-login on the customer app).</p><form hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -332,7 +332,7 @@ func UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, ca
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#rail\"><button class=\"btn danger sm\" type=\"submit\" hx-disabled-elt=\"this\" hx-confirm=\"Force this user to set a new password? They are signed out of every session immediately and cannot use the app or console until they do.\">Require password change</button></form><p class=\"muted\">For a credential you believe is compromised — the standard's rotation trigger.</p></section>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#rail\"><button class=\"btn danger sm\" type=\"submit\" hx-disable=\"this\" hx-confirm=\"Force this user to set a new password? They are signed out of every session immediately and cannot use the app or console until they do.\">Require password change</button></form><p class=\"muted\">For a credential you believe is compromised — the standard's rotation trigger.</p></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -367,7 +367,7 @@ func UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, ca
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" hx-target=\"#rail\"><label>IBAN <input name=\"iban\" placeholder=\"SE45...\" required></label> <label>PIN <input name=\"pin\" inputmode=\"numeric\" pattern=\"\\d{4}\" placeholder=\"4 digits\" required></label> <label>Transfer limit (€) <input name=\"limit\" type=\"number\" step=\"0.01\" min=\"0\" value=\"500.00\"></label> <button class=\"primary sm\" type=\"submit\" hx-disabled-elt=\"this\">Create account</button></form></details>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" hx-target=\"#rail\"><label>IBAN <input name=\"iban\" placeholder=\"SE45...\" required></label> <label>PIN <input name=\"pin\" inputmode=\"numeric\" pattern=\"\\d{4}\" placeholder=\"4 digits\" required></label> <label>Transfer limit (€) <input name=\"limit\" type=\"number\" step=\"0.01\" min=\"0\" value=\"500.00\"></label> <button class=\"primary sm\" type=\"submit\" hx-disable=\"this\">Create account</button></form></details>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -626,7 +626,7 @@ func accountCard(a sqlc.ListAccountsByUserRow, canMoney bool) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\"> <input name=\"amount\" type=\"number\" step=\"0.01\" min=\"0.01\" placeholder=\"€ amount\" required> <button class=\"btn ok\" type=\"submit\" hx-disabled-elt=\"this\" hx-confirm=\"Credit this account (posts a ledger deposit from external_clearing)?\">Add credit</button></form><form class=\"inline\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\"> <input name=\"amount\" type=\"number\" step=\"0.01\" min=\"0.01\" placeholder=\"€ amount\" required> <button class=\"btn ok\" type=\"submit\" hx-disable=\"this\" hx-confirm=\"Credit this account (posts a ledger deposit from external_clearing)?\">Add credit</button></form><form class=\"inline\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -652,7 +652,7 @@ func accountCard(a sqlc.ListAccountsByUserRow, canMoney bool) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\"> <input name=\"amount\" type=\"number\" step=\"0.01\" min=\"0.01\" placeholder=\"€ amount\" required> <button class=\"btn danger\" type=\"submit\" hx-disabled-elt=\"this\" hx-confirm=\"Withdraw from this account (posts a ledger debit to external_clearing)?\">Withdraw</button></form><div class=\"acct-controls\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\"> <input name=\"amount\" type=\"number\" step=\"0.01\" min=\"0.01\" placeholder=\"€ amount\" required> <button class=\"btn danger\" type=\"submit\" hx-disable=\"this\" hx-confirm=\"Withdraw from this account (posts a ledger debit to external_clearing)?\">Withdraw</button></form><div class=\"acct-controls\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

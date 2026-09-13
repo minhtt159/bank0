@@ -128,7 +128,7 @@ The "is the bank healthy?" glance:
   historical) renders the **full transfer history**, newest first: requested-at,
   from/to, kind, status, amount, description. `status='pending'` rows carry inline
   `Post` / `Cancel` buttons; every other status is read-only. The buttons are
-  `hx-confirm`-gated and `hx-disabled-elt` on submit - but unlike credit/withdraw/
+  `hx-confirm`-gated and `hx-disable` on submit - but unlike credit/withdraw/
   reverse they send **no** `Idempotency-Key`; `post_transfer`/`cancel_transfer` are
   idempotent on the transfer's own status instead.
 - **Search/paging**: one free-text `?q` box (IBAN or description, `SearchTransfers`)
@@ -326,7 +326,7 @@ payment `under_review` and files it into the screening queue (§4.4a).
    it; a retried/double-clicked submit reuses the key -> the DB replays the original
    result. The operator literally cannot create a duplicate movement. (Post/cancel
    need no key - they only advance an existing transfer's status; see §4.3.)
-3. **Optimistic disable**: action buttons disable on click (`hx-disabled-elt`),
+3. **Optimistic disable**: action buttons disable on click (`hx-disable`),
    re-enable on response - kills the double-submit instinct even before the key
    does.
 4. **Maker-checker threshold**: deposits/withdrawals strictly above a
@@ -353,10 +353,17 @@ One handler feeds both the JSON API and HTML. The interaction patterns:
 |---------|------|-----|
 | Drill-down | `hx-get` -> right rail target | account/transfer detail |
 | Live search | `hx-get` + `hx-trigger="input changed delay:300ms"` | account/transfer search |
-| Safe action | `hx-post` + `hx-confirm` + `hx-disabled-elt="this"` (+ `Idempotency-Key` on credit/withdraw/reverse) | credit, post, reverse |
+| Safe action | `hx-post` + `hx-confirm` + `hx-disable="this"` (+ `Idempotency-Key` on credit/withdraw/reverse) | credit, post, reverse |
 | Auto-refresh | `hx-trigger="... every 15s"` on Dashboard, Approvals + Screenings, and Limit requests | keep ops view live |
 | Refresh on mutation | `hx-trigger="bank0:refresh from:body"` - Transfers and Reconciliation refresh **only** on this event, they don't poll | avoid churn on quiet screens |
 | Partial swap | `hx-target` + `hx-swap="outerHTML"` | update one row after an action, not the whole table |
+| Deep link | nav items carry `hx-push-url`; a panel GET without `HX-Request` (F5, pasted URL, htmx 4 history restore) returns the shell primed to load that panel (`Server.page`) | back button and shareable URLs |
+| Server toasts | console errors on htmx requests are a `<hx-partial hx-target="#toasts">` body with the mapped reason (`Server.consoleFail`); htmx 4 swaps error responses, and a pure-partial body leaves the panel alone | operator reads why, not a status code |
+| Row buttons | `hx-trigger="click consume"` on a button inside a clickable row | no inline JS, no `eval()` |
+
+htmx is **4.x**, vendored in `web/static/` and served same-origin. Inheritance is
+explicit (`:inherited`), which the templates never relied on; JS listeners read the
+request context from `e.detail.ctx`.
 
 Components live in `web/template/` as Templ files; `templ generate` compiles them.
 The recurring `...Panel` / `...Rows` split is the chrome-versus-results-fragment

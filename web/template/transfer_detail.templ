@@ -82,7 +82,7 @@ templ TransferDetail(t sqlc.GetTransferDetailRow, legs []sqlc.TransferLegsRow, h
 				<form hx-post={ "/console/transfers/" + t.ID.String() + "/reverse" } hx-target="#rail">
 					<input type="hidden" name="idempotency_key" value={ newKey() }/>
 					<label>Reason <input name="reason" required/></label>
-					<button class="btn danger" type="submit" hx-disabled-elt="this" hx-confirm="Reverse this posted transfer? This appends inverse ledger entries (the original is never edited).">Reverse</button>
+					<button class="btn danger" type="submit" hx-disable="this" hx-confirm="Reverse this posted transfer? This appends inverse ledger entries (the original is never edited).">Reverse</button>
 				</form>
 			</section>
 		}

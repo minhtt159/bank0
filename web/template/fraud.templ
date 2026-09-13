@@ -25,7 +25,7 @@ templ WarningRulesPanel() {
 			<h1>Warning rules</h1>
 			<span class="muted small">Fraud/decision policy — matched at payment time by evaluate_transfer.</span>
 		</div>
-		<div id="warning-rules-results" hx-get="/console/warning-rules/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+		<div id="warning-rules-results" hx-get="/console/warning-rules/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML"></div>
 	</div>
 }
 
@@ -117,7 +117,7 @@ templ WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) {
 			<summary>+ New warning rule</summary>
 			<form hx-post="/console/warning-rules" hx-target="#warning-rules-results">
 				@warnRuleFields(sqlc.WarningRule{Category: "risk_warning", Severity: "warning", Decision: "warn", Active: true})
-				<button class="primary" type="submit" hx-disabled-elt="this">Create rule</button>
+				<button class="primary" type="submit" hx-disable="this">Create rule</button>
 			</form>
 		</details>
 	}
@@ -166,15 +166,15 @@ templ WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) {
 						if canEdit {
 							<td class="actions">
 								if rule.Active {
-									<button class="btn" hx-post={ "/console/warning-rules/" + rule.ID.String() + "/toggle" } hx-vals={ `{"active":"false"}` } hx-target="#warning-rules-results" hx-disabled-elt="this">Deactivate</button>
+									<button class="btn" hx-post={ "/console/warning-rules/" + rule.ID.String() + "/toggle" } hx-vals={ `{"active":"false"}` } hx-target="#warning-rules-results" hx-disable="this">Deactivate</button>
 								} else {
-									<button class="btn ok" hx-post={ "/console/warning-rules/" + rule.ID.String() + "/toggle" } hx-vals={ `{"active":"true"}` } hx-target="#warning-rules-results" hx-disabled-elt="this">Activate</button>
+									<button class="btn ok" hx-post={ "/console/warning-rules/" + rule.ID.String() + "/toggle" } hx-vals={ `{"active":"true"}` } hx-target="#warning-rules-results" hx-disable="this">Activate</button>
 								}
 								<details class="editblock">
 									<summary>Edit</summary>
 									<form hx-post={ "/console/warning-rules/" + rule.ID.String() } hx-target="#warning-rules-results">
 										@warnRuleFields(rule)
-										<button class="primary" type="submit" hx-disabled-elt="this">Save rule</button>
+										<button class="primary" type="submit" hx-disable="this">Save rule</button>
 									</form>
 								</details>
 							</td>
@@ -194,7 +194,7 @@ templ WatchlistPanel() {
 			<h1>Watchlist</h1>
 			<span class="muted small">Sanctions/AML name screening — matched payments are held for review.</span>
 		</div>
-		<div id="watchlist-results" hx-get="/console/watchlist/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML" hx-disinherit="*"></div>
+		<div id="watchlist-results" hx-get="/console/watchlist/results" hx-trigger="load, bank0:refresh from:body" hx-swap="innerHTML"></div>
 	</div>
 }
 
@@ -206,7 +206,7 @@ templ WatchlistList(entries []sqlc.WatchlistEntry, canEdit bool, flash string) {
 			<form hx-post="/console/watchlist" hx-target="#watchlist-results">
 				<label>Pattern (ILIKE, use % wildcards) <input name="pattern" autocomplete="off" required/></label>
 				<label>Reason <input name="reason"/></label>
-				<button class="primary" type="submit" hx-disabled-elt="this">Add entry</button>
+				<button class="primary" type="submit" hx-disable="this">Add entry</button>
 			</form>
 		</details>
 	}
@@ -241,9 +241,9 @@ templ WatchlistList(entries []sqlc.WatchlistEntry, canEdit bool, flash string) {
 						if canEdit {
 							<td class="actions">
 								if e.Active {
-									<button class="btn" hx-post={ "/console/watchlist/" + e.ID.String() + "/toggle" } hx-vals={ `{"active":"false"}` } hx-target="#watchlist-results" hx-disabled-elt="this">Deactivate</button>
+									<button class="btn" hx-post={ "/console/watchlist/" + e.ID.String() + "/toggle" } hx-vals={ `{"active":"false"}` } hx-target="#watchlist-results" hx-disable="this">Deactivate</button>
 								} else {
-									<button class="btn ok" hx-post={ "/console/watchlist/" + e.ID.String() + "/toggle" } hx-vals={ `{"active":"true"}` } hx-target="#watchlist-results" hx-disabled-elt="this">Reactivate</button>
+									<button class="btn ok" hx-post={ "/console/watchlist/" + e.ID.String() + "/toggle" } hx-vals={ `{"active":"true"}` } hx-target="#watchlist-results" hx-disable="this">Reactivate</button>
 								}
 							</td>
 						}

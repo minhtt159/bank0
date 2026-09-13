@@ -269,7 +269,7 @@ func DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, prevURL stri
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-include=\"closest td\" hx-target=\"#disputes-results\" hx-disabled-elt=\"this\">Reviewing</button>")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-include=\"closest td\" hx-target=\"#disputes-results\" hx-disable=\"this\">Reviewing</button>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
@@ -287,7 +287,7 @@ func DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, prevURL stri
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" hx-include=\"closest td\" hx-target=\"#disputes-results\" hx-disabled-elt=\"this\" hx-confirm=\"Resolve this dispute?\">Resolve</button> <button class=\"btn danger\" hx-post=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" hx-include=\"closest td\" hx-target=\"#disputes-results\" hx-disable=\"this\" hx-confirm=\"Resolve this dispute?\">Resolve</button> <button class=\"btn danger\" hx-post=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -300,7 +300,7 @@ func DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, prevURL stri
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-include=\"closest td\" hx-target=\"#disputes-results\" hx-disabled-elt=\"this\" hx-confirm=\"Reject this dispute?\">Reject</button>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-include=\"closest td\" hx-target=\"#disputes-results\" hx-disable=\"this\" hx-confirm=\"Reject this dispute?\">Reject</button>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

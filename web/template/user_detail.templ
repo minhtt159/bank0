@@ -32,7 +32,7 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 					</select>
 				</label>
 				if canManageUsers {
-					<button class="primary sm" type="submit" hx-disabled-elt="this">Save details</button>
+					<button class="primary sm" type="submit" hx-disable="this">Save details</button>
 				} else {
 					<p class="muted">Read-only (admin role required to edit users).</p>
 				}
@@ -44,7 +44,7 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 			if canCreate {
 				<form class="inline" hx-post={ "/console/users/" + u.ID.String() + "/invites" } hx-target="#rail">
 					<label>Set to <input name="invites_remaining" type="number" min="0" step="1" value={ i64(int64(u.InvitesRemaining)) } required/></label>
-					<button class="primary sm" type="submit" hx-disabled-elt="this">Save invitations</button>
+					<button class="primary sm" type="submit" hx-disable="this">Save invitations</button>
 				</form>
 			}
 		</section>
@@ -61,11 +61,11 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 					}
 				</p>
 				<form hx-post={ "/console/users/" + u.ID.String() + "/revoke-sessions" } hx-target="#rail">
-					<button class="btn danger sm" type="submit" hx-disabled-elt="this" hx-confirm="Revoke all of this user's refresh tokens? They will be signed out of the app everywhere and must log in again.">Revoke app sessions</button>
+					<button class="btn danger sm" type="submit" hx-disable="this" hx-confirm="Revoke all of this user's refresh tokens? They will be signed out of the app everywhere and must log in again.">Revoke app sessions</button>
 				</form>
 				<p class="muted">Invalidates every active refresh token (forces re-login on the customer app).</p>
 				<form hx-post={ "/console/users/" + u.ID.String() + "/require-password-change" } hx-target="#rail">
-					<button class="btn danger sm" type="submit" hx-disabled-elt="this" hx-confirm="Force this user to set a new password? They are signed out of every session immediately and cannot use the app or console until they do.">Require password change</button>
+					<button class="btn danger sm" type="submit" hx-disable="this" hx-confirm="Force this user to set a new password? They are signed out of every session immediately and cannot use the app or console until they do.">Require password change</button>
 				</form>
 				<p class="muted">For a credential you believe is compromised — the standard's rotation trigger.</p>
 			</section>
@@ -85,7 +85,7 @@ templ UserDetail(u sqlc.GetUserByIDRow, accounts []sqlc.ListAccountsByUserRow, c
 						<label>IBAN <input name="iban" placeholder="SE45..." required/></label>
 						<label>PIN <input name="pin" inputmode="numeric" pattern="\d{4}" placeholder="4 digits" required/></label>
 						<label>Transfer limit (€) <input name="limit" type="number" step="0.01" min="0" value="500.00"/></label>
-						<button class="primary sm" type="submit" hx-disabled-elt="this">Create account</button>
+						<button class="primary sm" type="submit" hx-disable="this">Create account</button>
 					</form>
 				</details>
 			}
@@ -121,12 +121,12 @@ templ accountCard(a sqlc.ListAccountsByUserRow, canMoney bool) {
 				<form class="inline" hx-post={ "/console/accounts/" + a.ID.String() + "/credit" } hx-target="#rail">
 					<input type="hidden" name="idempotency_key" value={ newKey() }/>
 					<input name="amount" type="number" step="0.01" min="0.01" placeholder="€ amount" required/>
-					<button class="btn ok" type="submit" hx-disabled-elt="this" hx-confirm="Credit this account (posts a ledger deposit from external_clearing)?">Add credit</button>
+					<button class="btn ok" type="submit" hx-disable="this" hx-confirm="Credit this account (posts a ledger deposit from external_clearing)?">Add credit</button>
 				</form>
 				<form class="inline" hx-post={ "/console/accounts/" + a.ID.String() + "/withdraw" } hx-target="#rail">
 					<input type="hidden" name="idempotency_key" value={ newKey() }/>
 					<input name="amount" type="number" step="0.01" min="0.01" placeholder="€ amount" required/>
-					<button class="btn danger" type="submit" hx-disabled-elt="this" hx-confirm="Withdraw from this account (posts a ledger debit to external_clearing)?">Withdraw</button>
+					<button class="btn danger" type="submit" hx-disable="this" hx-confirm="Withdraw from this account (posts a ledger debit to external_clearing)?">Withdraw</button>
 				</form>
 				<div class="acct-controls">
 					if a.Status == "active" {

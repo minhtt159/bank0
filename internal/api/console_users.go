@@ -33,7 +33,7 @@ func (s *Server) consoleUsersResults(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.log.Error("search users", "err", err)
-		http.Error(w, "users error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "users error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(u sqlc.SearchUsersRow) (time.Time, uuid.UUID) {
@@ -90,7 +90,7 @@ func (s *Server) consoleCreateUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) consoleUserDetail(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid user id")
 		return
 	}
 	s.renderUserDetail(w, r, id, "")
@@ -125,7 +125,7 @@ func (s *Server) consoleSetInvites(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid user id")
 		return
 	}
 	_ = r.ParseForm()
@@ -152,7 +152,7 @@ func (s *Server) consoleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid user id")
 		return
 	}
 	_ = r.ParseForm()
@@ -185,7 +185,7 @@ func (s *Server) consoleRequirePasswordChange(w http.ResponseWriter, r *http.Req
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid user id")
 		return
 	}
 	if err := s.pg.RequirePasswordChange(r.Context(), id); err != nil {
@@ -214,7 +214,7 @@ func (s *Server) consoleRevokeSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid user id")
 		return
 	}
 	n, err := s.pg.RevokeUserRefresh(r.Context(), id)

@@ -5,6 +5,8 @@ import (
 	"context"
 	"io/fs"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +24,7 @@ func TestHTMXSelfHosted(t *testing.T) {
 		t.Fatalf("htmx.min.js must be embedded for same-origin serving: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := template.Shell("op", "admin", 0).Render(context.Background(), &buf); err != nil {
+	if err := template.Shell("op", "admin", 0, "/console/dashboard").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render shell: %v", err)
 	}
 	html := buf.String()
@@ -36,8 +38,8 @@ func TestHTMXSelfHosted(t *testing.T) {
 
 func TestRoleGates(t *testing.T) {
 	cases := []struct {
-		role                          string
-		money, users, approve         bool
+		role                  string
+		money, users, approve bool
 	}{
 		{"operator", true, false, false},
 		{"admin", true, true, true},
@@ -267,5 +269,26 @@ func TestNewSessionTokenUnique(t *testing.T) {
 			t.Fatalf("session tokens must be non-empty and unique; dup at %d", i)
 		}
 		seen[tok] = true
+	}
+}
+
+// htmx 4 dropped hx-disabled-elt (now hx-disable) and hx-disinherit (inheritance
+// is explicit). Either attribute in a template is silently ignored at runtime, so
+// fail the build instead: an unprotected approve button is a double-post.
+func TestTemplatesUseHTMX4Attributes(t *testing.T) {
+	files, err := filepath.Glob("../../web/template/*.templ")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("glob templates: %v (found %d)", err, len(files))
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, old := range []string{"hx-disabled-elt", "hx-disinherit"} {
+			if strings.Contains(string(b), old) {
+				t.Errorf("%s: %s was removed in htmx 4", filepath.Base(f), old)
+			}
+		}
 	}
 }

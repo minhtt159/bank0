@@ -25,7 +25,7 @@ func (s *Server) consoleTransfers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) consoleTransfersResults(w http.ResponseWriter, r *http.Request) {
 	rows, prev, next, canAct, err := s.transfersPage(r)
 	if err != nil {
-		http.Error(w, "transfers error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "transfers error")
 		return
 	}
 	s.html(w)
@@ -36,7 +36,7 @@ func (s *Server) consoleTransfersResults(w http.ResponseWriter, r *http.Request)
 func (s *Server) renderTransfers(w http.ResponseWriter, r *http.Request, flash string) {
 	rows, prev, next, canAct, err := s.transfersPage(r)
 	if err != nil {
-		http.Error(w, "transfers error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "transfers error")
 		return
 	}
 	s.html(w)
@@ -102,7 +102,7 @@ func (s *Server) consoleActionContext(w http.ResponseWriter, r *http.Request) (d
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid transfer id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid transfer id")
 		return db.SessionUser{}, uuid.Nil, false
 	}
 	return u, id, true
@@ -111,7 +111,7 @@ func (s *Server) consoleActionContext(w http.ResponseWriter, r *http.Request) (d
 func (s *Server) consoleTransferDetail(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid transfer id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid transfer id")
 		return
 	}
 	s.renderTransferDetail(w, r, id, "")
@@ -146,7 +146,7 @@ func (s *Server) consoleReverse(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid transfer id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid transfer id")
 		return
 	}
 	_ = r.ParseForm()

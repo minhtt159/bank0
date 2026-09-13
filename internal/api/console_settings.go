@@ -30,7 +30,7 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, flash st
 	bs, err := s.pg.Queries.GetBankSettings(r.Context())
 	if err != nil {
 		s.log.Error("get settings", "err", err)
-		http.Error(w, "settings error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "settings error")
 		return
 	}
 	canEdit := false

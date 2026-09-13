@@ -30,7 +30,7 @@ func (s *Server) renderApprovals(w http.ResponseWriter, r *http.Request, flash s
 	})
 	if err != nil {
 		s.log.Error("list approvals", "err", err)
-		http.Error(w, "approvals error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "approvals error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.ListPendingApprovalsRow) (time.Time, uuid.UUID) {
@@ -66,7 +66,7 @@ func (s *Server) renderScreenings(w http.ResponseWriter, r *http.Request, flash 
 	})
 	if err != nil {
 		s.log.Error("list screenings", "err", err)
-		http.Error(w, "screening error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "screening error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.ListPendingScreeningsRow) (time.Time, uuid.UUID) {
@@ -92,7 +92,7 @@ func (s *Server) consoleApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid request id")
 		return
 	}
 	tid, err := s.pg.Queries.ApproveRequest(r.Context(), sqlc.ApproveRequestParams{RequestID: id, Approver: actor.UserID})
@@ -112,7 +112,7 @@ func (s *Server) consoleReject(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid request id")
 		return
 	}
 	tid, err := s.pg.Queries.RejectRequest(r.Context(), sqlc.RejectRequestParams{
@@ -147,7 +147,7 @@ func (s *Server) renderLimitRequests(w http.ResponseWriter, r *http.Request, fla
 	})
 	if err != nil {
 		s.log.Error("list limit requests", "err", err)
-		http.Error(w, "limit requests error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "limit requests error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(q sqlc.ListLimitRequestsRow) (time.Time, uuid.UUID) {
@@ -173,7 +173,7 @@ func (s *Server) consoleLimitApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid request id")
 		return
 	}
 	acctID, err := s.pg.Queries.ApproveLimitChange(r.Context(), sqlc.ApproveLimitChangeParams{RequestID: id, Approver: actor.UserID})
@@ -193,7 +193,7 @@ func (s *Server) consoleLimitReject(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid request id")
 		return
 	}
 	acctID, err := s.pg.Queries.RejectLimitChange(r.Context(), sqlc.RejectLimitChangeParams{

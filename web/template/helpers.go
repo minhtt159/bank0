@@ -24,7 +24,7 @@ func jsonStr(raw []byte, key string) string {
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
 
 // txt renders an `any` column as a string. sqlc emits interface{} for some
-// COALESCE(...::text, '') projections (e.g. disputes queue `raised_by`).
+// COALESCE(...::text, ”) projections (e.g. disputes queue `raised_by`).
 func txt(v any) string {
 	if s, ok := v.(string); ok {
 		return s
@@ -79,21 +79,23 @@ func shortID(id *uuid.UUID) string {
 	return id.String()[:8]
 }
 
-// themeScript runs in <head> before first paint: it applies the persisted (or
-// OS-preferred) theme to <html data-theme=…> so there is no flash of the wrong
-// theme, and exposes toggleTheme() for the topbar button.
+// themeScript runs inline in <head> before first paint: it stamps the stored
+// Catppuccin flavour on <html data-theme=…> (no attribute = follow the OS) so
+// there is no flash of the wrong theme, and exposes setTheme() for themeSelect.
 const themeScript = `<script>
 (function () {
-  var t;
-  try { t = localStorage.getItem('bank0-theme'); } catch (e) {}
-  if (t !== 'light' && t !== 'dark') {
-    t = (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
-  }
-  document.documentElement.dataset.theme = t;
-  window.toggleTheme = function () {
-    var n = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-    document.documentElement.dataset.theme = n;
-    try { localStorage.setItem('bank0-theme', n); } catch (e) {}
+  var flavours = ['latte', 'frappe', 'macchiato', 'mocha'], t = '';
+  try { t = localStorage.getItem('bank0-theme') || ''; } catch (e) {}
+  if (flavours.indexOf(t) < 0) t = '';
+  if (t) document.documentElement.dataset.theme = t;
+  window.setTheme = function (n) {
+    if (flavours.indexOf(n) < 0) n = '';
+    if (n) document.documentElement.dataset.theme = n; else delete document.documentElement.dataset.theme;
+    try { if (n) localStorage.setItem('bank0-theme', n); else localStorage.removeItem('bank0-theme'); } catch (e) {}
   };
+  document.addEventListener('DOMContentLoaded', function () {
+    var s = document.getElementById('theme-select');
+    if (s) s.value = t;
+  });
 })();
 </script>`

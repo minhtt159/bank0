@@ -39,7 +39,7 @@ func TestHTTPConsoleDisputes(t *testing.T) {
 	admin := login(t, ts, adminName, "pw")
 
 	// panel renders; results list the dispute with a Resolve action for an operator
-	if r := get(t, admin, ts.URL+"/console/disputes", nil); r.StatusCode != 200 {
+	if r := get(t, admin, ts.URL+"/console/disputes", hx); r.StatusCode != 200 {
 		t.Fatalf("console disputes panel = %d, want 200", r.StatusCode)
 	}
 	if r := get(t, admin, ts.URL+"/console/disputes/results", nil); r.StatusCode != 200 {

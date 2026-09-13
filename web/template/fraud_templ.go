@@ -127,7 +127,7 @@ func WarningRulesPanel() templ.Component {
 			templ_7745c5c3_Var6 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"panel\"><div class=\"panel-head\"><h1>Warning rules</h1><span class=\"muted small\">Fraud/decision policy — matched at payment time by evaluate_transfer.</span></div><div id=\"warning-rules-results\" hx-get=\"/console/warning-rules/results\" hx-trigger=\"load, bank0:refresh from:body\" hx-swap=\"innerHTML\" hx-disinherit=\"*\"></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"panel\"><div class=\"panel-head\"><h1>Warning rules</h1><span class=\"muted small\">Fraud/decision policy — matched at payment time by evaluate_transfer.</span></div><div id=\"warning-rules-results\" hx-get=\"/console/warning-rules/results\" hx-trigger=\"load, bank0:refresh from:body\" hx-swap=\"innerHTML\"></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -396,7 +396,7 @@ func WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) temp
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<button class=\"primary\" type=\"submit\" hx-disabled-elt=\"this\">Create rule</button></form></details> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<button class=\"primary\" type=\"submit\" hx-disable=\"this\">Create rule</button></form></details> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -579,7 +579,7 @@ func WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) temp
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" hx-target=\"#warning-rules-results\" hx-disabled-elt=\"this\">Deactivate</button> ")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" hx-target=\"#warning-rules-results\" hx-disable=\"this\">Deactivate</button> ")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -610,7 +610,7 @@ func WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) temp
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" hx-target=\"#warning-rules-results\" hx-disabled-elt=\"this\">Activate</button> ")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" hx-target=\"#warning-rules-results\" hx-disable=\"this\">Activate</button> ")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -636,7 +636,7 @@ func WarningRulesList(rules []sqlc.WarningRule, canEdit bool, flash string) temp
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<button class=\"primary\" type=\"submit\" hx-disabled-elt=\"this\">Save rule</button></form></details></td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<button class=\"primary\" type=\"submit\" hx-disable=\"this\">Save rule</button></form></details></td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -677,7 +677,7 @@ func WatchlistPanel() templ.Component {
 			templ_7745c5c3_Var25 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"panel\"><div class=\"panel-head\"><h1>Watchlist</h1><span class=\"muted small\">Sanctions/AML name screening — matched payments are held for review.</span></div><div id=\"watchlist-results\" hx-get=\"/console/watchlist/results\" hx-trigger=\"load, bank0:refresh from:body\" hx-swap=\"innerHTML\" hx-disinherit=\"*\"></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"panel\"><div class=\"panel-head\"><h1>Watchlist</h1><span class=\"muted small\">Sanctions/AML name screening — matched payments are held for review.</span></div><div id=\"watchlist-results\" hx-get=\"/console/watchlist/results\" hx-trigger=\"load, bank0:refresh from:body\" hx-swap=\"innerHTML\"></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -711,7 +711,7 @@ func WatchlistList(entries []sqlc.WatchlistEntry, canEdit bool, flash string) te
 			return templ_7745c5c3_Err
 		}
 		if canEdit {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<details class=\"editblock\"><summary>+ New watchlist entry</summary><form hx-post=\"/console/watchlist\" hx-target=\"#watchlist-results\"><label>Pattern (ILIKE, use % wildcards) <input name=\"pattern\" autocomplete=\"off\" required></label> <label>Reason <input name=\"reason\"></label> <button class=\"primary\" type=\"submit\" hx-disabled-elt=\"this\">Add entry</button></form></details> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<details class=\"editblock\"><summary>+ New watchlist entry</summary><form hx-post=\"/console/watchlist\" hx-target=\"#watchlist-results\"><label>Pattern (ILIKE, use % wildcards) <input name=\"pattern\" autocomplete=\"off\" required></label> <label>Reason <input name=\"reason\"></label> <button class=\"primary\" type=\"submit\" hx-disable=\"this\">Add entry</button></form></details> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -827,7 +827,7 @@ func WatchlistList(entries []sqlc.WatchlistEntry, canEdit bool, flash string) te
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" hx-target=\"#watchlist-results\" hx-disabled-elt=\"this\">Deactivate</button>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" hx-target=\"#watchlist-results\" hx-disable=\"this\">Deactivate</button>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -858,7 +858,7 @@ func WatchlistList(entries []sqlc.WatchlistEntry, canEdit bool, flash string) te
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" hx-target=\"#watchlist-results\" hx-disabled-elt=\"this\">Reactivate</button>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" hx-target=\"#watchlist-results\" hx-disable=\"this\">Reactivate</button>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

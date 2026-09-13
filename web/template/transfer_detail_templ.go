@@ -487,7 +487,7 @@ func TransferDetail(t sqlc.GetTransferDetailRow, legs []sqlc.TransferLegsRow, ho
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\"> <label>Reason <input name=\"reason\" required></label> <button class=\"btn danger\" type=\"submit\" hx-disabled-elt=\"this\" hx-confirm=\"Reverse this posted transfer? This appends inverse ledger entries (the original is never edited).\">Reverse</button></form></section>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\"> <label>Reason <input name=\"reason\" required></label> <button class=\"btn danger\" type=\"submit\" hx-disable=\"this\" hx-confirm=\"Reverse this posted transfer? This appends inverse ledger entries (the original is never edited).\">Reverse</button></form></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

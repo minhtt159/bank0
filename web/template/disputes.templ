@@ -52,10 +52,10 @@ templ DisputeRows(rows []sqlc.ListDisputesAdminRow, canResolve bool, prevURL str
 								} else {
 									<input type="text" name="resolution_note" placeholder="note (optional)"/>
 									if d.Status == sqlc.DisputeStatusOpen {
-										<button class="btn" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=under_review" } hx-include="closest td" hx-target="#disputes-results" hx-disabled-elt="this">Reviewing</button>
+										<button class="btn" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=under_review" } hx-include="closest td" hx-target="#disputes-results" hx-disable="this">Reviewing</button>
 									}
-									<button class="btn ok" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=resolved" } hx-include="closest td" hx-target="#disputes-results" hx-disabled-elt="this" hx-confirm="Resolve this dispute?">Resolve</button>
-									<button class="btn danger" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=rejected" } hx-include="closest td" hx-target="#disputes-results" hx-disabled-elt="this" hx-confirm="Reject this dispute?">Reject</button>
+									<button class="btn ok" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=resolved" } hx-include="closest td" hx-target="#disputes-results" hx-disable="this" hx-confirm="Resolve this dispute?">Resolve</button>
+									<button class="btn danger" hx-post={ "/console/disputes/" + d.ID.String() + "/resolve?status=rejected" } hx-include="closest td" hx-target="#disputes-results" hx-disable="this" hx-confirm="Reject this dispute?">Reject</button>
 								}
 							</td>
 						}

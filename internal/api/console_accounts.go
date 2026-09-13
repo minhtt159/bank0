@@ -31,7 +31,7 @@ func (s *Server) consoleAccountsResults(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		s.log.Error("search accounts", "err", err)
-		http.Error(w, "accounts error", http.StatusInternalServerError)
+		s.consoleFail(w, r, http.StatusInternalServerError, "internal", "accounts error")
 		return
 	}
 	rows, lastTs, lastID, hasMore := paginate(rows, limit, func(a sqlc.SearchAccountsRow) (time.Time, uuid.UUID) {
@@ -49,7 +49,7 @@ func (s *Server) consoleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid user id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid user id")
 		return
 	}
 	_ = r.ParseForm()
@@ -95,7 +95,7 @@ func (s *Server) consoleAccountContext(w http.ResponseWriter, r *http.Request) (
 	}
 	var err error
 	if acctID, err = pathID(r); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid account id")
 		return db.SessionUser{}, uuid.Nil, uuid.Nil, false
 	}
 	// Resolve the owning user for the re-render.
@@ -105,7 +105,7 @@ func (s *Server) consoleAccountContext(w http.ResponseWriter, r *http.Request) (
 		return db.SessionUser{}, uuid.Nil, uuid.Nil, false
 	}
 	if ownerPtr == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "account has no owner")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "account has no owner")
 		return db.SessionUser{}, uuid.Nil, uuid.Nil, false
 	}
 	owner = *ownerPtr
@@ -274,7 +274,7 @@ func (s *Server) consoleStatement(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id, err := pathID(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid account id")
+		s.consoleFail(w, r, http.StatusBadRequest, "bad_request", "invalid account id")
 		return
 	}
 	ts, cid := pageCursor(r)
