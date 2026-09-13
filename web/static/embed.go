@@ -11,5 +11,5 @@ import "embed"
 // guarantee (or depend on CDN availability). Bump deliberately, like the generators.
 // sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc
 //
-//go:embed console.css console.js htmx.min.js favicon.svg
+//go:embed console.css console.js theme-boot.js htmx.min.js favicon.svg
 var FS embed.FS

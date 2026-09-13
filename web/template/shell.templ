@@ -79,7 +79,7 @@ templ Shell(username string, role string, pendingApprovals int, panel string) {
 				<main id="main-panel" hx-get={ panel } hx-trigger="load"></main>
 				<aside id="rail-wrap" class="rail-wrap">
 					<div class="rail-bar">
-						<button class="rail-close" type="button" onclick="closeRail()" title="Close panel" aria-label="Close panel">×</button>
+						<button class="rail-close" type="button" title="Close panel" aria-label="Close panel">×</button>
 					</div>
 					<div id="rail">
 						<div class="rail-empty">

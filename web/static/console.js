@@ -17,7 +17,11 @@
     document.querySelectorAll('.leftnav .navitem').forEach(function (n) { n.classList.remove('active'); });
     item.classList.add('active');
   };
-  document.addEventListener('click', function (e) { setActive(e.target.closest('.leftnav .navitem')); });
+  document.addEventListener('click', function (e) {
+    setActive(e.target.closest('.leftnav .navitem'));
+    // Was onclick="closeRail()" on the button; script-src 'self' blocks inline handlers.
+    if (e.target.closest('.rail-close')) window.closeRail();
+  });
   // deep link / F5 / history restore: highlight the panel the URL names (the shell loads it).
   // An htmx 4 history restore re-swaps the body, so this also runs after swaps that left no item active.
   var markHere = function () {

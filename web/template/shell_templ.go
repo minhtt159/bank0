@@ -133,7 +133,7 @@ func Shell(username string, role string, pendingApprovals int, panel string) tem
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" onclick=\"closeRail()\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M9 18l6-6-6-6\"></path></svg><p>Select a user or row to see details.</p></div></div></aside></div><div id=\"toasts\" role=\"status\" aria-live=\"polite\"></div><script src=\"/static/console.js\"></script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" hx-trigger=\"load\"></main><aside id=\"rail-wrap\" class=\"rail-wrap\"><div class=\"rail-bar\"><button class=\"rail-close\" type=\"button\" title=\"Close panel\" aria-label=\"Close panel\">×</button></div><div id=\"rail\"><div class=\"rail-empty\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><path d=\"M9 18l6-6-6-6\"></path></svg><p>Select a user or row to see details.</p></div></div></aside></div><div id=\"toasts\" role=\"status\" aria-live=\"polite\"></div><script src=\"/static/console.js\"></script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

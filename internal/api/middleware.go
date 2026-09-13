@@ -85,18 +85,25 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 
 // securityHeaders sets safe, high-value response headers on every surface. The
 // customer PWA gets its full CSP from the Worker; the Go operator console (a
-// higher-privilege HTML surface) previously shipped NONE. These are harmless on
-// JSON API responses too. htmx is already vendored + served same-origin from
-// /static, so the remaining blocker on a script-src 'self' lockdown is the
-// console's inline onclick/hx-on handlers (a separate follow-up, docs/10);
-// what's here is the anti-clickjacking / sniffing core.
+// higher-privilege HTML surface) gets its CSP here. Harmless on JSON responses too.
+//
+// script-src 'self' means the console can only run script it served itself: htmx is
+// vendored under /static (TestHTMXSelfHosted guards that), and the console carries
+// no inline <script> and no inline event attributes — theme-boot.js and console.js
+// own what used to be onchange=/onclick= (#122). Adding an inline handler back
+// breaks the page silently in the browser, not in Go, so TestConsoleHasNoInlineScript
+// fails the build instead.
+//
+// No default-src on purpose: this locks down script, the injection vector that
+// matters, without also having to enumerate every img/style/font source the console
+// legitimately uses.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+		h.Set("Content-Security-Policy", "script-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
