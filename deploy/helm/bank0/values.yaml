@@ -118,10 +118,11 @@ api:
   #
   # Going public, set these in the SAME change:
   #   trustedProxyHops: 2      (cloudflared + Envoy; see the note above)
-  #   api.autoscaling.enabled: false + a pinned replicaCount, because the in-app
-  #     /auth/* rate limiter is PER REPLICA — 3-10 pods means 3-10x the configured
-  #     limit against a public login endpoint. Or put a per-route limit on the
-  #     Gateway, where the counters are shared.
+  #   a Gateway-side global rate limit on /auth/*. The in-app limiter below is a
+  #     PER-REPLICA window, so 3-10 pods means 3-10x the configured limit — and
+  #     with HPA on, the real ceiling moves by itself. Envoy Gateway's global rate
+  #     limit (Valkey-backed) shares its counters across pods; autoscaling can then
+  #     stay on, and the in-app limiter remains defence in depth.
   parentRef: {}
   replicaCount: 3
   runMaintenance: false     # maintenance runs on portal only (advisory-locked)

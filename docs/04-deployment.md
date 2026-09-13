@@ -333,10 +333,15 @@ needs to leave the LAN.
    Add a `DetectionOnly` per-authority directive for the api hostname first (the
    `flux-webhook` carve-out in the platform's `waf.yaml` is the pattern), run a
    real login + transfer + dispute, read the match log, then enforce.
-5. **Pin the replica count while the limiter is per-replica.** Set
-   `api.autoscaling.enabled: false` with a fixed `api.replicaCount` in the same
-   change, or add a per-route rate limit at the Gateway where the counters are
-   shared. **Know what the edge limit does not do.** ~3000 req/min per distinct client
+5. **Move the `/auth/*` limit to the Gateway.** The in-app limiter is a
+   *per-replica* sliding window, so 3-10 api pods mean 3-10x the configured limit
+   against a public login endpoint - and HPA makes the real ceiling move on its
+   own. `envoy-external` already runs Envoy Gateway's **global** rate limit backed
+   by Valkey, so the counters are shared across every pod and the limit means what
+   it says. Add a `BackendTrafficPolicy` targeting the api HTTPRoute with a
+   per-client-IP rule on the `/auth/*` paths; keep autoscaling on. The in-app
+   limiter stays as defence in depth for anything that reaches a pod without
+   passing the Gateway. **Know what the edge limit does not do.** ~3000 req/min per distinct client
    IP, fail-open: flood protection, not an auth-abuse control. The
    credential-stuffing backstop is the in-app per-IP `/auth/*` limiter, and it is
    **per replica** (§3) - 3-10 api pods means 3-10x the configured limit. Pin
