@@ -31,7 +31,7 @@ same workflow at human pace; the design rationale is
 | Host | Surface | How | Doc |
 |---|---|---|---|
 | `portal.bank0.hnimn.art` | admin API + operator console (HTML) | Go `mode=portal`, cookie sessions | [`docs/05`](docs/05-admin-ui.md) |
-| `api.bank0.hnimn.art` | client JSON API | Go `mode=api`, JWT + refresh, Cloudflare-fronted | [`docs/06`](docs/06-client-api.md) |
+| `api.bank0.hnimn.art` | client JSON API | Go `mode=api`, JWT + refresh, Envoy Gateway (LAN-only today) | [`docs/06`](docs/06-client-api.md) |
 | `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite), proxies `/api/*` | [`docs/07`](docs/07-client-web-app.md) |
 
 `mode=all` serves both Go surfaces locally. Always-public on every surface:
