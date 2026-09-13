@@ -81,3 +81,16 @@ templ flashBar(flash string) {
 	}
 }
 
+
+// themeSelect picks the Catppuccin flavour (or the OS default). Native <select>:
+// keyboard and screen-reader support for free. themeScript (helpers.go) applies
+// the stored choice before first paint and re-selects it here on load.
+templ themeSelect() {
+	<select id="theme-select" class="theme-select" aria-label="Colour theme" onchange="setTheme(this.value)">
+		<option value="">System</option>
+		<option value="latte">Latte</option>
+		<option value="frappe">Frappé</option>
+		<option value="macchiato">Macchiato</option>
+		<option value="mocha">Mocha</option>
+	</select>
+}

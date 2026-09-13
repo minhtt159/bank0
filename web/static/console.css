@@ -1,23 +1,60 @@
-/* bank0 operator console — design tokens (dark default, light via html[data-theme=light]) */
+/* bank0 operator console — Catppuccin tokens (github.com/catppuccin/palette).
+   Flavour is chosen by html[data-theme=latte|frappe|macchiato|mocha]; no attribute
+   means "system": Latte, or Mocha when the OS prefers dark. Roles follow the
+   upstream style guide: base = page, mantle = secondary panes, crust = topbar,
+   surface0/1 = fills and borders, subtext0 = muted text, overlay0 = faint text,
+   blue = the single accent; green/yellow/red only ever mean status.
+   --warn-ink is the one contrast exception: Latte yellow on base is ~2.6:1, so
+   the light flavour sets warning-pill text in `text` and keeps yellow for the
+   dot, border and tint. */
 :root {
-  --bg:#0a0e15; --surface:#111723; --surface-2:#171f2e; --line:#222c3d; --line-soft:#1b2434;
-  --ink:#e7edf5; --muted:#8d9aac; --faint:#5c6a7d;
-  --accent:#4d8dff; --accent-ink:#ffffff;
-  --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
-  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+  --bg:#eff1f5; --surface:#e6e9ef; --crust:#dce0e8; --surface-2:#ccd0da; --line:#bcc0cc; --line-soft:#ccd0da;
+  --ink:#4c4f69; --muted:#6c6f85; --faint:#9ca0b0; --sel:#7c7f93;
+  --accent:#1e66f5; --accent-ink:#eff1f5; --lavender:#7287fd;
+  --ok:#40a02b; --warn:#df8e1d; --warn-ink:#4c4f69; --bad:#d20f39;
+  --shadow:0 1px 2px rgba(76,79,105,.08), 0 8px 24px -12px rgba(76,79,105,.18);
+  --shadow-sm:0 1px 2px rgba(76,79,105,.08);
   --ring:0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
   --r-sm:7px; --r-md:10px; --r-lg:14px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg:#1e1e2e; --surface:#181825; --crust:#11111b; --surface-2:#313244; --line:#45475a; --line-soft:#313244;
+    --ink:#cdd6f4; --muted:#a6adc8; --faint:#6c7086; --sel:#9399b2;
+    --accent:#89b4fa; --accent-ink:#1e1e2e; --lavender:#b4befe;
+    --ok:#a6e3a1; --warn:#f9e2af; --warn-ink:#f9e2af; --bad:#f38ba8;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+}
+:root[data-theme=frappe] {
+  --bg:#303446; --surface:#292c3c; --crust:#232634; --surface-2:#414559; --line:#51576d; --line-soft:#414559;
+  --ink:#c6d0f5; --muted:#a5adce; --faint:#737994; --sel:#949cbb;
+  --accent:#8caaee; --accent-ink:#303446; --lavender:#babbf1;
+  --ok:#a6d189; --warn:#e5c890; --warn-ink:#e5c890; --bad:#e78284;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 8px 24px -12px rgba(0,0,0,.45);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);
   color-scheme:dark;
 }
-:root[data-theme=light] {
-  --bg:#f2f5f9; --surface:#ffffff; --surface-2:#f7f9fc; --line:#dde4ee; --line-soft:#e8edf4;
-  --ink:#1b2434; --muted:#5e6c81; --faint:#94a1b3;
-  --accent:#2e6ee8; --accent-ink:#ffffff;
-  --ok:#0e9f6e; --warn:#b07a0a; --bad:#dc4c4c;
-  --shadow:0 1px 2px rgba(23,32,49,.06), 0 8px 24px -12px rgba(23,32,49,.14);
-  --shadow-sm:0 1px 2px rgba(23,32,49,.06);
-  color-scheme:light;
+:root[data-theme=macchiato] {
+  --bg:#24273a; --surface:#1e2030; --crust:#181926; --surface-2:#363a4f; --line:#494d64; --line-soft:#363a4f;
+  --ink:#cad3f5; --muted:#a5adcb; --faint:#6e738d; --sel:#939ab7;
+  --accent:#8aadf4; --accent-ink:#24273a; --lavender:#b7bdf8;
+  --ok:#a6da95; --warn:#eed49f; --warn-ink:#eed49f; --bad:#ed8796;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+  color-scheme:dark;
+}
+:root[data-theme=mocha] {
+  --bg:#1e1e2e; --surface:#181825; --crust:#11111b; --surface-2:#313244; --line:#45475a; --line-soft:#313244;
+  --ink:#cdd6f4; --muted:#a6adc8; --faint:#6c7086; --sel:#9399b2;
+  --accent:#89b4fa; --accent-ink:#1e1e2e; --lavender:#b4befe;
+  --ok:#a6e3a1; --warn:#f9e2af; --warn-ink:#f9e2af; --bad:#f38ba8;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.5);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+  color-scheme:dark;
 }
 * { box-sizing:border-box; }
 html { scrollbar-color:var(--line) transparent; }
@@ -27,13 +64,13 @@ body {
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   transition:background-color .25s ease, color .25s ease;
 }
-::selection { background:color-mix(in srgb, var(--accent) 30%, transparent); }
+::selection { background:color-mix(in srgb, var(--sel) 30%, transparent); }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
 
 /* ---------- topbar ---------- */
 .topbar {
   display:flex; gap:.65rem; align-items:center; padding:.55rem 1.1rem;
-  background:color-mix(in srgb, var(--surface) 85%, transparent);
+  background:color-mix(in srgb, var(--crust) 85%, transparent);
   backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
   border-bottom:1px solid var(--line); position:sticky; top:0; z-index:40;
 }
@@ -42,19 +79,16 @@ body {
 .logo {
   display:inline-flex; align-items:center; justify-content:center;
   width:26px; height:26px; border-radius:8px; flex:none;
-  background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #7c5bf0));
-  color:#fff; font-weight:800; font-size:.8rem; letter-spacing:-.05em;
+  background:linear-gradient(135deg, var(--accent), var(--lavender));
+  color:var(--accent-ink); font-weight:800; font-size:.8rem; letter-spacing:-.05em;
   box-shadow:var(--shadow-sm);
 }
-.iconbtn {
-  display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px;
-  border:1px solid transparent; border-radius:var(--r-sm); background:none; color:var(--muted); cursor:pointer;
-  transition:color .15s, background-color .15s, border-color .15s;
+.theme-select {
+  font:inherit; font-size:.8rem; color:var(--muted); background:var(--surface-2); border:1px solid var(--line);
+  border-radius:var(--r-sm); padding:.25rem .5rem; cursor:pointer; transition:color .15s, border-color .15s;
 }
-.iconbtn:hover { color:var(--ink); background:var(--surface-2); border-color:var(--line); }
-.iconbtn:focus-visible { outline:none; box-shadow:var(--ring); }
-:root[data-theme=light] .icon-sun { display:none; }
-:root:not([data-theme=light]) .icon-moon { display:none; }
+.theme-select:hover { color:var(--ink); }
+.theme-select:focus-visible { outline:none; border-color:var(--accent); box-shadow:var(--ring); }
 
 main { padding:1.2rem; max-width:1100px; margin:0 auto; }
 h1 { font-size:1.25rem; margin:.2rem 0 1rem; letter-spacing:-.015em; }
@@ -108,14 +142,14 @@ tbody tr { transition:background-color .1s; }
 }
 .pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.8; flex:none; }
 .pill.posted, .pill.active   { color:var(--ok);   border-color:color-mix(in srgb, var(--ok) 35%, transparent);   background:color-mix(in srgb, var(--ok) 10%, transparent); }
-.pill.pending, .pill.frozen, .pill.locked { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 35%, transparent); background:color-mix(in srgb, var(--warn) 10%, transparent); }
+.pill.pending, .pill.frozen, .pill.locked { color:var(--warn-ink); border-color:color-mix(in srgb, var(--warn) 35%, transparent); background:color-mix(in srgb, var(--warn) 10%, transparent); }
 .pill.failed, .pill.canceled, .pill.closed { color:var(--bad); border-color:color-mix(in srgb, var(--bad) 35%, transparent); background:color-mix(in srgb, var(--bad) 10%, transparent); }
 .pill.reversed { color:var(--muted); }
 .rolebadge { padding:.12rem .6rem; border-radius:999px; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; border:1px solid var(--line); background:var(--surface-2); }
-.rolebadge.admin    { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent); background:color-mix(in srgb, var(--warn) 10%, transparent); }
+.rolebadge.admin    { color:var(--warn-ink); border-color:color-mix(in srgb, var(--warn) 40%, transparent); background:color-mix(in srgb, var(--warn) 10%, transparent); }
 .rolebadge.operator { color:var(--accent); border-color:color-mix(in srgb, var(--accent) 40%, transparent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
-.rolebadge.auditor  { color:var(--muted); }
-.badge-count { background:var(--bad); color:#fff; border-radius:999px; padding:0 .42rem; font-size:.7rem; font-weight:700; margin-left:auto; line-height:1.5; }
+.rolebadge.auditor  { color:var(--lavender); border-color:color-mix(in srgb, var(--lavender) 40%, transparent); background:color-mix(in srgb, var(--lavender) 10%, transparent); }
+.badge-count { background:var(--bad); color:var(--accent-ink); border-radius:999px; padding:0 .42rem; font-size:.7rem; font-weight:700; margin-left:auto; line-height:1.5; }
 
 .muted { color:var(--muted); }
 .spacer { flex:1; }
