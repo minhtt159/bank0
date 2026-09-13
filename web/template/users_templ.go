@@ -265,7 +265,7 @@ func CreateUserForm(flash string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<form hx-post=\"/console/users\" hx-target=\"#rail\"><label>Username <input name=\"username\" autocomplete=\"off\" required></label> <label>Full name <input name=\"full_name\" required></label> <label>Email <input name=\"email\" type=\"email\"></label> <label>Phone <input name=\"phone_number\"></label> <label>Temp password <input name=\"password\" type=\"text\" value=\"password\" required></label> <label>Role <select name=\"role\"><option value=\"customer\">customer</option> <option value=\"operator\">operator</option> <option value=\"admin\">admin</option> <option value=\"auditor\">auditor</option></select></label> <button class=\"primary\" type=\"submit\" hx-disabled-elt=\"this\">Create user</button></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<form hx-post=\"/console/users\" hx-target=\"#rail\"><label>Username <input name=\"username\" autocomplete=\"off\" required></label> <label>Full name <input name=\"full_name\" required></label> <label>Email <input name=\"email\" type=\"email\"></label> <label>Phone <input name=\"phone_number\"></label> <label>Temp password <input name=\"password\" type=\"text\" value=\"password\" required></label> <label>Role <select name=\"role\"><option value=\"customer\">customer</option> <option value=\"operator\">operator</option> <option value=\"admin\">admin</option> <option value=\"auditor\">auditor</option></select></label> <button class=\"primary\" type=\"submit\" hx-disable=\"this\">Create user</button></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

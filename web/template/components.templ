@@ -12,6 +12,8 @@ templ consoleHead(title string) {
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<title>{ title }</title>
+		<!-- htmx 4 swaps 4xx/5xx bodies by default; the console still answers errors as JSON/text, so keep the htmx 2 behaviour. -->
+		<meta name="htmx-config" content='{"noSwap":[204,304,"4xx","5xx"]}'/>
 		<script src={ htmxSrc }></script>
 		@templ.Raw(themeScript)
 		<link rel="stylesheet" href="/static/console.css"/>
@@ -27,14 +29,13 @@ templ consolePanel(title, resultsID, resultsURL, extraTrigger string) {
 			<h1>{ title }</h1>
 			{ children... }
 		</div>
-		<div id={ resultsID } hx-get={ resultsURL } hx-trigger={ "load, bank0:refresh from:body" + extraTrigger } hx-swap="innerHTML" hx-disinherit="*"></div>
+		<div id={ resultsID } hx-get={ resultsURL } hx-trigger={ "load, bank0:refresh from:body" + extraTrigger } hx-swap="innerHTML"></div>
 	</div>
 }
 
 // searchBox is a live-search input. It swaps only the results fragment (target),
 // so the input keeps focus while typing. type=search gives a native clear (x),
-// and the "search" trigger fires when cleared. hx-disinherit keeps child results
-// from inheriting these attributes.
+// and the "search" trigger fires when cleared.
 templ searchBox(placeholder string, url string, target string) {
 	<input
 		class="search"
@@ -46,7 +47,6 @@ templ searchBox(placeholder string, url string, target string) {
 		hx-target={ "#" + target }
 		hx-swap="innerHTML"
 		hx-trigger="input changed delay:300ms, search"
-		hx-disinherit="*"
 	/>
 }
 

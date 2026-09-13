@@ -45,8 +45,8 @@ templ LimitRequestRows(rows []sqlc.ListLimitRequestsRow, canApprove bool, prevUR
 						<td class="muted">{ q.Reason }</td>
 						if canApprove {
 							<td class="actions">
-								<button class="btn ok" hx-post={ "/console/limit-requests/" + q.RequestID.String() + "/approve" } hx-target="#limit-requests-results" hx-disabled-elt="this" hx-confirm="Apply this transfer limit? You must not be the requester.">Apply</button>
-								<button class="btn danger" hx-post={ "/console/limit-requests/" + q.RequestID.String() + "/reject" } hx-target="#limit-requests-results" hx-disabled-elt="this" hx-confirm="Reject this limit request?">Reject</button>
+								<button class="btn ok" hx-post={ "/console/limit-requests/" + q.RequestID.String() + "/approve" } hx-target="#limit-requests-results" hx-disable="this" hx-confirm="Apply this transfer limit? You must not be the requester.">Apply</button>
+								<button class="btn danger" hx-post={ "/console/limit-requests/" + q.RequestID.String() + "/reject" } hx-target="#limit-requests-results" hx-disable="this" hx-confirm="Reject this limit request?">Reject</button>
 							</td>
 						}
 					</tr>

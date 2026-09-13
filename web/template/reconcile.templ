@@ -3,7 +3,7 @@ package template
 import "github.com/minhtt159/bank0/internal/db"
 
 templ ReconcilePanel(issues []db.ReconcileRow) {
-	<div id="reconcile" hx-get="/console/reconcile" hx-trigger="bank0:refresh from:body" hx-swap="outerHTML" hx-disinherit="*">
+	<div id="reconcile" hx-get="/console/reconcile" hx-trigger="bank0:refresh from:body" hx-swap="outerHTML">
 		<div class="panel-head">
 			<h1>Reconciliation</h1>
 			<button class="btn" hx-get="/console/reconcile" hx-target="#main-panel">Re-run</button>

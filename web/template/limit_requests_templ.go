@@ -219,7 +219,7 @@ func LimitRequestRows(rows []sqlc.ListLimitRequestsRow, canApprove bool, prevURL
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" hx-target=\"#limit-requests-results\" hx-disabled-elt=\"this\" hx-confirm=\"Apply this transfer limit? You must not be the requester.\">Apply</button> <button class=\"btn danger\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" hx-target=\"#limit-requests-results\" hx-disable=\"this\" hx-confirm=\"Apply this transfer limit? You must not be the requester.\">Apply</button> <button class=\"btn danger\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -232,7 +232,7 @@ func LimitRequestRows(rows []sqlc.ListLimitRequestsRow, canApprove bool, prevURL
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-target=\"#limit-requests-results\" hx-disabled-elt=\"this\" hx-confirm=\"Reject this limit request?\">Reject</button></td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-target=\"#limit-requests-results\" hx-disable=\"this\" hx-confirm=\"Reject this limit request?\">Reject</button></td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

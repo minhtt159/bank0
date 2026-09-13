@@ -296,7 +296,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) templ.Component 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#transfers-results\" hx-disabled-elt=\"this\" hx-confirm=\"Post (settle) this transfer now?\">Post</button> <button class=\"btn danger\" hx-on:click=\"event.stopPropagation()\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#transfers-results\" hx-disable=\"this\" hx-confirm=\"Post (settle) this transfer now?\">Post</button> <button class=\"btn danger\" hx-on:click=\"event.stopPropagation()\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -309,7 +309,7 @@ func TransferItems(rows []sqlc.SearchTransfersRow, canAct bool) templ.Component 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" hx-target=\"#transfers-results\" hx-disabled-elt=\"this\" hx-confirm=\"Cancel this pending transfer and release the hold?\">Cancel</button>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" hx-target=\"#transfers-results\" hx-disable=\"this\" hx-confirm=\"Cancel this pending transfer and release the hold?\">Cancel</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

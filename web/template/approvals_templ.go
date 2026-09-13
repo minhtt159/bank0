@@ -40,7 +40,7 @@ func ApprovalsPanel(canApprove bool) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"panel\"><div class=\"panel-head\"><h1>Approvals</h1><span class=\"muted small\">Four-eyes: a different admin must approve high-value credits.</span></div><h2 class=\"section-title\">Four-eyes queue</h2><div id=\"approvals-results\" hx-get=\"/console/approvals/results\" hx-trigger=\"load, bank0:refresh from:body, every 15s\" hx-swap=\"innerHTML\" hx-disinherit=\"*\"></div><h2 class=\"section-title\">Screening queue (AML)</h2><span class=\"muted small\">Payments parked for sanctions/watchlist review. Any operator may release or refuse.</span><div id=\"screenings-results\" hx-get=\"/console/screenings/results\" hx-trigger=\"load, bank0:refresh from:body, every 15s\" hx-swap=\"innerHTML\" hx-disinherit=\"*\"></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"panel\"><div class=\"panel-head\"><h1>Approvals</h1><span class=\"muted small\">Four-eyes: a different admin must approve high-value credits.</span></div><h2 class=\"section-title\">Four-eyes queue</h2><div id=\"approvals-results\" hx-get=\"/console/approvals/results\" hx-trigger=\"load, bank0:refresh from:body, every 15s\" hx-swap=\"innerHTML\"></div><h2 class=\"section-title\">Screening queue (AML)</h2><span class=\"muted small\">Payments parked for sanctions/watchlist review. Any operator may release or refuse.</span><div id=\"screenings-results\" hx-get=\"/console/screenings/results\" hx-trigger=\"load, bank0:refresh from:body, every 15s\" hx-swap=\"innerHTML\"></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -177,7 +177,7 @@ func ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, prevURL 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Approve and POST this money movement? You must not be the maker.\">Approve</button> <button class=\"btn danger\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#approvals-results\" hx-disable=\"this\" hx-confirm=\"Approve and POST this money movement? You must not be the maker.\">Approve</button> <button class=\"btn danger\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -190,7 +190,7 @@ func ApprovalRows(rows []sqlc.ListPendingApprovalsRow, canApprove bool, prevURL 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Reject this request and release the hold?\">Reject</button></td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" hx-target=\"#approvals-results\" hx-disable=\"this\" hx-confirm=\"Reject this request and release the hold?\">Reject</button></td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -402,7 +402,7 @@ func ScreeningRows(rows []sqlc.ListPendingScreeningsRow, canApprove bool, prevUR
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Release and POST this payment? Screening checks are complete.\">Release &amp; post</button> <button class=\"btn danger\" hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#approvals-results\" hx-disable=\"this\" hx-confirm=\"Release and POST this payment? Screening checks are complete.\">Release &amp; post</button> <button class=\"btn danger\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -415,7 +415,7 @@ func ScreeningRows(rows []sqlc.ListPendingScreeningsRow, canApprove bool, prevUR
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" hx-target=\"#approvals-results\" hx-disabled-elt=\"this\" hx-confirm=\"Refuse and CANCEL this payment? The hold is released.\">Refuse &amp; cancel</button></td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" hx-target=\"#approvals-results\" hx-disable=\"this\" hx-confirm=\"Refuse and CANCEL this payment? The hold is released.\">Refuse &amp; cancel</button></td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

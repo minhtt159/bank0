@@ -5,11 +5,11 @@ package webstatic
 
 import "embed"
 
-// htmx.min.js is vendored (htmx 2.0.3, from unpkg.com/htmx.org@2.0.3/dist) and
+// htmx.min.js is vendored (htmx 4.0.0, from unpkg.com/htmx.org@4.0.0/dist) and
 // served same-origin instead of from a CDN: the operator console moves money, so
 // it must not pull a script over the network from a third party with no integrity
 // guarantee (or depend on CDN availability). Bump deliberately, like the generators.
-// sha384-0895/pl2MU10Hqc6jd4RvrthNlDiE9U1tWmX7WRESftEDRosgxNsQG/Ze9YMRzHq
+// sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc
 //
 //go:embed console.css console.js htmx.min.js
 var FS embed.FS

@@ -12,7 +12,7 @@
     document.querySelectorAll('.leftnav .navitem').forEach(function (n) { n.classList.remove('active'); });
     item.classList.add('active');
   });
-  document.body.addEventListener('htmx:afterSwap', function (e) {
+  document.body.addEventListener('htmx:after:swap', function (e) {
     if (e.detail && e.detail.target && e.detail.target.id === 'rail') window.openRail();
   });
   window.toast = function (msg, kind) {
@@ -27,19 +27,19 @@
   };
   if (window.htmx) {
     var bar = function () { return document.getElementById('progress'); };
-    htmx.on('htmx:beforeRequest', function (evt) {
+    htmx.on('htmx:before:request', function (evt) {
       var trg = evt.detail && evt.detail.elt && evt.detail.elt.getAttribute('hx-trigger');
       if (trg && trg.indexOf('every') !== -1) return; // skip auto-refresh polling
       bar().classList.add('on');
     });
-    htmx.on('htmx:afterRequest', function () { bar().classList.remove('on'); });
-    htmx.on('htmx:responseError', function (evt) {
+    htmx.on('htmx:after:request', function () { bar().classList.remove('on'); });
+    htmx.on('htmx:response:error', function (evt) {
       var x = evt.detail && evt.detail.xhr;
       var msg = 'Request failed' + (x && x.status ? ' (' + x.status + ')' : '');
       if (x && x.status === 403) msg = 'Not allowed — your role can’t do that.';
       if (x && x.status === 401) { location.href = '/login'; return; }
       window.toast(msg, 'bad');
     });
-    htmx.on('htmx:sendError', function () { window.toast('Network error — is the server up?', 'bad'); });
+    htmx.on('htmx:error', function () { window.toast('Network error — is the server up?', 'bad'); });
   }
 })();
