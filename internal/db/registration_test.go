@@ -249,7 +249,7 @@ func TestVerifyContactWrongCodeLockoutAndUnknownToken(t *testing.T) {
 	// 5 wrong codes -> 28P01 each (wrong code has its OWN SQLSTATE, distinct from
 	// the expired/consumed 28000 — the attempt counter keys on it); the 6th
 	// attempt (even with the right code) -> 23514.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := pg.VerifyContact(ctx, sha256hex(token), sha256hex("000000")); sqlstate(err) != "28P01" {
 			t.Fatalf("wrong code #%d SQLSTATE = %q, want 28P01", i+1, sqlstate(err))
 		}

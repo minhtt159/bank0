@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -143,12 +144,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 }
 
 func originAllowed(allowed []string, origin string) bool {
-	for _, a := range allowed {
-		if a == origin {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, origin)
 }
 
 // csrfGuard is a same-origin check for the cookie-authenticated portal surface

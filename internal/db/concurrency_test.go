@@ -45,7 +45,7 @@ func TestConcurrentSameIdempotencyKey(t *testing.T) {
 	ids := map[uuid.UUID]bool{}
 	var posted, replayed, inProgress, other int
 
-	for i := 0; i < n; i++ {
+	for range n {
 		wg.Go(func() {
 			res, err := testTransfer(ctx, pg, key, a, b, amount, "same-key race", sqlc.TransferKindTransfer)
 			mu.Lock()
@@ -105,7 +105,7 @@ func TestConcurrentTransfersSharedDebit(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make([]error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Go(func() {
 			_, errs[i] = testTransfer(ctx, pg, uuid.NewString(), src, dests[i], amount, "fan-out", sqlc.TransferKindTransfer)
 		})
@@ -149,7 +149,7 @@ func TestConcurrentDeadlockOrdering(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2*pairs)
-	for i := 0; i < pairs; i++ {
+	for i := range pairs {
 		wg.Add(2)
 		go func(i int) { // A -> B
 			defer wg.Done()

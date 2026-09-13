@@ -9,8 +9,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +19,8 @@ import (
 
 	"github.com/minhtt159/bank0/internal/config"
 	"github.com/minhtt159/bank0/internal/db"
-	"github.com/minhtt159/bank0/internal/iban"
 	sqlc "github.com/minhtt159/bank0/internal/db/sqlc"
+	"github.com/minhtt159/bank0/internal/iban"
 	"github.com/minhtt159/bank0/internal/migrate"
 )
 

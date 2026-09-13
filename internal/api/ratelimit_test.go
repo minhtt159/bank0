@@ -11,7 +11,7 @@ func TestRateLimiterAllow(t *testing.T) {
 	rl := newRateLimiter(3, time.Minute)
 	base := time.Unix(1_700_000_000, 0)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if !rl.allow("ip1", base.Add(time.Duration(i)*time.Second)) {
 			t.Fatalf("hit %d within limit should be allowed", i)
 		}
@@ -36,7 +36,7 @@ func TestRateLimitMiddleware429(t *testing.T) {
 	h := s.rateLimit(rl, key, ok)
 	var last *httptest.ResponseRecorder
 	codes := []int{}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		last = httptest.NewRecorder()
 		h.ServeHTTP(last, httptest.NewRequest(http.MethodPost, "/auth/login", nil))
 		codes = append(codes, last.Code)

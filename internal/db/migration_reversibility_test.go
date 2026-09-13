@@ -47,7 +47,7 @@ func TestMigrationsReversible(t *testing.T) {
 	// assert every Down leg succeeds — a broken `-- +goose Down` trips here.
 	pg := newRawPG(t, migDSN)
 	t.Cleanup(pg.Close) // LIFO: runs before the DROP above
-	for step := 0; step < 100; step++ {
+	for range 100 {
 		var v int64
 		if err := pg.Pool.QueryRow(ctx,
 			`SELECT COALESCE(max(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&v); err != nil {

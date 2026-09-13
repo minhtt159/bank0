@@ -22,7 +22,7 @@ func TestParseEuros(t *testing.T) {
 		// as grouping would post EUR 150.00 — a 100x wrong payment.
 		{"1,50", 150},
 		{"12,3", 1230},
-		{"1,250", 125000},     // 3 digits after the comma -> grouping, not decimals
+		{"1,250", 125000},           // 3 digits after the comma -> grouping, not decimals
 		{"1.234.567,89", 123456789}, // full euro-style formatting
 	}
 	for _, c := range ok {
@@ -48,10 +48,10 @@ func TestParseEuros(t *testing.T) {
 
 func TestFormatMinor(t *testing.T) {
 	cases := map[int64]string{
-		0:     "€0.00",
-		5:     "€0.05",
-		1050:  "€10.50",
-		-1050: "-€10.50",
+		0:      "€0.00",
+		5:      "€0.05",
+		1050:   "€10.50",
+		-1050:  "-€10.50",
 		100000: "€1000.00",
 	}
 	for in, want := range cases {

@@ -27,7 +27,7 @@ func TestLedgerKeysetCoversTies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var tid uuid.UUID
 		if err := tx.QueryRow(ctx, `SELECT transfer_id FROM transfer($1,$2,$3,$4,$5,'transfer')`,
 			uuid.NewString(), a, b, int64(100), fmt.Sprintf("tie #%d", i)).Scan(&tid); err != nil {
@@ -43,7 +43,7 @@ func TestLedgerKeysetCoversTies(t *testing.T) {
 	debits := 0
 	var curTS *time.Time
 	var curID *uuid.UUID
-	for page := 0; page < 100; page++ {
+	for page := range 100 {
 		rows, err := pg.Queries.GetAccountLedger(ctx, sqlc.GetAccountLedgerParams{
 			AccountID: a, Cursor: curTS, CursorID: curID, PageLimit: 7,
 		})

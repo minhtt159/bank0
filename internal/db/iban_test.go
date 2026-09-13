@@ -48,7 +48,6 @@ func TestIbanIsValid(t *testing.T) {
 		{"ZZ unregistered country", "ZZ6600000000000000000", false},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			var got bool
 			if err := pg.Pool.QueryRow(ctx, `SELECT iban_is_valid($1)`, c.in).Scan(&got); err != nil {
@@ -94,7 +93,6 @@ func TestIbanGenerateRoundTrip(t *testing.T) {
 		{"NO", 15},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.cc, func(t *testing.T) {
 			bbanLen := c.total - 4
 			var gen string

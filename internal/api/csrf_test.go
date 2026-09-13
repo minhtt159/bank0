@@ -27,9 +27,9 @@ func TestCSRFGuard(t *testing.T) {
 	}
 
 	cases := []struct {
-		name             string
+		name                string
 		method, origin, ref string
-		want             int
+		want                int
 	}{
 		{"safe GET cross-origin", http.MethodGet, "https://evil.example", "", 200},
 		{"POST no origin (non-browser)", http.MethodPost, "", "", 200},

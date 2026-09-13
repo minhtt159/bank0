@@ -24,7 +24,7 @@ func jsonStr(raw []byte, key string) string {
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
 
 // txt renders an `any` column as a string. sqlc emits interface{} for some
-// COALESCE(...::text, '') projections (e.g. disputes queue `raised_by`).
+// COALESCE(...::text, ”) projections (e.g. disputes queue `raised_by`).
 func txt(v any) string {
 	if s, ok := v.(string); ok {
 		return s

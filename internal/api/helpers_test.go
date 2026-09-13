@@ -36,8 +36,8 @@ func TestHTMXSelfHosted(t *testing.T) {
 
 func TestRoleGates(t *testing.T) {
 	cases := []struct {
-		role                          string
-		money, users, approve         bool
+		role                  string
+		money, users, approve bool
 	}{
 		{"operator", true, false, false},
 		{"admin", true, true, true},
@@ -261,7 +261,7 @@ func TestHashTokenDeterministicOpaque(t *testing.T) {
 
 func TestNewSessionTokenUnique(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		tok := newSessionToken()
 		if tok == "" || seen[tok] {
 			t.Fatalf("session tokens must be non-empty and unique; dup at %d", i)
