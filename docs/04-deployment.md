@@ -452,6 +452,13 @@ the same `X.Y.Z` in the release commit: the chart job refuses to publish a chart
 whose versions disagree with the tag. The only credential is the ambient
 `GITHUB_TOKEN`.
 
+The version lives in two more hand-maintained places - the `app.version` default
+in `internal/config/config.go` and `app.version` in `config.yaml`, which together
+feed `/health` and the console dashboard card. `TestVersionNoDrift`
+(`internal/config`) anchors both to `Chart.yaml`'s `appVersion`, so a bump that
+touches only the chart is a red test on the bump PR rather than a `v1.1.0` binary
+reporting `1.0.2`. Chained to the chart job's assertion, the tag pins all three.
+
 A third job then cuts the **GitHub Release**, gated on both artifacts existing -
 announcing an image and a chart before they are pushed is the same half-release
 failure the chart job's `needs: image` prevents. Its notes are assembled from:
