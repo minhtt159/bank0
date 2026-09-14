@@ -69,7 +69,7 @@ Self-hosted Kubernetes is the primary path. One image and one chart, both
 published to GHCR, so nothing is built locally:
 
 ```bash
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.1.0 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```

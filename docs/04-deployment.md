@@ -152,7 +152,7 @@ stack), then visit `http://localhost:8080/` (console) and
 ```bash
 # database secret has key "dsn"; auth secret has key "jwt-secret"
 # (api pods fail closed without a JWT secret - see §1)
-helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
+helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.1.0 \
   --set database.existingSecret=bank0-db \
   --set auth.existingSecret=bank0-auth
 ```
@@ -451,6 +451,13 @@ Tagging a release means bumping `Chart.yaml`'s `version` **and** `appVersion` to
 the same `X.Y.Z` in the release commit: the chart job refuses to publish a chart
 whose versions disagree with the tag. The only credential is the ambient
 `GITHUB_TOKEN`.
+
+The version lives in two more hand-maintained places - the `app.version` default
+in `internal/config/config.go` and `app.version` in `config.yaml`, which together
+feed `/health` and the console dashboard card. `TestVersionNoDrift`
+(`internal/config`) anchors both to `Chart.yaml`'s `appVersion`, so a bump that
+touches only the chart is a red test on the bump PR rather than a `v1.1.0` binary
+reporting `1.0.2`. Chained to the chart job's assertion, the tag pins all three.
 
 A third job then cuts the **GitHub Release**, gated on both artifacts existing -
 announcing an image and a chart before they are pushed is the same half-release
