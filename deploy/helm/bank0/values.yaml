@@ -105,7 +105,7 @@ gateway:
 # Client-facing API — scaled for HA.
 api:
   exposed: true
-  host: api.bank0.hnimn.art
+  host: bank0-api.hnimn.art
   # Attach this route to a DIFFERENT Gateway than `gateway` above. Empty = the
   # chart's own. This is how the api goes public while the portal stays on the LAN
   # (docs/04-deployment.md §3, "Exposing the client API to the internet"):

@@ -4,7 +4,7 @@ info:
   version: 1.1.0
   description: |
     Core-banking backend. Two surfaces, separated by domain:
-      * **client** (api.bank0.hnimn.art) — customer-facing money operations
+      * **client** (bank0-api.hnimn.art) — customer-facing money operations
       * **admin**  (portal.bank0.hnimn.art) — operator/back-office operations
 
     This file is the source of truth. `oapi-codegen` generates the Go
@@ -19,13 +19,13 @@ info:
     `password_change_required`. Changing the password clears the flag; the client
     then logs in again for a normal pair.
 servers:
-  - url: https://api.bank0.hnimn.art
+  - url: https://bank0-api.hnimn.art
     description: client
   - url: https://portal.bank0.hnimn.art
     description: admin
 tags:
   - name: client
-    description: Customer-facing operations (api.bank0.hnimn.art)
+    description: Customer-facing operations (bank0-api.hnimn.art)
   - name: admin
     description: Operator / back-office operations (portal.bank0.hnimn.art)
 
@@ -1233,7 +1233,7 @@ paths:
 
 components:
   securitySchemes:
-    # client surface (api.bank0.hnimn.art): JWT bearer from POST /auth/login
+    # client surface (bank0-api.hnimn.art): JWT bearer from POST /auth/login
     bearerAuth:
       type: http
       scheme: bearer
