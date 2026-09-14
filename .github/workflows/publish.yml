@@ -1,19 +1,27 @@
 name: Publish
 
-# Artifacts only — this workflow deploys nothing. The cluster sits behind a
-# tunnel and CI has no path to it; the operator runs `helm upgrade` themselves.
-# (The customer PWA is the exception and ships from deploy-pwa.yml: it lives on
-# Cloudflare, which CI *can* reach.)
+# The release lane. Release artifacts, plus the ONE deploy this repo does: the
+# cluster sits behind a tunnel and CI has no path to it, so the operator promotes
+# the chart themselves (docs/04 §3), but the customer PWA lives on Cloudflare,
+# which CI *can* reach.
 #
-#   push to main  -> image ghcr.io/minhtt159/bank0:sha-<shortsha>
-#   push tag v*   -> image :X.Y.Z + :X.Y  and  chart oci://ghcr.io/minhtt159/charts/bank0
+#   push tag v*  -> image ghcr.io/minhtt159/bank0:X.Y.Z + :X.Y
+#                   chart oci://ghcr.io/minhtt159/charts/bank0
+#                   GitHub release
+#                   the customer PWA to bank0.hnimn.art  (final tags only)
+#
+# Nothing runs on a merge: that says the project is stable, tagging says this is
+# the version to run. ci.yml is the run on the default branch, and publishes
+# nothing.
 #
 # Never `latest`: the target cluster's admission control rejects an unpinned tag,
 # and it defeats "what exactly is running?".
 on:
   push:
-    branches: [main]
     tags: ["v*"]
+  # Re-run a tag: `gh workflow run publish.yml --ref vX.Y.Z`. Every job is
+  # idempotent on a re-run — same image and chart tags overwritten, the release
+  # job no-ops when the release exists — so this doubles as the redeploy button.
   workflow_dispatch:
 
 env:
@@ -21,9 +29,10 @@ env:
   CHART_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
-  # The gate. ci.yml is workflow_call-able for exactly this: a tag push does not
-  # trigger CI on its own (it only runs on branches + PRs), so without this a
-  # release could ship code no job ever ran.
+  # The gate, and on a tag the ONLY gate. ci.yml is workflow_call-able for exactly
+  # this: a tag push does not trigger CI on its own (it only runs on branches +
+  # PRs), so without this a release could ship — and now deploy — code no job ever
+  # ran. Every job below is transitively `needs: ci`.
   ci:
     uses: ./.github/workflows/ci.yml
 
@@ -54,7 +63,6 @@ jobs:
           # .Chart.AppVersion ("1.0.0"), so a v-prefixed-only tag set would make
           # the documented `helm install` land in ImagePullBackOff.
           tags: |
-            type=sha,prefix=sha-,format=short,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -175,3 +183,101 @@ jobs:
           esac
 
           gh release create "$tag" "${flags[@]}"
+
+  # The one deploy (see the header). It sits behind image + chart for the same
+  # half-release reason the chart sits behind image: the Worker for vX must not go
+  # live if vX's backend artifacts do not exist.
+  #
+  # It does NOT wait for the cluster, and cannot — production is promoted by Kargo
+  # writing chartVersion and a human applying it (docs/04 §3), hours or days after
+  # the tag, with no signal CI can see. So the PWA for vX serves against api vX-1
+  # for that window. Acceptable while the Worker is a static host plus an /api
+  # proxy with no business logic (docs/07 §4) and the PWA tolerates the previous
+  # release's API; both stop being true the day it becomes a token-holding BFF
+  # (docs/07 §6), which is also when it earns a staging Worker.
+  deploy-pwa:
+    needs: [image, chart]
+    # Final tags only. A pre-release publishes artifacts but must not touch the
+    # production edge — the same hyphen rule the release job uses for --prerelease.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Attach the Cloudflare secrets to an environment so the deploy can be given
+    # required reviewers later without touching this file.
+    environment:
+      name: production
+      url: https://bank0.hnimn.art
+    # One deploy at a time, and never cancel one in flight: a half-uploaded Worker
+    # version is not something to race a second upload against.
+    concurrency:
+      group: deploy-pwa
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            web/app/package-lock.json
+            worker/package-lock.json
+
+      - name: Build the SPA
+        # tsc --noEmit + vite build + the service worker. wrangler uploads
+        # web/app/dist via the assets binding, so this must run first.
+        run: npm ci && npm run build
+        working-directory: web/app
+
+      - name: Install wrangler
+        run: npm ci
+        working-directory: worker
+
+      - name: Deploy the Worker
+        run: npm run deploy
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Smoke — the edge serves THIS build
+        # Deliberately stops at the edge: /api/* answers from the cluster, which
+        # can be down, mid-rollout, or missing its Access token for reasons that
+        # have nothing to do with this upload.
+        run: |
+          set -euo pipefail
+
+          # Vite hashes the bundle names per build, so finding them in the served
+          # page proves THIS upload is live rather than merely that some earlier
+          # version still answers.
+          mapfile -t bundles < <(grep -oE '/assets/[A-Za-z0-9_.-]+\.(js|css)' web/app/dist/index.html | sort -u)
+          [ "${#bundles[@]}" -gt 0 ] || {
+            echo "::error::built index.html references no hashed bundles — did the build change shape?"; exit 1; }
+
+          # Bounded retry. Assets are normally live before wrangler returns, but
+          # the first deploy after the switch to `custom_domain` had to wait for
+          # Cloudflare to create the DNS record and failed on `curl: (6) Could not
+          # resolve host` — a green deploy reported red.
+          url=https://bank0.hnimn.art/
+          for attempt in $(seq 1 12); do
+            if code=$(curl -sS --max-time 15 -o /tmp/body -w '%{http_code}' "$url"); then
+              if [ "$code" = 200 ] && grep -q '<div id="app">' /tmp/body; then
+                stale=0
+                for b in "${bundles[@]}"; do
+                  grep -qF "$b" /tmp/body || { echo "attempt $attempt: served page has no $b yet"; stale=1; }
+                done
+                if [ "$stale" = 0 ]; then
+                  echo "GET / -> 200, serving this build (attempt $attempt)"
+                  exit 0
+                fi
+              else
+                echo "attempt $attempt: HTTP $code"
+              fi
+            else
+              echo "attempt $attempt: curl could not reach the edge yet"
+            fi
+            sleep 10
+          done
+          echo "::error::$url did not serve this build within 2 minutes — the upload itself succeeded (see the wrangler step); check Cloudflare before re-running"
+          exit 1

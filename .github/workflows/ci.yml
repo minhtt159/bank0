@@ -217,9 +217,6 @@ jobs:
           path: web/app/playwright-report
           retention-days: 7
 
-  # Every migration must be reversible (CLAUDE.md): up -> reset(down all) -> up on
-  # a throwaway PG18.
-
   # The chart is the delivery artifact and its templates change often (admission
   # compliance, env wiring). Without this it was first exercised by the operator's
   # own `helm upgrade` — `helm package` at tag time never renders templates.

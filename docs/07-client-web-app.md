@@ -172,13 +172,24 @@ Tasks: `task webapp:dev`, `task webapp:build` (`tsc --noEmit` then Vite),
 `task webapp:deploy`, `task e2e` (arguments after `--`, for example
 `task e2e -- --ui`).
 
-**Deploys come from CI, not from a laptop.** `.github/workflows/deploy-pwa.yml`
-builds the SPA and runs `wrangler deploy` on every push to `main` that touches
-`web/app/**` or `worker/**`, gated on the full CI suite. Production only - there
-is no staging Worker, because this one is a static host and a proxy with no
-business logic, so a front end a commit ahead of the cluster changes nothing
-about the ledger. That reasoning expires the day it becomes a token-holding BFF
-(§6). `task webapp:deploy` still works for a manual push.
+**Deploys come from CI, not from a laptop, and only on a release tag.** The
+`deploy-pwa` job in `.github/workflows/publish.yml` builds the SPA and runs
+`wrangler deploy` on every final `v*` tag, after the image and the chart have
+published and behind the full CI suite - which on a tag is the *only* gate,
+because `ci.yml` never triggers on tags. Pre-release tags publish artifacts but
+leave the edge alone.
+
+Production only; there is no staging Worker, because this one is a static host
+and a proxy with no business logic, so a front end ahead of the cluster changes
+nothing about the ledger. It *is* ahead, routinely: production is promoted by
+Kargo plus a human, hours or days after the tag ([`04`](04-deployment.md) §3), so
+the PWA for a release serves against the previous release's API for that window.
+Keep API changes additive and put new UI behind a capability check. Both that
+rule and the no-staging-Worker call expire the day this becomes a token-holding
+BFF (§6).
+
+`task webapp:deploy` still works for a manual push between releases, and
+`gh workflow run publish.yml --ref vX.Y.Z` re-runs a whole release.
 
 ---
 
