@@ -1,4 +1,4 @@
-# bank0 - Client API (`api.bank0.hnimn.art`)
+# bank0 - Client API (`bank0-api.hnimn.art`)
 
 **TL;DR.** Log in for a 15-minute access token and a rotating refresh token.
 Send the access token as `Authorization: Bearer`. Everything you can reach is
@@ -11,7 +11,8 @@ on the message.
 
 > The customer-facing JSON API: the same Go binary as the portal, run in
 > `server.mode=api`. JWT bearer auth, ownership-scoped to the token subject, and
-> fronted by the cluster's Envoy Gateway - LAN-only today, see
+> fronted by the cluster's Envoy Gateway, reachable from the internet through a
+> Cloudflare tunnel and gated to the Workers by Cloudflare Access - see
 > [`04-deployment.md`](04-deployment.md).
 > The browser never calls this host directly - the PWA's Worker proxies `/api/*`
 > here ([`07-client-web-app.md`](07-client-web-app.md)). MFA and step-up auth are

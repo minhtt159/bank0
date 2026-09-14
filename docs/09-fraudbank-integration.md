@@ -1,9 +1,15 @@
 # bank0 - integrating an external client
 
-**TL;DR.** External clients - the fraudbank web, Android and iOS apps - call
-`api.bank0.hnimn.art` exactly as bank0's own PWA does. There is no client-specific
-backend. Read [`06-client-api.md`](06-client-api.md) for the full contract; this
-page covers what client teams get wrong.
+**TL;DR.** External clients - the fraudbank web, Android and iOS apps - speak the
+same contract as bank0's own PWA, and all of them reach it through
+`fraudbank.hnimn.art/api/*`. There is no client-specific backend. Read
+[`06-client-api.md`](06-client-api.md) for the full contract; this page covers what
+client teams get wrong.
+
+`bank0-api.hnimn.art` is **not** a client-facing hostname. Cloudflare Access gates
+it in Service Auth mode and only the two Workers hold the service token, so a call
+straight to it is refused at the edge. There is no unauthenticated fallback path on
+purpose: one would make the gate theatre.
 
 Written for a developer building against the API who has never seen this
 repository. You need to know HTTP and JSON; banking terms are explained where
@@ -11,16 +17,15 @@ they appear.
 
 ```mermaid
 flowchart LR
-    W[fraudbank web] -->|same-origin /api/*| CFW[Cloudflare Worker]
-    CFW --> API[api.bank0.hnimn.art]
-    A[Android app] -->|bearer, direct| API
-    I[iOS app] -->|bearer, direct| API
+    W[fraudbank web] -->|same-origin /api/*| CFW["fraudbank.hnimn.art<br/>Cloudflare Worker"]
+    A[Android app] -->|"bearer, /api/*"| CFW
+    I[iOS app] -->|"bearer, /api/*"| CFW
+    CFW -->|"+ Access service token"| API[bank0-api.hnimn.art]
     API --> DB[(Postgres ledger)]
 ```
 
-Diagram: the web client reaches the API through a same-origin Worker proxy; the
-native apps call the API directly with a bearer token. All paths end at the same
-ledger.
+Diagram: every client - web and native - goes through the fraudbank Worker, which
+is the only holder of the Access service token. All paths end at the same ledger.
 
 ---
 
@@ -54,9 +59,11 @@ Two rules that bite:
 `POST /auth/logout` revokes one session; `POST /auth/logout-all` revokes every
 one.
 
-**Where the tokens live.** Native apps hold them in Keystore or Keychain and call
-the API directly - a proxy would add a hop and nothing else. Web holds them in
-the browser, because `worker/index.ts` is a pass-through proxy. Moving them
+**Where the tokens live.** Native apps hold them in Keystore or Keychain and send
+them to `fraudbank.hnimn.art/api/*` like every other client - the Worker hop is not
+optional, because the Access service token lives there and has no place in a
+shipped app. Web holds them in the browser, because `worker/index.ts` is a
+pass-through proxy. Moving them
 into httpOnly cookies at that same-origin seam is described in
 [`07-client-web-app.md`](07-client-web-app.md) §6. It is not built.
 

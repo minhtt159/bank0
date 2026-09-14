@@ -18,7 +18,7 @@ flowchart LR
     B([Browser]) -->|"GET /"| W[Cloudflare Worker]
     B -->|"/api/transfers"| W
     W -->|ASSETS binding| S[web/app/dist]
-    W -->|"drop /api, forward"| API[api.bank0.hnimn.art]
+    W -->|"drop /api, forward"| API[bank0-api.hnimn.art]
     API --> DB[(Postgres)]
 ```
 
@@ -37,7 +37,7 @@ One trap: `routes` is a top-level key and must appear *before* any `[table]`
 section, or TOML folds it into `[vars]` and the Worker silently serves nothing.
 
 **Why a path slug, not a second origin.** The SPA calls `bank0.hnimn.art/api/*`,
-never `api.bank0.hnimn.art`, and that is a contract rather than an implementation
+never `bank0-api.hnimn.art`, and that is a contract rather than an implementation
 detail. Same-origin costs no CORS middleware in the Go API and no preflight on
 every money POST (each carries `Idempotency-Key`, which forces one); it keeps the
 CSP at `connect-src 'self'`; it keeps the refresh-token-in-an-httpOnly-cookie
@@ -215,7 +215,7 @@ returns a masked owner name and is rate limited, so it cannot be walked to
 enumerate account holders. The confirm step always shows the resolved payee and
 IBAN before anything is sent.
 
-**Access service token.** Exactly one client ever calls `api.bank0.hnimn.art` -
+**Access service token.** Exactly one client ever calls `bank0-api.hnimn.art` -
 this Worker's `/api/*` proxy - so the hostname can be gated to it with a
 Cloudflare Access policy in Service Auth mode. The Worker sets
 `CF-Access-Client-Id` / `CF-Access-Client-Secret` from secrets of the same name on

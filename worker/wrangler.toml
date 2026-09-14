@@ -18,7 +18,7 @@ not_found_handling = "single-page-application"
 # Upstream client API. The Worker proxies /api/* here so the browser stays
 # same-origin (no CORS) — and this is the seam for a future token-holding BFF.
 [vars]
-API_ORIGIN = "https://api.bank0.hnimn.art"
+API_ORIGIN = "https://bank0-api.hnimn.art"
 
 # Cloudflare Access service token for the API hostname (docs/04 §3 step 7) is NOT
 # configured here — it is a secret, set out of band and both halves together:

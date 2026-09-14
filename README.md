@@ -54,7 +54,7 @@ Working on the code rather than running it:
 | Host | Surface | Auth |
 |---|---|---|
 | `portal.bank0.hnimn.art` | admin API + operator console | cookie session, staff roles |
-| `api.bank0.hnimn.art` | customer JSON API | JWT bearer + rotating refresh tokens |
+| `bank0-api.hnimn.art` | customer JSON API | JWT bearer + rotating refresh tokens |
 | `bank0.hnimn.art` | customer PWA | the Worker proxies `/api/*` to the client API |
 
 The first two are the same Go binary in different `server.mode`s - separated in

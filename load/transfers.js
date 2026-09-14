@@ -2,7 +2,7 @@
 // idempotency-burst contention probe from docs (the load plan). It is the deployed
 // shape under load: point it at a running `mode=api` binary, NOT mode=all.
 //
-//   k6 run -e BASE_URL=https://api.bank0.hnimn.art -e USER=alice -e PASS=password load/transfers.js
+//   k6 run -e BASE_URL=https://bank0-api.hnimn.art -e USER=alice -e PASS=password load/transfers.js
 //
 // Paths are BARE (/auth/login, /transfers) — that is what mode=api serves. The
 // /api prefix the PWA uses is a Worker/Vite proxy artifact and is stripped before
