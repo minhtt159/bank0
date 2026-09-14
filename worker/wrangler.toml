@@ -2,9 +2,11 @@ name = "bank0-webapp"
 main = "index.ts"
 compatibility_date = "2026-01-01"
 
-# Bind the public hostname. Adjust zone_name to your Cloudflare zone.
+# Custom domain, not a route: this Worker IS the origin, so Cloudflare owns the
+# DNS record and the cert. A plain route needs a pre-existing proxied record or
+# every request is ERR_NAME_NOT_RESOLVED.
 # (Top-level key — must precede any [table] header.)
-routes = [{ pattern = "bank0.hnimn.art/*", zone_name = "hnimn.art" }]
+routes = [{ pattern = "bank0.hnimn.art", custom_domain = true }]
 
 # Serve the built SPA. not_found_handling = single-page-application returns
 # index.html for unknown client routes so deep links work.
