@@ -68,9 +68,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # The Worker answers /api/* from the cluster, which is not reachable from
-      # Cloudflare yet — so only the shell is asserted here. Checking /api would
-      # fail for a reason that has nothing to do with this deploy.
+      # Only the shell is asserted. /api/* does reach the cluster now, but it is
+      # a different failure domain: a probe through it fails when Postgres is
+      # down, when the Access policy or the Worker's service token is missing, or
+      # when the cluster is mid-rollout — none of which say anything about the
+      # upload that just happened. Keep this check to what this job can break.
       - name: Smoke — the shell is served
         run: |
           code=$(curl -fsS -o /tmp/body -w '%{http_code}' https://bank0.hnimn.art/)
