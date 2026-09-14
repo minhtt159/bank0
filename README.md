@@ -76,10 +76,11 @@ helm install bank0 oci://ghcr.io/minhtt159/charts/bank0 --version 1.0.2 \
 
 That creates `bank0-api` (mode=api, with an HPA) and `bank0-portal` behind
 Gateway API, with migrations as a pre-upgrade job. The image is multi-arch
-(`linux/amd64` + `linux/arm64`) at `ghcr.io/minhtt159/bank0`, tagged
-`sha-<commit>` on every `main` push and `X.Y.Z` + `X.Y` on version tags - never
-`latest`. CI publishes but never deploys: `helm upgrade` stays an operator
-command. Details in [`docs/04-deployment.md`](docs/04-deployment.md).
+(`linux/amd64` + `linux/arm64`) at `ghcr.io/minhtt159/bank0`, tagged `X.Y.Z` +
+`X.Y` on version tags - never `latest`, and nothing is published on a plain
+`main` push. CI deploys only the customer PWA, which lives on Cloudflare;
+`helm upgrade` stays an operator command. Details in
+[`docs/04-deployment.md`](docs/04-deployment.md).
 
 ## Built with
 

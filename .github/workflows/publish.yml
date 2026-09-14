@@ -1,19 +1,24 @@
 name: Publish
 
-# Artifacts only — this workflow deploys nothing. The cluster sits behind a
-# tunnel and CI has no path to it; the operator runs `helm upgrade` themselves.
-# (The customer PWA is the exception and ships from deploy-pwa.yml: it lives on
-# Cloudflare, which CI *can* reach.)
+# The release lane, and the ONE deploy this repo does.
 #
-#   push to main  -> image ghcr.io/minhtt159/bank0:sha-<shortsha>
-#   push tag v*   -> image :X.Y.Z + :X.Y  and  chart oci://ghcr.io/minhtt159/charts/bank0
+#   push tag v*  -> image ghcr.io/minhtt159/bank0:X.Y.Z + :X.Y
+#                   chart oci://ghcr.io/minhtt159/charts/bank0
+#                   GitHub release
+#                   the customer PWA to bank0.hnimn.art  (final tags only)
 #
-# Never `latest`: the target cluster's admission control rejects an unpinned tag,
-# and it defeats "what exactly is running?".
+# A merge publishes nothing — it says the project is stable; the tag says this is
+# the version to run. The cluster is behind a tunnel with no path from CI, so the
+# operator promotes the chart (docs/04 §3); the PWA is the exception because it
+# lives on Cloudflare.
+#
+# Never `latest`: cluster admission rejects an unpinned tag, and it defeats "what
+# exactly is running?".
 on:
   push:
-    branches: [main]
     tags: ["v*"]
+  # Re-run a tag: `gh workflow run publish.yml --ref vX.Y.Z`. Every job is
+  # idempotent, so this doubles as the redeploy button.
   workflow_dispatch:
 
 env:
@@ -21,9 +26,9 @@ env:
   CHART_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
 
 jobs:
-  # The gate. ci.yml is workflow_call-able for exactly this: a tag push does not
-  # trigger CI on its own (it only runs on branches + PRs), so without this a
-  # release could ship code no job ever ran.
+  # The gate, and on a tag the ONLY one: a tag triggers no CI of its own, so
+  # without this call a release could ship and deploy unrun code. Every job below
+  # is transitively `needs: ci`.
   ci:
     uses: ./.github/workflows/ci.yml
 
@@ -50,17 +55,16 @@ jobs:
           images: ${{ env.IMAGE }}
           # flavor latest=false — see the header.
           flavor: latest=false
-          # {{version}} is unprefixed on purpose: the chart defaults image.tag to
-          # .Chart.AppVersion ("1.0.0"), so a v-prefixed-only tag set would make
-          # the documented `helm install` land in ImagePullBackOff.
+          # {{version}} unprefixed on purpose: the chart defaults image.tag to
+          # .Chart.AppVersion ("1.0.0"), so v-prefixed-only tags would land the
+          # documented `helm install` in ImagePullBackOff.
           tags: |
-            type=sha,prefix=sha-,format=short,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      # Two arches because the operator develops on arm64 and the cluster's node
-      # arch is unconfirmed. The Dockerfile cross-compiles from $BUILDPLATFORM,
-      # so this is a second `go build`, not a QEMU-emulated toolchain.
+      # Two arches: the operator develops on arm64, the cluster's node arch is
+      # unconfirmed. The Dockerfile cross-compiles from $BUILDPLATFORM, so this is
+      # a second `go build`, not QEMU.
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -72,11 +76,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # GHCR speaks OCI, so publishing the chart needs no chart-releaser/gh-pages
-  # machinery. Tags only: a chart version is a release, not a main push.
+  # GHCR speaks OCI: no chart-releaser/gh-pages machinery needed.
   chart:
-    # needs: image — a chart pinning an appVersion whose image failed to build is
-    # half a release, and the half that is broken installs first.
+    # A chart pinning an appVersion whose image failed to build is half a release,
+    # and the broken half installs first.
     needs: image
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -88,8 +91,8 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      # The tag is the release; Chart.yaml must already say the same thing, or
-      # the published chart would pin an appVersion nobody tagged.
+      # Chart.yaml must already match the tag, or the chart pins an appVersion
+      # nobody tagged.
       - name: Chart version matches the tag
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -110,13 +113,11 @@ jobs:
           helm package deploy/helm/bank0 --destination /tmp/chart
           helm push /tmp/chart/bank0-*.tgz "$CHART_REGISTRY"
 
-  # The human-facing record. Last, and needs BOTH artifacts: a release that
-  # announces an image and a chart before they exist is the same half-release
-  # failure the chart job's `needs: image` prevents.
+  # The human-facing record. Last, and needs BOTH artifacts — announcing an image
+  # and a chart before they exist is the same half-release failure.
   #
-  # Notes come from docs/releases/<tag>.md when that file exists (write the "why"
-  # by hand, in the PR that bumps the version); the artifact block and the PR list
-  # are appended automatically, so a release is never left without its refs.
+  # Notes come from docs/releases/<tag>.md when it exists (write the "why" by hand
+  # in the version-bump PR); the artifact block and PR list are appended.
   release:
     needs: [image, chart]
     if: startsWith(github.ref, 'refs/tags/v')
@@ -136,8 +137,8 @@ jobs:
           tag="$GITHUB_REF_NAME"
           version="${tag#v}"
 
-          # Reruns must not fail the workflow: the release either exists already or
-          # this is the first attempt.
+          # Reruns must not fail: the release either exists or this is the first
+          # attempt.
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release $tag already exists — nothing to do"
             exit 0
@@ -175,3 +176,98 @@ jobs:
           esac
 
           gh release create "$tag" "${flags[@]}"
+
+  # The one deploy. Behind image + chart for the same half-release reason the
+  # chart is behind image: the Worker for vX must not go live if vX's artifacts
+  # do not exist.
+  #
+  # It does NOT wait for the cluster, and cannot: production is promoted by Kargo
+  # plus a human hours or days later (docs/04 §3), invisible to CI. So the PWA for
+  # vX serves against api vX-1 for that window. Fine while the Worker is a static
+  # host plus an /api proxy with no business logic and the PWA tolerates the
+  # previous release's API — both expire when it becomes a token-holding BFF
+  # (docs/07 §6), which is also when it earns a staging Worker.
+  deploy-pwa:
+    needs: [image, chart]
+    # Final tags only: a pre-release publishes artifacts but must not touch the
+    # production edge. Same hyphen rule the release job uses for --prerelease.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # An environment so the deploy can get required reviewers later without
+    # touching this file.
+    environment:
+      name: production
+      url: https://bank0.hnimn.art
+    # One at a time, never cancelled in flight: do not race a second upload
+    # against a half-uploaded Worker version.
+    concurrency:
+      group: deploy-pwa
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            web/app/package-lock.json
+            worker/package-lock.json
+
+      - name: Build the SPA
+        # tsc --noEmit + vite build + the service worker. wrangler uploads
+        # web/app/dist via the assets binding, so this runs first.
+        run: npm ci && npm run build
+        working-directory: web/app
+
+      - name: Install wrangler
+        run: npm ci
+        working-directory: worker
+
+      - name: Deploy the Worker
+        run: npm run deploy
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Smoke — the edge serves THIS build
+        # Stops at the edge on purpose: /api/* answers from the cluster, which can
+        # be down, mid-rollout or missing its Access token for reasons unrelated
+        # to this upload.
+        run: |
+          set -euo pipefail
+
+          # Vite hashes bundle names per build, so finding them in the served page
+          # proves THIS upload is live, not merely that something answers.
+          mapfile -t bundles < <(grep -oE '/assets/[A-Za-z0-9_.-]+\.(js|css)' web/app/dist/index.html | sort -u)
+          [ "${#bundles[@]}" -gt 0 ] || {
+            echo "::error::built index.html references no hashed bundles — did the build change shape?"; exit 1; }
+
+          # Bounded retry: the first deploy after the switch to `custom_domain` had
+          # to wait for Cloudflare to create the DNS record and died on
+          # `curl: (6) Could not resolve host` — a green deploy reported red.
+          url=https://bank0.hnimn.art/
+          for attempt in $(seq 1 12); do
+            if code=$(curl -sS --max-time 15 -o /tmp/body -w '%{http_code}' "$url"); then
+              if [ "$code" = 200 ] && grep -q '<div id="app">' /tmp/body; then
+                stale=0
+                for b in "${bundles[@]}"; do
+                  grep -qF "$b" /tmp/body || { echo "attempt $attempt: served page has no $b yet"; stale=1; }
+                done
+                if [ "$stale" = 0 ]; then
+                  echo "GET / -> 200, serving this build (attempt $attempt)"
+                  exit 0
+                fi
+              else
+                echo "attempt $attempt: HTTP $code"
+              fi
+            else
+              echo "attempt $attempt: curl could not reach the edge yet"
+            fi
+            sleep 10
+          done
+          echo "::error::$url did not serve this build within 2 minutes — the upload itself succeeded (see the wrangler step); check Cloudflare before re-running"
+          exit 1

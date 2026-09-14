@@ -5,12 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  # publish.yml calls this before it ships anything, so a tag can never publish
-  # code that hasn't been through the same gates a PR goes through.
+  # publish.yml calls this: a tag triggers no CI of its own, so this IS the
+  # release gate.
   workflow_call:
 
-# Pinned generator versions — keep in lockstep with CLAUDE.md. If these drift,
-# the generate-drift gate below will fail with a churned generated file.
+# Pinned generators — keep in lockstep with CLAUDE.md. Drift fails generate-drift.
 env:
   SQLC_VERSION: v1.31.1
   OAPI_CODEGEN_VERSION: v2.7.1
@@ -21,10 +20,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    # Real Postgres for the DB + HTTP integration tests. The tests apply the
-    # embedded migrations themselves; they skip unless TEST_DATABASE_DSN is set.
-    # Postgres 18 — the only supported version: the schema's `DEFAULT uuidv7()`
-    # uses the PG18 built-in.
+    # PG18 only: the schema's `DEFAULT uuidv7()` is the PG18 built-in. The tests
+    # apply the embedded migrations and skip without TEST_DATABASE_DSN.
     services:
       postgres:
         image: postgres:18
@@ -60,10 +57,8 @@ jobs:
       - name: Test (unit + DB/HTTP integration, race detector)
         run: go test -race ./...
 
-  # Contract-first gate: regenerating from the sources must produce no diff, i.e.
-  # the committed sqlc / oapi-codegen / templ output is in sync with the spec,
-  # queries, migrations, and templates. Drift here is a build error by policy
-  # (CLAUDE.md rule 3).
+  # Contract-first gate (CLAUDE.md rule 3): regenerating sqlc / oapi-codegen /
+  # templ must produce no diff.
   generate-drift:
     runs-on: ubuntu-latest
     steps:
@@ -94,8 +89,8 @@ jobs:
             exit 1
           fi
 
-  # Worker /api proxy-contract test (Tier B, the cheaper intermediate). DB-free — runs the real worker in workerd via
-  # @cloudflare/vitest-pool-workers, so it runs per-PR.
+  # Worker /api proxy-contract test. DB-free: the real worker in workerd via
+  # @cloudflare/vitest-pool-workers, so it gates every PR.
   worker:
     runs-on: ubuntu-latest
     steps:
@@ -112,19 +107,17 @@ jobs:
       - name: Proxy-contract test
         run: npm test
         working-directory: worker
-      # Typecheck + wrangler dry-run: a broken wrangler config or a type error would
-      # otherwise surface at deploy time. The dry-run resolves assets.directory, so
-      # it needs the PWA output to exist — an empty dir is enough here; the webapp
-      # job is what actually proves the PWA builds.
+      # A broken wrangler config or type error would otherwise surface at deploy.
+      # The dry-run resolves assets.directory, so dist must exist — empty is enough,
+      # the webapp job proves the real build.
       - name: Typecheck + wrangler dry-run
         run: |
           mkdir -p ../web/app/dist
           npm run check
         working-directory: worker
 
-  # Customer-PWA unit tests (pure logic: IBAN validation, etc.). Cheap and DB-free,
-  # so it gates every PR. The IBAN length table's cross-source drift is guarded
-  # separately by a Go test (internal/iban/drift_test.go).
+  # Customer-PWA unit tests (IBAN validation etc). DB-free, gates every PR. The
+  # IBAN length table's cross-source drift is guarded by internal/iban/drift_test.go.
   webapp:
     runs-on: ubuntu-latest
     steps:
@@ -140,17 +133,15 @@ jobs:
       - name: Unit tests
         run: npm test
         working-directory: web/app
-      # The dev server (e2e-browser) transpiles without typechecking, so a TS error
-      # or a prod-only build break (PWA plugin, chunking) merged green and first
-      # failed at deploy. `npm run build` is tsc --noEmit + vite build.
+      # The dev server transpiles without typechecking, so a TS error or prod-only
+      # break (PWA plugin, chunking) once merged green and failed at deploy.
+      # `npm run build` is tsc --noEmit + vite build.
       - name: Production build
         run: npm run build
         working-directory: web/app
 
-  # Tier A end-to-end: the REAL two-binary split topology (portal + api processes)
-  # behind `//go:build e2e`. Go + Postgres only (no browser), so it gates every PR as
-  # the regression net for split-mode routing. The browser tier (e2e-browser) gates
-  # PRs too, below.
+  # Tier A e2e: the real two-binary split topology (portal + api) behind
+  # `//go:build e2e`. Go + Postgres, no browser. The net for split-mode routing.
   e2e-go:
     runs-on: ubuntu-latest
     services:
@@ -178,10 +169,9 @@ jobs:
       - name: Tier A split-mode e2e
         run: go test -tags e2e -count=1 ./internal/e2e/ -v
 
-  # Tier B browser e2e: the customer PWA driven through Playwright against the real
-  # api binary + a seeded Postgres (the suite's globalSetup self-manages a throwaway
-  # PG via docker). Gates every PR — it was dispatch-only once and silently rotted
-  # for weeks (nothing else exercises the PWA against a live backend).
+  # Tier B browser e2e: the PWA through Playwright against the real api binary and
+  # a seeded Postgres (globalSetup runs a throwaway PG in docker). Gates every PR —
+  # it was dispatch-only once and rotted for weeks, unnoticed.
   e2e-browser:
     runs-on: ubuntu-latest
     steps:
@@ -217,12 +207,9 @@ jobs:
           path: web/app/playwright-report
           retention-days: 7
 
-  # Every migration must be reversible (CLAUDE.md): up -> reset(down all) -> up on
-  # a throwaway PG18.
-
-  # The chart is the delivery artifact and its templates change often (admission
-  # compliance, env wiring). Without this it was first exercised by the operator's
-  # own `helm upgrade` — `helm package` at tag time never renders templates.
+  # The chart is the delivery artifact and its templates change often. `helm
+  # package` at tag time never renders them, so without this the operator's own
+  # `helm upgrade` was the first render.
   chart:
     runs-on: ubuntu-latest
     steps:
@@ -233,8 +220,8 @@ jobs:
       - name: Render (default values)
         run: helm template deploy/helm/bank0 --set database.existingSecret=x --set auth.existingSecret=y > /tmp/render.yaml
       - name: Every pod spec is admission-ready
-        # The migrate hook Job shipped without resources/automount/securityContext
-        # once; the cluster's policies reject that, so every install would fail.
+        # The migrate hook Job once shipped without
+        # resources/automount/securityContext; cluster policy rejects that.
         run: |
           python3 - <<'EOF'
           import yaml
@@ -253,11 +240,9 @@ jobs:
           EOF
 
       - name: Render (api re-parented to the external Gateway)
-        # The exposure path in docs/04 §3: the api route moves to the platform's
-        # external Gateway while the portal stays internal. Rendered here because
-        # getting it wrong is invisible until traffic is already public — and a
-        # redirect route that still claims the api host would hijack :80 for a
-        # hostname this Gateway no longer serves.
+        # docs/04 §3: the api route moves to the platform's external Gateway, the
+        # portal stays internal. Getting it wrong is invisible until traffic is
+        # public, and a redirect route still claiming the api host would hijack :80.
         run: |
           helm template deploy/helm/bank0 \
             --set database.existingSecret=x --set auth.existingSecret=y \
@@ -278,8 +263,8 @@ jobs:
           assert portal['name'] == 'bank0', portal
           assert portal['sectionName'] == 'https-portal', portal
 
-          # The redirect route lives on the chart's own :80 listener, so it may
-          # only claim hostnames still parented there.
+          # The redirect route owns the chart's :80, so it may only claim
+          # hostnames still parented there.
           hosts = routes['release-name-https-redirect']['spec']['hostnames']
           assert hosts == ['portal.bank0.hnimn.art'], hosts
           print('exposure render OK')

@@ -407,29 +407,40 @@ WAF logs no matches on those flows; and Gatus stays green on `/readyz`.
 
 ## 4. Publishing artifacts (`publish.yml`)
 
-CI publishes; it never deploys. The cluster sits behind a tunnel and Actions has
-no path to it, so `helm upgrade` stays an operator command.
+**A version tag is the only thing that publishes anything.** Merging to `main`
+says the project is stable; tagging says this is the version to run. The cluster
+sits behind a tunnel and Actions has no path to it, so `helm upgrade` stays an
+operator command - the customer PWA is the one exception, because it lives on
+Cloudflare, which CI *can* reach.
 
 ```mermaid
 flowchart LR
-    M[push to main] --> I1["image ghcr.io/minhtt159/bank0:sha-abc1234"]
-    T["push tag vX.Y.Z"] --> I2["image :X.Y.Z and :X.Y"]
+    M[merge to main] --> CI[ci.yml - gates only, publishes nothing]
+    T["push tag vX.Y.Z"] --> I["image :X.Y.Z and :X.Y"]
     T --> C["chart oci://ghcr.io/minhtt159/charts/bank0"]
-    I2 --> R[GitHub Release]
+    I --> R[GitHub Release]
     C --> R
+    I --> P["PWA -> bank0.hnimn.art<br/>final tags only"]
+    C --> P
     R -.notes from.-> N["docs/releases/vX.Y.Z.md"]
 ```
 
-Diagram: a push to main publishes one image tagged by commit sha. A version tag
-publishes the same image under its semver tags and the Helm chart, and a third
-job cuts the GitHub Release once both exist, taking the notes from the matching
-file in `docs/releases/`.
+Diagram: a merge runs the gates and stops there. A version tag publishes the
+image and the Helm chart, then cuts the GitHub Release and deploys the Worker
+once both artifacts exist - the same "no half releases" rule in both places. The
+release notes come from the matching file in `docs/releases/`.
 
-The `sha-<shortsha>` tag is the "deploy whatever main is" handle
-(`helm upgrade ... --set image.tag=sha-...`). The semver tags are unprefixed
-because the chart defaults `image.tag` to `.Chart.AppVersion`.
+The semver tags are unprefixed because the chart defaults `image.tag` to
+`.Chart.AppVersion`. There is no per-commit image tag: nothing consumed it (both
+environments track chart versions through Argo CD and Kargo), and building one on
+every merge contradicted what a merge is supposed to mean. Deploy a specific
+commit by tagging it.
 
-Both images are multi-arch (`linux/amd64` + `linux/arm64`): the Dockerfile's build
+A pre-release tag (`v1.1.0-rc.1`) publishes the image, the chart and a GitHub
+pre-release, but does **not** deploy the PWA - the production edge is for final
+tags only.
+
+The image is multi-arch (`linux/amd64` + `linux/arm64`): the Dockerfile's build
 stage pins `--platform=$BUILDPLATFORM` and cross-compiles with `GOARCH`, so the
 second arch costs a `go build`, not a QEMU-emulated toolchain.
 
