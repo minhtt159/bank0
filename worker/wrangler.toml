@@ -3,44 +3,32 @@ main = "index.ts"
 compatibility_date = "2026-01-01"
 
 # Custom domain, not a route: this Worker IS the origin, so Cloudflare owns the
-# DNS record and the cert. A plain route needs a pre-existing proxied record or
-# every request is ERR_NAME_NOT_RESOLVED.
-# (Top-level key — must precede any [table] header.)
+# record and the cert. A route needs a proxied record to already exist, or every
+# request is ERR_NAME_NOT_RESOLVED. Top-level key — must precede any [table].
 routes = [{ pattern = "bank0.hnimn.art", custom_domain = true }]
 
-# That custom domain is the ONE front door. No workers.dev subdomain, and no
-# preview URLs: a preview URL is a publicly reachable *.workers.dev instance of
-# THIS Worker, holding the same Access service token, so it would proxy /api/*
-# into the gated API with nothing in front of it — the fallback path the gate
-# exists to not have.
-#
-# Stated rather than inferred. `preview_urls` defaults to the value of
-# `workers_dev`, which itself defaults, so leaving both off meant the answer came
-# from a default tracking a default. The dashboard held `previews_enabled: false`
-# explicitly, but a custom-domain route can only express `pattern` and
-# `custom_domain`, so every `wrangler deploy` overwrote that with whatever the
-# local config implied — and said so in a drift warning nobody could act on.
+# One front door. A preview URL is a public *.workers.dev copy of this Worker
+# holding the same Access token, so it would proxy /api/* into the gated API with
+# no gate. `preview_urls` defaults to `workers_dev`, which also defaults — state
+# both rather than inherit them. The dashboard's `previews_enabled` has no
+# equivalent here, which is what the drift warning on every deploy is about.
 workers_dev = false
 preview_urls = false
 
-# Serve the built SPA. not_found_handling = single-page-application returns
-# index.html for unknown client routes so deep links work.
+# Serve the built SPA. single-page-application returns index.html for unknown
+# client routes, so deep links work.
 [assets]
 directory = "../web/app/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# Upstream client API. The Worker proxies /api/* here so the browser stays
-# same-origin (no CORS) — and this is the seam for a future token-holding BFF.
+# /api/* proxies here so the browser stays same-origin (no CORS). The seam for a
+# future token-holding BFF.
 [vars]
 API_ORIGIN = "https://bank0-api.hnimn.art"
 
-# The Cloudflare Access service token is NOT here — it is a secret. Both halves
-# are set on the Worker (dashboard: Settings -> Variables and Secrets, Type:
-# Secret; or `wrangler secret put CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`).
-# Either way it publishes a new Worker version on its own, no deploy needed.
-#
-# The Access policy is live, so unset now means every /api/* call is refused at
-# the edge. Half-set is worse and handled deliberately: index.ts answers
-# `500 misconfigured` rather than leaving you to debug Access returning a 403 that
-# points at nothing.
+# The Access service token is a secret, not config. Set both halves — dashboard
+# Variables and Secrets (Type: Secret), or `wrangler secret put` — either
+# publishes a new version without a deploy. The policy is live, so unset means
+# every /api/* call is refused at the edge; half-set means index.ts answers
+# `500 misconfigured` instead of an Access 403 that points at nothing.
