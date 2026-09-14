@@ -172,6 +172,14 @@ Tasks: `task webapp:dev`, `task webapp:build` (`tsc --noEmit` then Vite),
 `task webapp:deploy`, `task e2e` (arguments after `--`, for example
 `task e2e -- --ui`).
 
+**Deploys come from CI, not from a laptop.** `.github/workflows/deploy-pwa.yml`
+builds the SPA and runs `wrangler deploy` on every push to `main` that touches
+`web/app/**` or `worker/**`, gated on the full CI suite. Production only - there
+is no staging Worker, because this one is a static host and a proxy with no
+business logic, so a front end a commit ahead of the cluster changes nothing
+about the ledger. That reasoning expires the day it becomes a token-holding BFF
+(§6). `task webapp:deploy` still works for a manual push.
+
 ---
 
 ## 5. Cross-cutting rules

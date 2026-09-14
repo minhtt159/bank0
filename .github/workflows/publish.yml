@@ -1,7 +1,9 @@
 name: Publish
 
-# Artifacts only — there is no CI-driven deploy. The cluster sits behind a
+# Artifacts only — this workflow deploys nothing. The cluster sits behind a
 # tunnel and CI has no path to it; the operator runs `helm upgrade` themselves.
+# (The customer PWA is the exception and ships from deploy-pwa.yml: it lives on
+# Cloudflare, which CI *can* reach.)
 #
 #   push to main  -> image ghcr.io/minhtt159/bank0:sha-<shortsha>
 #   push tag v*   -> image :X.Y.Z + :X.Y  and  chart oci://ghcr.io/minhtt159/charts/bank0
