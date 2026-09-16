@@ -400,7 +400,12 @@ in [`00004_auth_tokens.sql`](../db/migrations/00004_auth_tokens.sql)), consisten
   programmatic callers get `401`. Public on the portal: `/health`, `/readyz`,
   `/metrics`, `/docs`, `/openapi.yaml`, `GET`/`POST /login`, `POST /logout`, and
   the embedded console assets under `/static/` (the login page is styled too).
-  Both `/login` POST and `/logout` still pass the `csrfGuard`.
+  Both `/login` POST and `/logout` still pass the `csrfGuard`, and `/login` POST
+  runs through the same per-IP limiter as the client's `/auth/login`.
+- **No MFA of its own** ([#116](https://github.com/minhtt159/bank0/issues/116)).
+  Where the console is reachable from the internet it sits behind Cloudflare
+  Access with Entra SSO, and the gateway re-verifies the Access JWT - see
+  "Exposing the operator console" in [`04-deployment.md`](04-deployment.md) §3.
 
 ---
 

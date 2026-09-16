@@ -266,6 +266,6 @@ jobs:
           # The redirect route owns the chart's :80, so it may only claim
           # hostnames still parented there.
           hosts = routes['release-name-https-redirect']['spec']['hostnames']
-          assert hosts == ['portal.bank0.hnimn.art'], hosts
+          assert hosts == ['bank0-portal.hnimn.art'], hosts
           print('exposure render OK')
           EOF

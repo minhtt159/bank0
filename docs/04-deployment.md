@@ -19,7 +19,7 @@ image and chart but never deploys - `helm upgrade` is an operator command.
 
 | Host | Surface | Tech | Served by |
 |------|---------|------|-----------|
-| `portal.bank0.hnimn.art` | **Admin UI** - operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal`, behind the cluster's internal Gateway - LAN-only ([`05-admin-ui.md`](05-admin-ui.md)) |
+| `bank0-portal.hnimn.art` | **Admin UI** - operator console + admin API | Go + Templ/HTMX (server-rendered HTML) | bank0 binary, `mode=portal`; one name on both Gateways, split-horizon: LAN resolves to the internal one, the internet reaches the external one behind **Cloudflare Access** - see "Exposing the operator console" in §3 ([`05-admin-ui.md`](05-admin-ui.md)) |
 | `bank0-api.hnimn.art` | **Client API** - customer JSON API | Go (same binary), `mode=api` | bank0 binary, on the **external** Gateway behind the tunnel - see "Exposing the client API" in §3 ([`06-client-api.md`](06-client-api.md)) |
 | `bank0.hnimn.art` | **Client web app** - customer PWA | TypeScript (Preact/Vite) | **Cloudflare Worker** (static assets + `/api/*` proxy) ([`07-client-web-app.md`](07-client-web-app.md)) |
 
@@ -30,29 +30,36 @@ browser stays same-origin (no CORS) and tokens never traverse a third origin.
 
 That proxy is the one hard dependency between the halves: the Worker runs on
 Cloudflare's edge, so it can only reach an API the internet can reach. The
-production api surface is on the external Gateway for exactly that reason; the
-portal is not, and never will be. The remaining gap is the Cloudflare Access gate
-that admits only the Worker - the checklist at the end of §3.
+production api surface is on the external Gateway for exactly that reason. The
+portal is public too, but on different terms: the api is gated to the Workers by
+an Access service token, the portal is gated to named people by Access + Entra
+SSO - the checklists at the end of §3.
 
 The api hostname is **flat** (`bank0-api`, not `api.bank0`) because Cloudflare's
 Universal SSL covers the apex and one wildcard level only; a two-label name has no
-edge certificate without paid Total TLS / ACM. The portal keeps its nested name -
-it never meets the Cloudflare edge.
+edge certificate without paid Total TLS / ACM. The portal is flat for the same
+reason (`bank0-portal`, since 2026-09-16; `portal.bank0` is gone from production).
 
 ```mermaid
 graph LR
-    Op([Operator]) -->|LAN HTTPS| GWi["shared internal Gateway<br/>envoy-internal, LAN"]
+    Op([Operator]) -->|"LAN HTTPS (split-horizon DNS), break-glass"| GWi["shared internal Gateway<br/>envoy-internal, LAN"]
+    Op -->|"HTTPS + Entra SSO"| CFA["bank0-portal.hnimn.art<br/>Cloudflare Access"]
+    CFA -->|"Access JWT, re-verified by Envoy"| GWx
     Cust([Customer browser]) -->|HTTPS| CFW["bank0.hnimn.art<br/>Cloudflare Worker + PWA"]
     CFW -->|"/api/* proxy + Access token"| GWx["cloudflared -> envoy-external"]
-    GWi --> Portal["portal.bank0.hnimn.art<br/>Go mode=portal"]
+    GWi --> Portal["bank0-portal.hnimn.art<br/>Go mode=portal"]
     GWx --> API["bank0-api.hnimn.art<br/>Go mode=api"]
+    GWx --> Portal
     Portal --> PG[(Postgres)]
     API --> PG
 ```
 
-Diagram: the portal is on the internal Gateway and LAN-only; the production api
-surface is on the external one, so the Worker's `/api/*` proxy has something to
-reach. What is still missing is the Access gate that admits only the Worker (§3).
+Diagram: both Go surfaces reach the external Gateway through the tunnel, each
+behind its own Cloudflare Access application - a service token for the api (only
+the Workers hold it), Entra SSO for the portal (only named operators pass). The
+portal additionally keeps a route on the internal Gateway under the same name:
+LAN DNS answers with that Gateway, so an Entra or Cloudflare outage never locks
+the operator out of the bank.
 
 ### Edge: Gateway API
 
@@ -74,7 +81,7 @@ The binary serves different route surfaces based on `server.mode`
 | Mode | Serves | Used by |
 |------|--------|---------|
 | `api` | client JSON API + `/docs` | `bank0-api.hnimn.art` (HA, autoscaled) |
-| `portal` | admin JSON API + operator console + `/docs` | `portal.bank0.hnimn.art` |
+| `portal` | admin JSON API + operator console + `/docs` | `bank0-portal.hnimn.art` |
 | `all` | everything | local development from one binary (`task run`). The compose stack does **not** use it - see §2. |
 
 The separation is enforced **in the app**, not just at the edge: an `api` pod
@@ -169,7 +176,7 @@ graph TD
     subgraph cluster
       GW["Gateway (Envoy Gateway)<br/>gatewayClassName: eg"]
       RtA["HTTPRoute api<br/>bank0-api.hnimn.art"] -.parentRef.-> GW
-      RtP["HTTPRoute portal<br/>portal.bank0.hnimn.art"] -.parentRef.-> GW
+      RtP["HTTPRoute portal<br/>bank0-portal.hnimn.art"] -.parentRef.-> GW
       GW --> SvcA[Service bank0-api]
       GW --> SvcP[Service bank0-portal]
       SvcA --> DepA["Deployment bank0-api<br/>mode=api, HPA 3-10"]
@@ -223,7 +230,7 @@ it with an empty `hostnames` list - matching every host on that listener.
 
 ```
 Gateway/bank0                 gatewayClassName=eg
-  listeners: http(:80), https-api(:443, bank0-api.hnimn.art), https-portal(:443, portal.bank0.hnimn.art)
+  listeners: http(:80), https-api(:443, bank0-api.hnimn.art), https-portal(:443, bank0-portal.hnimn.art)
 HTTPRoute/bank0-api           parentRef bank0 sectionName=https-api    -> Service/bank0-api
 HTTPRoute/bank0-portal        parentRef bank0 sectionName=https-portal -> Service/bank0-portal
 HTTPRoute/bank0-https-redirect parentRef bank0 sectionName=http        -> 301 https
@@ -277,10 +284,10 @@ The values that shape the install:
 Staging auto-syncs; **production does not** (`autoSync: false`) - Kargo writes the
 promotion commit, applying it stays a human's decision.
 
-**Only the production api surface attaches to `envoy-external`**; the production
-portal and both staging surfaces stay on `envoy-internal` and are LAN-only. Hosts
-are `bank0-api`, `portal.bank0` and the `*.staging.bank0` pair under the cluster
-domain; the platform wildcard cert carries explicit `*.bank0` and `*.staging.bank0`
+**Production attaches to `envoy-external` under its flat names** (`bank0-api`,
+`bank0-portal`); the portal also keeps a same-name route on `envoy-internal`, and
+both staging surfaces are `envoy-internal` only. The `*.staging.bank0` pair sits under the cluster
+domain too; the platform wildcard cert carries explicit `*.bank0` and `*.staging.bank0`
 SANs, because one wildcard label does not cover a nested one. The flat `bank0-api`
 needs no SAN of its own - the plain `*.<domain>` wildcard already covers it, at the
 Cloudflare edge as well as at the origin.
@@ -306,18 +313,17 @@ ECS-shaped access logs.
 Steps 1-5 are **done** (platform repo, minhtt159/bank0#124); what is left is the
 Access gate in step 7, which is dashboard work.
 
-Expose **the api surface only**. The portal is the admin surface, it has no MFA
-yet ([#116](https://github.com/minhtt159/bank0/issues/116)), and nothing about it
-needs to leave the LAN.
+This checklist is the **api surface**. The portal has its own, stricter one right
+after it: it is the admin surface and has no MFA of its own
+([#116](https://github.com/minhtt159/bank0/issues/116)), so it never goes out bare.
 
 1. **Re-parent the production `bank0-api` HTTPRoute** to `envoy-external`
    (`namespace: network`, `sectionName: https`) - **done**. That Gateway's https
    listener already accepts routes from all namespaces and the wildcard cert
    already covers the hostname. Rename it flat in the same change: `api.bank0` has
    no Cloudflare edge certificate (Universal SSL covers one wildcard level), and a
-   flat name also falls under the tunnel's existing `*.<domain>` ingress rule. The portal stays internal - it is the admin surface and has no
-   MFA yet ([#116](https://github.com/minhtt159/bank0/issues/116)). Staging stays
-   internal too.
+   flat name also falls under the tunnel's existing `*.<domain>` ingress rule.
+   Staging stays internal.
 
    **Where that edit lands depends on who owns the route**, and on the home
    cluster it is not the chart. There, `api.exposed`/`portal.exposed` are `false`
@@ -402,6 +408,39 @@ Worker owns its own copy of the same three values. Native fraudbank apps go thro
 **Done when** a browser off the LAN completes login and a transfer through
 `bank0.hnimn.art`; the Envoy access log shows real client IPs in `source.ip`; the
 WAF logs no matches on those flows; and Gatus stays green on `/readyz`.
+
+### Exposing the operator console
+
+The console is single-factor (username + password, cookie session, §7 of
+[`05`](05-admin-ui.md)). Its public route therefore has an identity-aware gate
+**in front** of it, and the origin verifies that gate rather than trusting it:
+
+| Layer | What | Owner |
+|---|---|---|
+| Identity + MFA | Cloudflare **Access** self-hosted application on `bank0-portal.<domain>`, Allow policy = the named operators via **Entra** (MFA is Entra's). Two logins: Entra at the edge, then the console's own. | Zero Trust dashboard |
+| Origin verifies Access | Envoy Gateway `SecurityPolicy` (`jwt`) on the public portal routes: `Cf-Access-Jwt-Assertion` validated against the team's JWKS with the application's AUD as audience. A request that reaches the route without having passed Access - a Worker subrequest, a LAN client on the external VIP - is a 401 at the gateway. | platform repo |
+| Route | `HTTPRoute bank0-portal-external` on `envoy-external`, flat name (Universal SSL, one wildcard level). `/login` split into its own route for a 10/min-per-IP limit; `/health`, `/readyz`, `/metrics` answer 404 from the gateway. `/docs` and `/openapi.yaml` stay: behind Access they are the operator's API reference. | platform repo |
+| WAF | Coraza CRS in `DetectionOnly` for the hostname, same as the api, until the match log has been read. | platform repo |
+| App | `POST /login` runs through the same per-IP limiter as `/auth/login`, on top of the DB lockout (25 failures / 15 min per account). `CF-Connecting-IP` arrives intact - no Worker on this path - so audit rows carry the real client IP. | this repo |
+| Break-glass | The same hostname on `envoy-internal`. LAN DNS (unifi-dns) answers with that Gateway because the internal route's name sorts before the external one's - the rule hindsight already relies on. Entra or Cloudflare down = be on the LAN. | platform repo |
+
+Before the route exists: rotate the bootstrap `admin` password (the forced
+rotation on first login makes the first stranger to log in the owner of the bank
+otherwise), remove any demo-seed staff users from production, and create the
+operator accounts the demo needs - maker-checker wants **two** admins.
+
+Deferred, deliberately: mapping the Access identity onto a console user (Access
+sends `Cf-Access-Authenticated-User-Email`; one login instead of two) and
+[#116](https://github.com/minhtt159/bank0/issues/116) TOTP, which Access + Entra
+covers for this install. The console cookie is `SameSite=Strict`: after an Entra
+re-authentication the first navigation back arrives without it and lands on
+`/login` even though the session is alive - give the Access session a long
+lifetime, or flip the cookie to `Lax` if it bites.
+
+**Done when** a browser off the LAN is challenged by Entra on
+`https://bank0-portal.<domain>/`, then reaches `/login`; the same URL against the
+external gateway's LAN VIP without an Access JWT is a 401; `/metrics` from outside
+is never a 200; and the audit log shows the operator's real IP.
 
 ---
 

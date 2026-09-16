@@ -30,7 +30,7 @@ same workflow at human pace; the design rationale is
 
 | Host | Surface | How | Doc |
 |---|---|---|---|
-| `portal.bank0.hnimn.art` | admin API + operator console (HTML) | Go `mode=portal`, cookie sessions | [`docs/05`](docs/05-admin-ui.md) |
+| `bank0-portal.hnimn.art` | admin API + operator console (HTML) | Go `mode=portal`, cookie sessions | [`docs/05`](docs/05-admin-ui.md) |
 | `bank0-api.hnimn.art` | client JSON API | Go `mode=api`, JWT + refresh, Envoy Gateway, public via tunnel + Cloudflare Access | [`docs/06`](docs/06-client-api.md) |
 | `bank0.hnimn.art` | customer PWA | Cloudflare Worker (Preact/Vite), proxies `/api/*` | [`docs/07`](docs/07-client-web-app.md) |
 

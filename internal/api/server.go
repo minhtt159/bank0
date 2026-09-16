@@ -115,7 +115,10 @@ func (s *Server) Router() http.Handler {
 	if portalOn {
 		// Public portal auth endpoints.
 		r.HandleFunc("/login", s.consoleLoginForm).Methods(http.MethodGet)
-		r.Handle("/login", s.csrfGuard(http.HandlerFunc(s.consoleLoginSubmit))).Methods(http.MethodPost)
+		// Same per-IP backstop as /auth/login: the DB lockout is per account, and
+		// an exposed portal (docs/04 §3) needs a per-source ceiling too.
+		r.Handle("/login", s.rateLimit(s.loginLimiter, s.clientIP,
+			s.csrfGuard(http.HandlerFunc(s.consoleLoginSubmit)))).Methods(http.MethodPost)
 		r.Handle("/logout", s.csrfGuard(http.HandlerFunc(s.consoleLogout))).Methods(http.MethodPost)
 		// Embedded console assets (CSS/JS). Public: the login page is styled too.
 		r.PathPrefix("/static/").Handler(http.StripPrefix("/static/",
