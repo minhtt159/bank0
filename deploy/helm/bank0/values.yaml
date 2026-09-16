@@ -135,8 +135,10 @@ api:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
 
-# Admin portal + operator console. Keep this one internal: it is the admin surface
-# and has no MFA yet (#116). Nothing about it needs to leave the LAN.
+# Admin portal + operator console. It is the admin surface and has no MFA of its
+# own (#116): keep it internal, or put an identity-aware gate with MFA in front
+# (Cloudflare Access + Entra on the home cluster, docs/04 §3) and never expose
+# it bare.
 portal:
   exposed: true
   host: portal.bank0.hnimn.art
