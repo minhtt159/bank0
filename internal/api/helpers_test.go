@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io/fs"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -333,5 +334,82 @@ func TestTemplatesUseHTMX4Attributes(t *testing.T) {
 				t.Errorf("%s: %s was removed in htmx 4", filepath.Base(f), old)
 			}
 		}
+	}
+}
+
+// /docs is a Scalar UI whose one <script> comes from a CDN, while
+// securityHeaders sets script-src 'self' on every surface. That combination
+// served 200 with a blank page on every deployment, localhost included, and no
+// test noticed: the HTML is valid, only the browser refuses to run it.
+//
+// So this asserts the invariant rather than the current hostname - every script
+// source the page actually references must be permitted by the CSP the same
+// response carries. Changing either the script host or the policy without the
+// other fails here instead of in a browser nobody is watching.
+func TestDocsCSPAllowsItsOwnScripts(t *testing.T) {
+	srv := &Server{}
+	rec := httptest.NewRecorder()
+	srv.securityHeaders(http.HandlerFunc(srv.handleDocs)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("/docs must carry a Content-Security-Policy")
+	}
+
+	var scriptSrc string
+	for _, d := range strings.Split(csp, ";") {
+		if d = strings.TrimSpace(d); strings.HasPrefix(d, "script-src") {
+			scriptSrc = d
+		}
+	}
+	if scriptSrc == "" {
+		t.Fatalf("no script-src in %q", csp)
+	}
+
+	// Every src= on a <script> has to be covered by script-src: 'self' for a
+	// same-origin path, or an explicit origin for an absolute URL.
+	body := rec.Body.String()
+	found := 0
+	for rest := body; ; {
+		i := strings.Index(rest, "<script")
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len("<script"):]
+		tag, after, ok := strings.Cut(rest, ">")
+		if !ok {
+			t.Fatal("unterminated <script> tag in /docs")
+		}
+		rest = after
+		j := strings.Index(tag, `src="`)
+		if j < 0 {
+			continue // the inline api-reference marker carries no src
+		}
+		src := tag[j+len(`src="`):]
+		src, _, _ = strings.Cut(src, `"`)
+		found++
+
+		if strings.HasPrefix(src, "/") {
+			if !strings.Contains(scriptSrc, "'self'") {
+				t.Errorf("%s is same-origin but script-src lacks 'self': %q", src, scriptSrc)
+			}
+			continue
+		}
+		origin := src
+		if k := strings.Index(strings.TrimPrefix(origin, "https://"), "/"); k >= 0 {
+			origin = "https://" + strings.TrimPrefix(origin, "https://")[:k]
+		}
+		if !strings.Contains(scriptSrc, origin) {
+			t.Errorf("/docs loads %s but script-src does not allow %s: %q", src, origin, scriptSrc)
+		}
+		// An off-origin script must stay SRI-pinned; that pin is the whole
+		// reason the CSP exception is defensible.
+		if !strings.Contains(tag, "integrity=") {
+			t.Errorf("off-origin script %s must carry an integrity= digest", src)
+		}
+	}
+	if found == 0 {
+		t.Fatal("found no <script src=> in /docs - did the page change shape?")
 	}
 }
