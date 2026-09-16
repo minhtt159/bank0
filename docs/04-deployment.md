@@ -422,7 +422,7 @@ The console is single-factor (username + password, cookie session, §7 of
 | Route | `HTTPRoute bank0-portal-external` on `envoy-external`, flat name (Universal SSL, one wildcard level). `/login` split into its own route for a 10/min-per-IP limit; `/health`, `/readyz`, `/metrics` answer 404 from the gateway. `/docs` and `/openapi.yaml` stay: behind Access they are the operator's API reference. | platform repo |
 | WAF | Coraza CRS in `DetectionOnly` for the hostname, same as the api, until the match log has been read. | platform repo |
 | App | `POST /login` runs through the same per-IP limiter as `/auth/login`, on top of the DB lockout (25 failures / 15 min per account). `CF-Connecting-IP` arrives intact - no Worker on this path - so audit rows carry the real client IP. | this repo |
-| Break-glass | The same hostname on `envoy-internal`. LAN DNS (unifi-dns) answers with that Gateway because the internal route's name sorts before the external one's - the rule hindsight already relies on. Entra or Cloudflare down = be on the LAN. | platform repo |
+| Break-glass | The same hostname on `envoy-internal`. LAN DNS (unifi-dns) answers with that Gateway because the external routes carry `dns.hnimn.art/lan: "false"` and unifi-dns runs `--label-filter=dns.hnimn.art/lan!=false`; without it external-dns sees two CNAMEs for one name and the LAN answer flips per loop (it did, on first apply). Entra or Cloudflare down = be on the LAN. | platform repo |
 
 Before the route exists: rotate the bootstrap `admin` password (the forced
 rotation on first login makes the first stranger to log in the owner of the bank
