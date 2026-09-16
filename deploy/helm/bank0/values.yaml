@@ -141,7 +141,7 @@ api:
 # it bare.
 portal:
   exposed: true
-  host: portal.bank0.hnimn.art
+  host: bank0-portal.hnimn.art
   parentRef: {}             # same override as api.parentRef; leave empty
   replicaCount: 2
   runMaintenance: true

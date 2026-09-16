@@ -33,12 +33,12 @@ func TestCSRFGuard(t *testing.T) {
 	}{
 		{"safe GET cross-origin", http.MethodGet, "https://evil.example", "", 200},
 		{"POST no origin (non-browser)", http.MethodPost, "", "", 200},
-		{"POST same-origin", http.MethodPost, "https://portal.bank0", "", 200},
+		{"POST same-origin", http.MethodPost, "https://bank0-portal", "", 200},
 		{"POST cross-origin via Origin", http.MethodPost, "https://evil.example", "", 403},
 		{"POST cross-origin via Referer", http.MethodPost, "", "https://evil.example/x", 403},
 	}
 	for _, c := range cases {
-		if got := do(c.method, "portal.bank0", c.origin, c.ref); got != c.want {
+		if got := do(c.method, "bank0-portal", c.origin, c.ref); got != c.want {
 			t.Errorf("%s = %d, want %d", c.name, got, c.want)
 		}
 	}

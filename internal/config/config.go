@@ -65,7 +65,7 @@ type ServerConfig struct {
 	DefaultPageLimit int32 `mapstructure:"default_page_limit"`
 	// Mode selects which route surface this instance serves:
 	//   "api"    -> client API only      (bank0-api.hnimn.art)
-	//   "portal" -> admin API + console   (portal.bank0.hnimn.art)
+	//   "portal" -> admin API + console   (bank0-portal.hnimn.art)
 	//   "all"    -> everything            (local docker-compose, single container)
 	Mode            string `mapstructure:"mode"`
 	OpenAPISpecPath string `mapstructure:"openapi_spec_path"`

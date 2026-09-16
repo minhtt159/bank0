@@ -73,7 +73,7 @@ write one Postgres ledger.
 
 | Host | Surface | Tech | Auth |
 |---|---|---|---|
-| `portal.bank0.hnimn.art` | admin API + operator console | Go `mode=portal`, Templ and HTMX | DB cookie session, staff roles |
+| `bank0-portal.hnimn.art` | admin API + operator console | Go `mode=portal`, Templ and HTMX | DB cookie session, staff roles |
 | `bank0-api.hnimn.art` | customer JSON API | Go `mode=api`, behind the external Gateway + tunnel, gated by Cloudflare Access | JWT bearer + rotating refresh tokens, ownership-scoped |
 | `bank0.hnimn.art` | customer PWA | Cloudflare Worker, Preact and Vite | proxies `/api/*` to the client API |
 

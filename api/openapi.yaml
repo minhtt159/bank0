@@ -5,7 +5,7 @@ info:
   description: |
     Core-banking backend. Two surfaces, separated by domain:
       * **client** (bank0-api.hnimn.art) — customer-facing money operations
-      * **admin**  (portal.bank0.hnimn.art) — operator/back-office operations
+      * **admin**  (bank0-portal.hnimn.art) — operator/back-office operations
 
     This file is the source of truth. `oapi-codegen` generates the Go
     `ServerInterface` for each tag (client/admin); handler drift is a compile
@@ -21,13 +21,13 @@ info:
 servers:
   - url: https://bank0-api.hnimn.art
     description: client
-  - url: https://portal.bank0.hnimn.art
+  - url: https://bank0-portal.hnimn.art
     description: admin
 tags:
   - name: client
     description: Customer-facing operations (bank0-api.hnimn.art)
   - name: admin
-    description: Operator / back-office operations (portal.bank0.hnimn.art)
+    description: Operator / back-office operations (bank0-portal.hnimn.art)
 
 paths:
   /health:
@@ -1238,7 +1238,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-    # admin surface (portal.bank0.hnimn.art): DB-backed cookie session from /login
+    # admin surface (bank0-portal.hnimn.art): DB-backed cookie session from /login
     sessionCookie:
       type: apiKey
       in: cookie
