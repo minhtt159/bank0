@@ -39,6 +39,18 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
             crossorigin="anonymous"></script>
   </body>
 </html>`
+	// securityHeaders sets script-src 'self' on every surface, which blocks the
+	// very script above: /docs returned 200 with a blank page on every
+	// deployment, including localhost. Nothing caught it because the HTML is
+	// fine - only the browser refuses to run it.
+	//
+	// This route is the one place the CDN is allowed, and only because the
+	// script is SRI-pinned: a tampered or swapped bundle is refused by the
+	// browser, so the exception costs availability (jsdelivr reachable) rather
+	// than integrity. Everything else in the policy stays as securityHeaders
+	// set it. Widen this no further - see TestDocsCSPAllowsItsOwnScripts.
+	w.Header().Set("Content-Security-Policy",
+		"script-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(page))
 }
