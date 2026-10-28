@@ -98,7 +98,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           # node 24; wrangler >= 4.105 (via vitest-pool-workers 0.18) needs >= 22
-          node-version: "24"
+          node-version: "26"
           cache: npm
           cache-dependency-path: worker/package-lock.json
       - name: Install
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "26"
           cache: npm
           cache-dependency-path: web/app/package-lock.json
       - name: Install
@@ -182,7 +182,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "26"
           cache: npm
           cache-dependency-path: web/app/package-lock.json
       - name: Install deps
