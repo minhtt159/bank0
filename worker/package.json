@@ -6,14 +6,14 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "check": "wrangler deploy --dry-run --outdir dist",
-    "test": "vitest run",
+    "test": "tsc -p test --noEmit && vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@cloudflare/vitest-plugin": "^1.9.2",
     "@cloudflare/workers-types": "^5.20260710.1",
     "typescript": "^7.0.2",
-    "vitest": "~4.1.10",
+    "vitest": "^4.1.12",
     "wrangler": "^4.110.0"
   },
   "type": "module"

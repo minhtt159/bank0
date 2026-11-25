@@ -1,7 +1,7 @@
 // Worker /api proxy-contract test (Tier B "cheaper intermediate" from
 // docs/08 §7). Runs the REAL worker (../index.ts) in
-// workerd via @cloudflare/vitest-pool-workers, stubs the upstream API by
-// swapping globalThis.fetch (vitest-pool-workers v0.13+ removed the old
+// workerd via @cloudflare/vitest-plugin, stubs the upstream API by
+// swapping globalThis.fetch (the pool since v0.13 removed the old
 // cloudflare:test fetchMock), and asserts the four proxy invariants:
 //   1. path rewrite (+ query preservation)
 //   2. header forwarding (Authorization / Idempotency-Key survive; Host and
@@ -215,7 +215,7 @@ describe("worker /api proxy contract", () => {
       const res = await SELF.fetch("https://bank0.test/api/transfers");
       expect(res.status).toBe(502);
       expect(res.headers.get("content-type")).toContain("application/json");
-      expect((await res.json()).error).toBe("bad_gateway");
+      expect(((await res.json()) as { error: string }).error).toBe("bad_gateway");
     });
   });
 
@@ -224,8 +224,8 @@ describe("worker /api proxy contract", () => {
     // worker running in the same isolate, so a leaked value would bleed into the
     // tests above (which assert the headers are absent).
     afterEach(() => {
-      delete (env as Record<string, unknown>).CF_ACCESS_CLIENT_ID;
-      delete (env as Record<string, unknown>).CF_ACCESS_CLIENT_SECRET;
+      delete env.CF_ACCESS_CLIENT_ID;
+      delete env.CF_ACCESS_CLIENT_SECRET;
     });
 
     it("sends no CF-Access headers while Access is not configured", async () => {
@@ -261,7 +261,7 @@ describe("worker /api proxy contract", () => {
       // (the stub throws on any un-intercepted outbound fetch).
       const res = await SELF.fetch("https://bank0.test/api/transfers");
       expect(res.status).toBe(500);
-      expect((await res.json()).error).toBe("misconfigured");
+      expect(((await res.json()) as { error: string }).error).toBe("misconfigured");
     });
 
     it("strips CF-Access headers the client tried to author", async () => {

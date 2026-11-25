@@ -90,14 +90,14 @@ jobs:
           fi
 
   # Worker /api proxy-contract test. DB-free: the real worker in workerd via
-  # @cloudflare/vitest-pool-workers, so it gates every PR.
+  # @cloudflare/vitest-plugin, so it gates every PR.
   worker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          # node 24; wrangler >= 4.105 (via vitest-pool-workers 0.18) needs >= 22
+          # wrangler >= 4.105 needs node >= 22
           node-version: "26"
           cache: npm
           cache-dependency-path: worker/package-lock.json
